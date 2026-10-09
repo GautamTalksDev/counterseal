@@ -98,7 +98,7 @@
           <span class="blk">#4812</span><span class="lnk-l"></span><span class="blk">#4813</span><span class="lnk-l"></span><span class="blk cur">#4814</span>
         </div>
         <h3>Everything is on the record</h3>
-        <p>Every call, hold and decision goes into an append-only log where each entry commits to the one before. Edit a row and the chain breaks.</p>
+        <p>Every write, hold and decision goes into an append-only log where each entry commits to the one before. Edit a row and the chain breaks.</p>
       </article>
     </div>
   </section>
@@ -178,7 +178,7 @@
       <div class="fact"><h4>Passkeys only</h4><p>No passwords to phish. The same tap that signs you in approves held calls.</p></div>
       <div class="fact"><h4>The CLI can't approve</h4><p>An agent on your laptop can read the CLI's files, so a CLI session can never approve a hold.</p></div>
       <div class="fact"><h4>Envelope encryption</h4><p>A key per secret, wrapped by a master key, bound to its row. Never logged, never returned by any API.</p></div>
-      <div class="fact"><h4>Locked-down web</h4><p>Strict CSP with Trusted Types, HSTS preload, SameSite=Strict cookies, CSRF headers, no CORS.</p></div>
+      <div class="fact"><h4>Locked-down web</h4><p>Strict CSP with Trusted Types, HSTS, SameSite=Strict cookies, CSRF headers, no CORS on your account's API.</p></div>
       <div class="fact"><h4>Abuse limits</h4><p>Rate limits per token and per IP (IPv6 by /64). Upstream redirects are never followed.</p></div>
       <div class="fact"><h4>Receipts anyone can verify</h4><p>Shaped after the IETF draft for agent credential brokers. Every decision can be sealed in a public log, checked <a class="ul" href="/verify/">in your browser</a>.</p></div>
     </div>
