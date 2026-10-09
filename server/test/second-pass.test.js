@@ -8,6 +8,7 @@ import { World, Authenticator } from './helpers.js';
 import { _resetMemoryBuckets } from '../src/ratelimit.js';
 import { _resetSeen } from '../src/admin.js';
 import { audit } from '../src/audit.js';
+import { SITE_HEADERS } from '../src/index.js';
 import { generateAgentKey, importAgentKey, proveAgentKey } from '../../cli/sign.mjs';
 
 beforeEach(() => { _resetMemoryBuckets(); _resetSeen(); });
@@ -189,4 +190,36 @@ test('phone alerts belong to the browser: a CLI session cannot add, remove or te
   await w.req('POST', '/v1/push/subscribe', { cookie: u.cookie, body: { endpoint: FCM + 'shared' } });
   assert.equal((await w.req('POST', '/v1/push/subscribe', { cookie: v.cookie, body: { endpoint: FCM + 'shared' } })).body.error, 'too_many_devices');
   assert.equal(w.env.DB.raw.prepare('SELECT COUNT(*) n FROM push_subs WHERE account_id = (SELECT account_id FROM push_subs WHERE endpoint = ?)').get(FCM + 'b0').n, 10);
+});
+
+test('pages the Worker serves carry the site security headers even when the asset server adds none, the same as _headers', async () => {
+  const w = new World();
+  w.env.ASSETS = { fetch: async (r) => (new URL(r.url).pathname === '/kept' ? new Response('x', { headers: { 'x-frame-options': 'SAMEORIGIN' } }) : new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } })) };
+  const r = await w.req('GET', '/', bare);
+  for (const [k, v] of Object.entries(SITE_HEADERS)) assert.equal(r.headers.get(k), v, k);
+  assert.equal((await w.req('GET', '/kept', bare)).headers.get('x-frame-options'), 'SAMEORIGIN', 'a header the asset has is kept');
+  // the Worker's list is exactly the "/*" block of site/public/_headers
+  const lines = readFileSync(new URL('../../site/public/_headers', import.meta.url), 'utf8').split('\n');
+  const block = {};
+  for (const l of lines.slice(lines.indexOf('/*') + 1)) { if (!/^\s/.test(l)) break; const i = l.indexOf(':'); block[l.slice(0, i).trim().toLowerCase()] = l.slice(i + 1).trim(); }
+  assert.deepEqual(block, SITE_HEADERS);
+});
+
+test('a CLI sign-in and where it came from never reach the public log', async () => {
+  const w = new World();
+  const u = await w.user();
+  assert.equal((await w.req('GET', '/v1/me', { cookie: u.cookie })).body.receipts.on, true);
+  // a sealed decision, so the log is not empty
+  const cred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'github', secret: GH } })).body.id;
+  assert.equal((await w.req('POST', '/p/github/repos/acme/app/issues', { bearer: await tokenFor(w, u, cred), ...bare, body: { title: 'x' } })).status, 200);
+  const d =(await w.req('POST', '/v1/device/start', { ...bare, body: {}, cf: { country: 'DE', asOrganization: 'Hetzner Online GmbH', asn: 24940 } })).body;
+  const b = await w.req('POST', '/v1/device/approve/begin', { cookie: u.cookie, body: { user_code: d.user_code } });
+  await w.req('POST', '/v1/device/approve/finish', { cookie: u.cookie, body: { user_code: d.user_code, challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) } });
+  const cli = (await w.req('POST', '/v1/device/poll', { ...bare, body: { device_code: d.device_code } })).body.access_token;
+  const sid = (await w.req('GET', '/v1/sessions', { cookie: u.cookie })).body.sessions[0].id;
+  await w.req('DELETE', `/v1/sessions/${sid}`, { cookie: u.cookie });
+  const leaves = w.sql.raw.prepare('SELECT entry, tenant, opening FROM leaves').all();
+  assert.ok(leaves.length >= 1);
+  const dump = JSON.stringify(leaves);
+  for (const s of ['DE', 'Hetzner', 'cli_', d.user_code, sid, cli]) assert.ok(!dump.includes(s), s);
 });

@@ -24,6 +24,26 @@ const ID = '([0-9a-f]{24})';
 const KEEP_ON_OLD_HOST = /^\/(app(\/.*)?|sw\.js|manifest\.webmanifest|styles\.css|brand\.js|favicon\.svg|icon-\d+\.png|fonts\/.*)$/;
 const movedPermanently = (location) => new Response(null, { status: 301, headers: { location, 'cache-control': 'public, max-age=3600', 'strict-transport-security': 'max-age=63072000; includeSubDomains; preload', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } });
 const DO_READS = /^\/v1\/(log\/(entries|proof\/)|my\/)/;
+// The site's security headers, the same as the "/*" block of site/public/_headers (server/test/second-pass.test.js
+// checks they match). Pages the Worker serves through env.ASSETS (every page listed in run_worker_first) may not get
+// _headers applied (Cloudflare: "attach any custom headers ... directly within that Worker script"), so the Worker adds
+// any that are missing; a header the asset already has is kept as it is.
+export const SITE_HEADERS = {
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; require-trusted-types-for 'script'; trusted-types leash-sw; upgrade-insecure-requests",
+  'strict-transport-security': 'max-age=63072000; includeSubDomains; preload',
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), publickey-credentials-get=(self), publickey-credentials-create=(self)',
+  'cross-origin-opener-policy': 'same-origin',
+  'cross-origin-resource-policy': 'same-origin',
+  'x-frame-options': 'DENY',
+};
+function withSiteHeaders(res) {
+  if (Object.keys(SITE_HEADERS).every((k) => res.headers.has(k))) return res;
+  const out = new Response(res.body, res);
+  for (const [k, v] of Object.entries(SITE_HEADERS)) if (!out.headers.has(k)) out.headers.set(k, v);
+  return out;
+}
 const REG_PER_DAY = (env) => Number(env.REG_PER_IP_DAY) || 5;
 // [method, regex, guard, handler]
 //   public / publicw (with Origin check): per-IP D1 limit;  pub: public log reads, in-memory limit, CORS open
@@ -210,7 +230,7 @@ export async function handle(request, rawEnv, opts = {}) {
       // the old host keeps /app (sign-in for its passkeys); every other page moves to the product's host
       const here = A.hosts(env).find((h) => h.origin === url.origin);
       if (here && here.legacy && !KEEP_ON_OLD_HOST.test(url.pathname)) return movedPermanently(A.hosts(env)[0].origin + url.pathname + url.search);
-      return env.ASSETS ? env.ASSETS.fetch(request) : json({ error: 'not_found' }, 404);
+      return env.ASSETS ? withSiteHeaders(await env.ASSETS.fetch(request)) : json({ error: 'not_found' }, 404);
     }
     if (request.method === 'OPTIONS') {
       if (isPublic) return new Response(null, { status: 204, headers: { ...CORS, 'access-control-allow-methods': 'GET', 'access-control-max-age': '86400' } });
