@@ -1,6 +1,7 @@
 // Credentials, proxy tokens, the proxy, and holds.
 import { HttpError, json, b64u, rand, randomId, sha256hex, now, str, readBody, cleanText } from './util.js';
 import { mapOf } from './approvals.js';
+import { cardOf, publicRepoOf } from './gatefacts.js';
 import { seal, open } from './vault.js';
 import { summarize, PROVIDERS, MAP_VERSION, storeHost } from './providers.js';
 import { normalisePolicy, decide } from './policy.js';
@@ -122,12 +123,14 @@ export async function revokeToken(env, sess, id) {
 export async function listHolds(env, sess, status) {
   await env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND status IN ('pending','approved') AND expires_at < ?").bind(sess.accountId, now()).run();
   const st = ['pending', 'approved', 'denied', 'used', 'expired'].includes(status) ? status : 'pending';
-  // the label of what asked: an agent token, or for a coding-agent approval the guard key (token_id "g:<key id>"); the
-  // seals so far (only those that still count), and the quorum in force, for "1 of 2 seals" on the card
+  // the label of what asked: an agent token, a coding-agent approval's guard key (token_id "g:<key id>"), or a deploy gate
+  // (token_id "d:<gate id>"); the seals so far (only those that still count), and the quorum in force, for "1 of 2 seals"
   const t = now();
-  const r = await env.DB.prepare(`SELECT h.*, COALESCE(t.label, g.label) AS token_label, ${Team.VOTES_JSON('h', '?3')} AS votes_json,
+  const r = await env.DB.prepare(`SELECT h.*, COALESCE(t.label, g.label, gt.label) AS token_label, ${Team.VOTES_JSON('h', '?3')} AS votes_json,
       a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at
-    FROM holds h JOIN accounts a ON a.id = h.account_id LEFT JOIN tokens t ON t.id = h.token_id LEFT JOIN guard_keys g ON h.kind != 'proxy' AND g.id = substr(h.token_id, 3) AND g.account_id = h.account_id
+    FROM holds h JOIN accounts a ON a.id = h.account_id LEFT JOIN tokens t ON t.id = h.token_id
+      LEFT JOIN guard_keys g ON h.kind IN ('shell','tool') AND g.id = substr(h.token_id, 3) AND g.account_id = h.account_id
+      LEFT JOIN gates gt ON h.kind = 'deploy' AND gt.id = substr(h.token_id, 3) AND gt.account_id = h.account_id
     WHERE h.account_id = ?1 AND h.status = ?2 ORDER BY h.created_at DESC LIMIT 100`).bind(sess.accountId, st, t).all();
   const base = await appOrigin(env, sess.accountId);
   // `headline`: the amount of a held Stripe refund or payout, for large type (the first line of its preview);
@@ -139,9 +142,12 @@ export async function listHolds(env, sess, status) {
     }),
   };
 }
-/** a guard hold's context as the app shows it: the folder name and the agent's session, nothing else */
+/** a guard hold's context as the app shows it: the folder name and the agent's session, nothing else. A deploy hold's is
+ *  the facts from GitHub's signed token (and the workflow's own unverified text, kept apart), with links built from them. */
 function holdContext(raw) {
   if (!raw) return null;
+  const gate = cardOf(raw);
+  if (gate) return { gate };
   try { const c = JSON.parse(raw); return { cwd: typeof c.cwd === 'string' ? c.cwd : null, session: typeof c.session === 'string' ? c.session : null }; } catch { return null; }
 }
 
@@ -172,12 +178,14 @@ export async function approveFinish(env, sess, holdId, body) {
     return { ok: true, approved: false, seals: s.votes.length, needs: s.need, note: `Your seal is on (${s.votes.length} of ${s.need}). It needs ${s.need - s.votes.length} more from a different approver before the agent can go ahead.` };
   }
   await audit(env, sess.accountId, 'web', 'approve', { ...base, ...(s.need > 1 ? { quorum: s.need, votes: s.votes } : {}) }, { receipts: s.receipts });
-  return { ok: true, approved: true, seals: s.votes.length, needs: s.need, note: !guard ? 'The agent can now retry the exact same request once, within 10 minutes.' : 'The agent can now run that exact command once, within 10 minutes.' };
+  return { ok: true, approved: true, seals: s.votes.length, needs: s.need, note: !guard ? 'The agent can now retry the exact same request once, within 10 minutes.' : h.kind === 'deploy' ? 'The job can now go on, once, within 10 minutes.' : 'The agent can now run that exact command once, within 10 minutes.' };
 }
 
-/** for a coding-agent approval: its kind, and the shell map version its receipts name */
+/** for a coding-agent approval: its kind, and the shell map version its receipts name; for a deploy: its kind, and the
+ *  repository name only if the owner opted in for the gate (default off) */
 function guardDetail(h) {
   if (!h.kind || h.kind === 'proxy') return {};
+  if (h.kind === 'deploy') return { kind: 'deploy', ...publicRepoOf(h.context) };
   const map = mapOf(h.context);
   return { kind: h.kind, ...(map ? { map } : {}) };
 }

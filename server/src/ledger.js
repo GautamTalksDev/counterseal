@@ -206,9 +206,11 @@ async function leaveNothingIfDeleted(c, db, acct, signer) {
 // ---------------------------------------------------------------- broker receipts
 /** which audit actions are broker decisions, and the public decision word for each */
 // run_approved: a coding-agent command (or tool call) approved with a passkey was released to run (approvals.js)
-export const DECISION = { proxy: 'allowed', hold: 'held', deny: 'denied', approve: 'approved', proxy_approved: 'executed', run_approved: 'executed' };
+// gate_passed: a GitHub Actions job waiting at a deploy gate was let go on after a passkey approval (gates.js)
+export const DECISION = { proxy: 'allowed', hold: 'held', deny: 'denied', approve: 'approved', proxy_approved: 'executed', run_approved: 'executed', gate_passed: 'executed' };
 const RULE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const MAPV = /^\d{4}-\d{2}-\d{2}\.\d{1,3}$/;
+const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 
 /** the public receipt for one broker decision. Only fixed vocabulary goes in: method and provider host (for a
  *  coding-agent approval: RUN or CALL and the agent's name from a fixed list), decision, rule id, map version (the
@@ -226,6 +228,8 @@ export function brokerReceipt({ action, detail, auditHash, at, mapVersion }) {
     meta.quorum = detail.quorum;
     meta.votes = Math.min(detail.votes.length, 10);
   }
+  // a deploy gate's repository name is public only if its owner opted in for that gate (it is permanent in the log)
+  if (typeof detail.public_repo === 'string' && REPO.test(detail.public_repo)) meta.repo = detail.public_repo;
   return { agent: 'broker', action: method && host ? `${method} ${host}` : action === 'approve' ? 'approve' : 'decision', decision: DECISION[action], parent: auditHash, ts: at, meta };
 }
 

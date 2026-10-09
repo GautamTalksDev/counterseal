@@ -8,6 +8,7 @@ import * as A from './auth.js';
 import * as B from './broker.js';
 import * as K from './agentkeys.js';
 import * as G from './approvals.js';
+import * as Gt from './gates.js';
 import { list as auditList, verifyChain, audit } from './audit.js';
 import { limit, readLimit, ipBucket } from './ratelimit.js';
 import { metaOf } from './providers.js';
@@ -59,6 +60,8 @@ const REG_PER_DAY = (env) => Number(env.REG_PER_IP_DAY) || 5;
 //   role (signed-in routes): the least team role needed, ANY < MEMBER < APPROVER < OWNER. Default: ANY for session
 //   (reads), MEMBER for write and webw. A role is checked on the server for every request; a passkey proves presence,
 //   not authority.
+//   gate:  a GitHub Actions OIDC token (verified in the route, src/oidc.js); poll: a gate poll secret (gps_); both with a
+//          per-network limit in memory (GitHub's runners share networks, so it is generous), the routes add their own limits
 const ROUTES = [
   ['GET', /^\/v1\/meta$/, 'public', (c) => ({ app: A.hosts(c.env)[0].origin, legacyApp: A.hosts(c.env)[1]?.origin || null, ...metaOf() })],
   ['POST', /^\/v1\/auth\/register\/begin$/, 'publicw', (c) => A.registerBegin(c.env, c.body)],
@@ -198,6 +201,15 @@ const ROUTES = [
   ['POST', /^\/v1\/approvals$/, 'guard', (c) => G.create(c)],
   ['GET', new RegExp(`^/v1/approvals/${ID}$`), 'guard', (c) => G.status(c, c.m[1])],
   ['POST', new RegExp(`^/v1/approvals/${ID}/use$`), 'guard', (c) => G.use(c, c.m[1])],
+  // Deploy gates: a GitHub Actions job waits for a passkey approval. Making a gate needs a passkey ceremony (it decides which
+  // repository may ask you, and in phase 2 which key a run gets); revoking only tightens, so any signed-in session may.
+  ['GET', /^\/v1\/gates$/, 'session', (c) => Gt.listGates(c.env, c.s)],
+  ['POST', /^\/v1\/gates\/passkey\/begin$/, 'webw', (c) => Gt.createBegin(c.env, c.s)],
+  ['POST', /^\/v1\/gates\/passkey\/finish$/, 'webw', (c) => Gt.createFinish(c.env, c.s, c.body)],
+  ['DELETE', /^\/v1\/gates\/(gate_[0-9a-f]{24})$/, 'write', (c) => Gt.revoke(c.env, c.s, c.m[1])],
+  ['POST', /^\/v1\/gate\/request$/, 'gate', (c) => Gt.request(c)],
+  ['GET', new RegExp(`^/v1/gate/status/${ID}$`), 'poll', (c) => Gt.status(c, c.m[1])],
+  ['POST', new RegExp(`^/v1/gate/cancel/${ID}$`), 'poll', (c) => Gt.cancel(c, c.m[1])],
   ['GET', /^\/v1\/audit$/, 'session', async (c) => { const v = c.url.searchParams.get('before'); return { entries: await auditList(c.env, c.s.accountId, v === null ? 0 : int(v, 'before')) }; }],
   ['GET', /^\/v1\/audit\/verify$/, 'session', (c) => verifyChain(c.env, c.s.accountId)],
   // agent keys (Prove who). Registering needs proof of possession; revoking breaks every token bound to the key, so
@@ -235,7 +247,7 @@ async function deleteAccount(env, s, body) {
   await env.DB.batch([
     ...deleteStatements(env.DB, id),
     ...Brakes.deleteStatements(env.DB, id), // their tokens' daily totals and breaker windows, before the tokens go
-    ...['push_subs', 'hold_votes', 'holds', 'guard_keys', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes', 'invites', 'members'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
+    ...['push_subs', 'hold_votes', 'holds', 'guard_keys', 'gate_polls', 'gate_runs', 'gates', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes', 'invites', 'members'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
     env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id),
   ]);
   return { body: { deleted: true, note: 'Account deleted. Receipts already in the public log stay there by design; they are no longer linked to you on our side.' }, cookie: '__Host-leash=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0' };
@@ -249,7 +261,9 @@ const SECURITY_EVENTS = new Set(['api_key_required', 'api_key_invalid', 'csrf', 
   'not_configured', 'log_key_invalid', 'log_key_changed', 'token_invalid', 'agent_signature_required', 'bad_agent_signature', 'agent_signature_replayed',
   'agent_key_revoked', 'passkey_required', 'bad_proof', 'key_taken', 'code_not_found', 'bad_user_code', 'too_many_holds',
   'guard_key_required', 'guard_key_invalid', 'hash_mismatch', 'account_frozen',
-  'role_required', 'approver_required', 'own_request', 'already_sealed', 'seal_not_yet', 'invite_invalid', 'already_member', 'hold_changed']);
+  'role_required', 'approver_required', 'own_request', 'already_sealed', 'seal_not_yet', 'invite_invalid', 'already_member', 'hold_changed',
+  'oidc_required', 'oidc_malformed', 'oidc_alg', 'oidc_unknown_kid', 'oidc_bad_signature', 'oidc_issuer', 'oidc_audience', 'oidc_expired', 'oidc_not_yet_valid',
+  'oidc_lifetime', 'oidc_claims', 'oidc_replayed', 'oidc_keys_unavailable', 'gate_refused', 'poll_secret_required']);
 /** an audit detail's `member` on a team (the founder's entries keep their shape) */
 const who = (s) => (s.memberId && s.memberId !== s.accountId ? { member: s.memberId } : {});
 const logPath = (url) => url.pathname.startsWith('/p/') ? url.pathname.split('/').slice(0, 3).join('/') + '/...' : url.pathname.replace(/\/[0-9a-f]{24}(?=\/|$)/g, '/:id');
@@ -322,6 +336,10 @@ export async function handle(request, rawEnv, opts = {}) {
       if (guard === 'key') { c.k = await apiKey(env, request); await readLimit(env, 'key:' + c.k.id, 1200, t); }
       // guard keys: waiting for an approval writes nothing to D1, so this limit lives in memory too
       if (guard === 'guard') { await readLimit(env, await ipBucket(env, request, 'guard'), Number(env.GUARD_RPM) || 240, t); c.g = await G.guardKey(env, request); }
+      // deploy gates: waiting and asking write nothing to D1 for their limits either. A hosted runner's network is shared with
+      // many other people, so the per-network limit is generous; the gate (30 new holds an hour) and the poll secret (30 a minute) have their own.
+      if (guard === 'gate') await readLimit(env, await ipBucket(env, request, 'gate'), Number(env.GATE_RPM) || 600, t);
+      if (guard === 'poll') { await readLimit(env, await ipBucket(env, request, 'gatepoll'), Number(env.GATE_RPM) || 600, t); c.poll = await Gt.pollAuth(request); }
       if (guard === 'session' || guard === 'write' || guard === 'webw') {
         c.s = await A.session(env, request, guard !== 'session');
         if (guard === 'webw' && c.s.kind !== 'web') throw new HttpError(403, 'passkey_required', `This needs your passkey in the ${BRAND.name} app.`);
@@ -355,7 +373,7 @@ export async function handle(request, rawEnv, opts = {}) {
 
 // Expired rows are always rejected at read time; this only tidies them away. There is no cron (the account's five cron
 // triggers are used by other Workers): it runs on about 1 in 50 requests, and after sign-ins and sign-ups at most every
-// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 16 statements (D1 allows 50).
+// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 18 statements (D1 allows 50).
 export async function sweep(env, t = Date.now()) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM challenges WHERE expires_at < ?').bind(t),
@@ -371,6 +389,10 @@ export async function sweep(env, t = Date.now()) {
     // seal), and an invite that expired a day ago is gone
     env.DB.prepare('DELETE FROM hold_votes WHERE at < ?').bind(t - 2 * 86400_000),
     env.DB.prepare('DELETE FROM invites WHERE expires_at < ?').bind(t - 86400_000),
+    // a deploy hold also names the person who started the run (their GitHub login): dropped with the preview. The private
+    // audit log keeps the repository, commit and run, never that name.
+    env.DB.prepare("UPDATE holds SET context = NULL WHERE kind = 'deploy' AND context IS NOT NULL AND status NOT IN ('pending','approved') AND expires_at < ?").bind(t - 86400_000),
+    env.DB.prepare('DELETE FROM gate_polls WHERE expires_at < ?').bind(t),
     ...cleanupStatements(env.DB, t),
     ...Brakes.sweepStatements(env.DB, t), // breaker windows that ended, daily money totals older than 35 days
   ]);
