@@ -15,10 +15,14 @@ import { LEDGER_ROUTES, PUBLIC_PATH, CORS, logOf, apiKey, cachedHead, quotaFor, 
 import { logKey } from './note.js';
 import { directoryTool } from './tools.js';
 import { stats, checkStatsToken, markSeen } from './admin.js';
+import * as Move from './move.js';
 import { BRAND } from './brand.js';
 export { ReceiptLog } from './log.js';
 
 const ID = '([0-9a-f]{24})';
+// on the old host, these stay (the dashboard and what it loads); /v1, /p and /.well-known are handled before this
+const KEEP_ON_OLD_HOST = /^\/(app(\/.*)?|sw\.js|manifest\.webmanifest|styles\.css|brand\.js|favicon\.svg|icon-\d+\.png|fonts\/.*)$/;
+const movedPermanently = (location) => new Response(null, { status: 301, headers: { location, 'cache-control': 'public, max-age=3600', 'strict-transport-security': 'max-age=63072000; includeSubDomains; preload', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } });
 const DO_READS = /^\/v1\/(log\/(entries|proof\/)|my\/)/;
 const REG_PER_DAY = (env) => Number(env.REG_PER_IP_DAY) || 5;
 // [method, regex, guard, handler]
@@ -26,7 +30,7 @@ const REG_PER_DAY = (env) => Number(env.REG_PER_IP_DAY) || 5;
 //   key: receipts API key (lsr_);  session: read with any session;  write: session + CSRF for web
 //   webw: web (passkey) session only, never a CLI session
 const ROUTES = [
-  ['GET', /^\/v1\/meta$/, 'public', () => ({ mapVersion: MAP_VERSION, common: COMMON.map((r) => ({ id: r.id, method: r.m, path: r.p, why: r.why })), providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, name: p.name, host: p.host, irreversible: p.irreversible.map((r) => ({ id: r.id, method: r.m, path: r.p, why: r.why })) })) })],
+  ['GET', /^\/v1\/meta$/, 'public', (c) => ({ app: A.hosts(c.env)[0].origin, mapVersion: MAP_VERSION, common: COMMON.map((r) => ({ id: r.id, method: r.m, path: r.p, why: r.why })), providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, name: p.name, host: p.host, irreversible: p.irreversible.map((r) => ({ id: r.id, method: r.m, path: r.p, why: r.why })) })) })],
   ['POST', /^\/v1\/auth\/register\/begin$/, 'publicw', (c) => A.registerBegin(c.env, c.body)],
   ['POST', /^\/v1\/auth\/register\/finish$/, 'publicw', async (c) => {
     await limit(c.env.DB, await ipBucket(c.env, c.request, 'regday'), REG_PER_DAY(c.env), 86_400_000, now());
@@ -47,6 +51,8 @@ const ROUTES = [
     const { receipts, ...rest } = account || {};
     return {
       account: account ? rest : null, kind: c.s.kind,
+      // which host this is, and where the product lives (the app offers "Move to Counterseal" on the old host)
+      host: { here: A.rp(c.env).origin, legacy: A.rp(c.env).legacy, primary: A.hosts(c.env)[0].origin },
       // receipts numbers at the top level as well, as the receipts API always had them
       usage: u.usage, quota: c.env.UNLIMITED ? null : quotaFor(c.env),
       receipts: { on: !!receipts, usage: u.usage, today: u.today, skipped: u.skipped, quota: c.env.UNLIMITED ? null : quotaFor(c.env), dayCap: c.env.UNLIMITED ? null : dayCapFor(c.env) },
@@ -73,6 +79,13 @@ const ROUTES = [
     await audit(c.env, c.s.accountId, 'web', 'receipts_off', {});
     return { ok: true, on: false };
   }],
+  // the domain move: a one-time link from the old host, and a new passkey on the new host for the same account
+  ['POST', /^\/v1\/me\/move\/begin$/, 'webw', (c) => Move.linkBegin(c.env, c.s)],
+  ['POST', /^\/v1\/me\/move\/finish$/, 'webw', (c) => Move.linkFinish(c.env, c.s, c.body)],
+  ['POST', /^\/v1\/move\/begin$/, 'publicw', (c) => Move.registerBegin(c.env, c.body)],
+  ['POST', /^\/v1\/move\/finish$/, 'publicw', (c) => Move.registerFinish(c.env, c.body)],
+  ['GET', /^\/v1\/passkeys$/, 'session', (c) => Move.listPasskeys(c.env, c.s)],
+  ['DELETE', new RegExp(`^/v1/passkeys/${ID}$`), 'webw', (c) => Move.removePasskey(c.env, c.s, c.m[1])],
   ['GET', /^\/v1\/push\/key$/, 'session', (c) => Push.publicKey(c.env)],
   ['POST', /^\/v1\/push\/subscribe$/, 'write', (c) => Push.subscribe(c.env, c.s, c.body)],
   ['POST', /^\/v1\/push\/unsubscribe$/, 'write', (c) => Push.unsubscribe(c.env, c.s, c.body)],
@@ -126,7 +139,7 @@ async function deleteAccount(env, s, body) {
   await forgetAccount(env, id);
   await env.DB.batch([
     ...deleteStatements(env.DB, id),
-    ...['push_subs', 'holds', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'passkeys', 'challenges', 'device_codes'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
+    ...['push_subs', 'holds', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
     env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id),
   ]);
   return { body: { deleted: true, note: 'Account deleted. Receipts already in the public log stay there by design; they are no longer linked to you on our side.' }, cookie: '__Host-leash=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0' };
@@ -170,7 +183,7 @@ export async function handle(request, rawEnv, opts = {}) {
     if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(q);
     return q;
   };
-  const env = { ...rawEnv, __ctx: ctx ? { waitUntil } : undefined, __log: opts.log || rawEnv.__log };
+  const env = { ...rawEnv, __ctx: ctx ? { waitUntil } : undefined, __log: opts.log || rawEnv.__log, __rp: A.hostOf(rawEnv, request) };
   const isPublic = PUBLIC_PATH.test(url.pathname);
   try {
     if (url.pathname.startsWith('/.well-known/')) return wellKnown(url, request, env);
@@ -180,7 +193,12 @@ export async function handle(request, rawEnv, opts = {}) {
       await limit(env.DB, await ipBucket(env, request, 'pip'), 1200, 60_000, now());
       return await B.proxy(env, request, pm[1], pm[2], opts.fetcher || fetch);
     }
-    if (!url.pathname.startsWith('/v1/')) return env.ASSETS ? env.ASSETS.fetch(request) : json({ error: 'not_found' }, 404);
+    if (!url.pathname.startsWith('/v1/')) {
+      // the old host keeps /app (sign-in for its passkeys); every other page moves to the product's host
+      const here = A.hosts(env).find((h) => h.origin === url.origin);
+      if (here && here.legacy && !KEEP_ON_OLD_HOST.test(url.pathname)) return movedPermanently(A.hosts(env)[0].origin + url.pathname + url.search);
+      return env.ASSETS ? env.ASSETS.fetch(request) : json({ error: 'not_found' }, 404);
+    }
     if (request.method === 'OPTIONS') {
       if (isPublic) return new Response(null, { status: 204, headers: { ...CORS, 'access-control-allow-methods': 'GET', 'access-control-max-age': '86400' } });
       return json({ error: 'no_cors' }, 403);
@@ -194,7 +212,7 @@ export async function handle(request, rawEnv, opts = {}) {
       // the log's name and key, for the routes that sign or name the log (the broker's own routes work without it)
       if (guard === 'pub' || guard === 'key' || isPublic || /^\/v1\/(keys|my)(\/|$)/.test(url.pathname)) c.key = await logKey(env);
       if (guard === 'public' || guard === 'publicw') await limit(env.DB, await ipBucket(env, request, guard === 'public' ? 'pub' : 'pubw'), 60, 60_000, t);
-      if (guard === 'publicw' && request.headers.get('origin') !== A.rp(env).origin) throw new HttpError(403, 'csrf');
+      if (guard === 'publicw' && !A.originAllowed(env, request)) throw new HttpError(403, 'csrf');
       // reads of the public log and the tool: no storage write per request
       if (guard === 'pub') await readLimit(env, await ipBucket(env, request, 'pubr'), Number(env.PUB_RPM) || 600, t);
       if (guard === 'tool') await readLimit(env, await ipBucket(env, request, 'tool'), Number(env.TOOL_RPM) || 10, t);
@@ -231,7 +249,7 @@ export async function handle(request, rawEnv, opts = {}) {
 
 // Expired rows are always rejected at read time; this only tidies them away. There is no cron (the account's five cron
 // triggers are used by other Workers): it runs on about 1 in 50 requests, and after sign-ins and sign-ups at most every
-// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 13 statements.
+// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 14 statements.
 export async function sweep(env, t = Date.now()) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM challenges WHERE expires_at < ?').bind(t),
@@ -239,6 +257,7 @@ export async function sweep(env, t = Date.now()) {
     env.DB.prepare('DELETE FROM device_codes WHERE expires_at < ?').bind(t),
     env.DB.prepare('DELETE FROM ratelimits WHERE reset_at < ?').bind(t),
     env.DB.prepare('DELETE FROM nonces WHERE expires_at < ?').bind(t),
+    env.DB.prepare('DELETE FROM move_links WHERE expires_at < ?').bind(t - 86400_000),
     env.DB.prepare("UPDATE holds SET status = 'expired' WHERE status IN ('pending','approved') AND expires_at < ?").bind(t),
     // request previews are only needed while a human is deciding; drop them a day after the hold is closed
     env.DB.prepare("UPDATE holds SET preview = NULL WHERE preview IS NOT NULL AND status NOT IN ('pending','approved') AND expires_at < ?").bind(t - 86400_000),

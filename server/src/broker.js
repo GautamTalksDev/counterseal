@@ -4,7 +4,7 @@ import { seal, open } from './vault.js';
 import { summarize, PROVIDERS, MAP_VERSION } from './providers.js';
 import { normalisePolicy, decide } from './policy.js';
 import { audit } from './audit.js';
-import { newChallenge, takeChallenge, checkAssertion, rp } from './auth.js';
+import { newChallenge, takeChallenge, checkAssertion, rp, hosts, appOrigin } from './auth.js';
 import { limit } from './ratelimit.js';
 import { notify } from './push.js';
 import { verifyAgentSignature, d1Seen, ownActive } from './agentkeys.js';
@@ -89,7 +89,8 @@ export async function listHolds(env, sess, status) {
   await env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND status IN ('pending','approved') AND expires_at < ?").bind(sess.accountId, now()).run();
   const st = ['pending', 'approved', 'denied', 'used', 'expired'].includes(status) ? status : 'pending';
   const r = await env.DB.prepare('SELECT h.*, t.label AS token_label FROM holds h LEFT JOIN tokens t ON t.id = h.token_id WHERE h.account_id = ? AND h.status = ? ORDER BY h.created_at DESC LIMIT 100').bind(sess.accountId, st).all();
-  return { holds: r.results.map(({ req_hash, ...h }) => h) };
+  const base = await appOrigin(env, sess.accountId);
+  return { holds: r.results.map(({ req_hash, ...h }) => ({ ...h, approve_url: `${base}/app#hold=${h.id}` })) };
 }
 
 export async function approveBegin(env, sess, holdId) {
@@ -176,7 +177,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   const m = authz.match(/^Bearer (lsh_[A-Za-z0-9_-]{43})$/);
   if (!m) throw new HttpError(401, 'leash_token_required', `Send your ${BRAND.name} token as: Authorization: Bearer lsh_...`);
   // one query: the token, whether its account has public receipts on, and the agent key it is bound to (if any)
-  const tok = await env.DB.prepare('SELECT t.*, a.receipts AS receipts_on, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?').bind(await sha256hex(m[1])).first();
+  const tok = await env.DB.prepare('SELECT t.*, a.receipts AS receipts_on, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM passkeys p WHERE p.account_id = t.account_id AND p.rp_id = ?) AS has_new_passkey FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?').bind(hosts(env)[0].rpId, await sha256hex(m[1])).first();
   if (!tok || tok.revoked || tok.expires_at < now()) throw new HttpError(401, 'token_invalid');
   // a token bound to an agent key whose key is gone or revoked never works again (fails closed)
   if (tok.agent_key_id && (!tok.agent_keyid || tok.agent_revoked)) throw new HttpError(401, 'agent_key_revoked', 'The agent key this token is bound to was revoked.');
@@ -237,7 +238,8 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
         const p = notify(env, tok.account_id, env.__pushFetch || fetch).catch(() => {});
         if (env.__ctx) env.__ctx.waitUntil(p); else await p;
       }
-      const approveUrl = `${rp(env).origin}/app#hold=${h.id}`;
+      // the approve link goes where the owner can sign in: the product's host once they have a passkey there
+      const approveUrl = `${await appOrigin(env, tok.account_id, !!tok.has_new_passkey)}/app#hold=${h.id}`;
       return json({
         error: 'held_for_approval', hold_id: h.id, approve_url: approveUrl, expires_at: h.expires_at, rule: d.rule, map_version: MAP_VERSION,
         message: `${BRAND.name} held this request because it cannot be undone: ${d.why} Stop and ask your human to approve it at ${approveUrl} . After they approve, retry the exact same request once.`,

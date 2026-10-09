@@ -29,10 +29,10 @@ Existing secrets stay as they are: `LEASH_KEK`, `IP_SALT`, `VAPID_PRIVATE_JWK`. 
 Then check:
 
 ```bash
-curl -s https://leash.gautamkhosla.com/v1/log/key           # publish this verifier key (README, site, auditors)
-curl -s https://leash.gautamkhosla.com/v1/stats             # {"tree_size":0,...} on a fresh log
-curl -s https://leash.gautamkhosla.com/.well-known/security.txt
-curl -s -H "authorization: Bearer $STATS_TOKEN" https://leash.gautamkhosla.com/v1/admin/stats
+curl -s https://counterseal.gautamkhosla.com/v1/log/key           # publish this verifier key (README, site, auditors)
+curl -s https://counterseal.gautamkhosla.com/v1/stats             # {"tree_size":0,...} on a fresh log
+curl -s https://counterseal.gautamkhosla.com/.well-known/security.txt
+curl -s -H "authorization: Bearer $STATS_TOKEN" https://counterseal.gautamkhosla.com/v1/admin/stats
 ```
 
 and in the app: sign in with an existing passkey, see the existing tokens and holds, approve a test hold.
@@ -138,13 +138,13 @@ These are Node numbers, not a load test on Workers. Run one before raising the b
 
 Not set up yet. Three things decide how:
 
-1. **The published CLI.** `leashcli` 0.1.x calls `https://leash.gautamkhosla.com` and refuses redirects. That host must keep
+1. **The published CLI.** `leashcli` 0.1.x calls `https://counterseal.gautamkhosla.com` and refuses redirects. That host must keep
    **serving** `/v1/*` and `/p/*` (not redirect them) for as long as old CLIs are in use. Agents configured with
    `/p/...` base URLs need the same.
-2. **Passkeys.** Every existing passkey is bound to the RP ID `leash.gautamkhosla.com` and cannot sign in on
+2. **Passkeys.** Every existing passkey is bound to the RP ID `counterseal.gautamkhosla.com` and cannot sign in on
    `counterseal.gautamkhosla.com` (not a subdomain of it). Either keep the app (`/app`, sign-in, approvals) on
-   `leash.gautamkhosla.com` and redirect only the marketing pages, or serve
-   `https://leash.gautamkhosla.com/.well-known/webauthn` (WebAuthn Related Origin Requests) listing the new origin and
+   `counterseal.gautamkhosla.com` and redirect only the marketing pages, or serve
+   `https://counterseal.gautamkhosla.com/.well-known/webauthn` (WebAuthn Related Origin Requests) listing the new origin and
    accept both origins in `src/auth.js` (browser support varies; test before relying on it).
 3. **The brand.** Change `domain` and `origin` in `server/src/brand.js`, run `node scripts/rebrand.mjs`, review the diff,
    and add the new route in `wrangler.jsonc`. `LOG_ORIGIN` already uses the new name and does not change.

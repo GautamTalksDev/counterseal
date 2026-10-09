@@ -19,7 +19,7 @@ const VERSION = '0.2.0';
 const CFG_DIR = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'leash');
 const CFG = join(CFG_DIR, 'config.json');
 const cfg = () => (existsSync(CFG) ? JSON.parse(readFileSync(CFG, 'utf8')) : {});
-const server = () => (process.env.LEASH_URL || cfg().server || 'https://leash.gautamkhosla.com').replace(/\/+$/, '');
+const server = () => (process.env.LEASH_URL || cfg().server || 'https://counterseal.gautamkhosla.com').replace(/\/+$/, '');
 const die = (m, code = 1) => { process.stderr.write(m + '\n'); process.exit(code); };
 
 function save(c) {

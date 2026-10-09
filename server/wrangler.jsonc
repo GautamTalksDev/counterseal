@@ -5,10 +5,16 @@
   "main": "src/index.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": false,
-  // leash.gautamkhosla.com stays: the published CLI (leashcli 0.1.x) talks to it and never follows redirects.
-  // counterseal.gautamkhosla.com is planned; read docs/DEPLOY.md "Moving to the new domain" before adding it.
-  "routes": [{ "pattern": "leash.gautamkhosla.com", "custom_domain": true }],
-  "assets": { "directory": "../site/public", "binding": "ASSETS", "run_worker_first": ["/v1/*", "/p/*", "/.well-known/*"], "not_found_handling": "404-page" },
+  // Two custom domains (wrangler adds the DNS records on deploy). counterseal.gautamkhosla.com is the product.
+  // leash.gautamkhosla.com keeps /v1, /p (the published CLI, leashcli 0.1.x, never follows redirects) and /app (passkeys
+  // made there), and 301s every other page to the same path on counterseal. Same assets, same _headers, so the CSP and
+  // HSTS are identical on both.
+  "routes": [{ "pattern": "counterseal.gautamkhosla.com", "custom_domain": true }, { "pattern": "leash.gautamkhosla.com", "custom_domain": true }],
+  // The Worker runs first for the API, the proxy, security.txt and the site's pages (so the old host can redirect them);
+  // CSS, scripts, fonts and images are served straight from assets on both hosts. A new page needs its paths here
+  // (server/test/domain.test.js checks every page in site/public is listed).
+  "assets": { "directory": "../site/public", "binding": "ASSETS", "not_found_handling": "404-page",
+    "run_worker_first": ["/v1/*", "/p/*", "/.well-known/*", "/", "/index.html", "/docs", "/docs/", "/docs/index.html", "/privacy", "/privacy/", "/privacy/index.html", "/security", "/security/", "/security/index.html", "/terms", "/terms/", "/terms/index.html", "/verify", "/verify/", "/verify/index.html", "/tools/web-bot-auth", "/tools/web-bot-auth/", "/tools/web-bot-auth/index.html", "/404.html"] },
   "d1_databases": [{ "binding": "DB", "database_name": "leash", "database_id": "f275b6ea-aa0a-477a-a843-6caf89c74ca9", "migrations_dir": "migrations" }],
   // The public log: one SQLite-backed Durable Object (the only kind Workers Free allows).
   "durable_objects": { "bindings": [{ "name": "LOG", "class_name": "ReceiptLog" }] },
@@ -16,7 +22,9 @@
   // LOG_ORIGIN is signed into every checkpoint and can never change once the log has an entry (src/brand.js).
   // FREE_LIMIT: receipts per account per month. ACCOUNT_DAILY_CAP: per account per UTC day. GLOBAL_DAILY_CAP: appends
   // per UTC day across all accounts, sized for the Workers Free row budgets (docs/DEPLOY.md). REG_PER_IP_DAY: sign-ups.
-  "vars": { "RP_ID": "leash.gautamkhosla.com", "ORIGIN": "https://leash.gautamkhosla.com", "LOG_ORIGIN": "counterseal.gautamkhosla.com/log", "FREE_LIMIT": "10000", "ACCOUNT_DAILY_CAP": "2000", "GLOBAL_DAILY_CAP": "10000", "REG_PER_IP_DAY": "5" },
+  // ORIGIN / RP_ID: the product's host (new passkeys). LEGACY_ORIGIN / LEGACY_RP_ID: the old host (its existing passkeys).
+  // WebAuthn ceremonies and CSRF checks accept exactly these two origins, each with its own RP ID.
+  "vars": { "RP_ID": "counterseal.gautamkhosla.com", "ORIGIN": "https://counterseal.gautamkhosla.com", "LEGACY_RP_ID": "leash.gautamkhosla.com", "LEGACY_ORIGIN": "https://leash.gautamkhosla.com", "LOG_ORIGIN": "counterseal.gautamkhosla.com/log", "FREE_LIMIT": "10000", "ACCOUNT_DAILY_CAP": "2000", "GLOBAL_DAILY_CAP": "10000", "REG_PER_IP_DAY": "5" },
   // Secrets (wrangler secret put): LEASH_KEK (32 random bytes, base64url), IP_SALT, VAPID_PRIVATE_JWK (phone alerts:
   // node dev/vapid-keygen.mjs), LOG_KEY_JWK (the log's Ed25519 signing key: node dev/log-keygen.mjs).
   // Optional, replaces the in-memory read limiter: "ratelimits": [{ "name": "READ_LIMITER", "namespace_id": "1001", "simple": { "limit": 600, "period": 60 } }],

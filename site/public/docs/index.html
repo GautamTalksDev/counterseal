@@ -89,9 +89,9 @@ npx leashcli token &lt;key-id&gt; --label coding-agent</pre></li>
 
   <h2 id="proxy">Calling through the proxy</h2>
   <p>Any agent, script or SDK can call the broker directly. Swap the provider's base URL for the proxy and the real key for your token:</p>
-  <pre>https://leash.gautamkhosla.com/p/&lt;provider&gt;/&lt;path&gt;
+  <pre>https://counterseal.gautamkhosla.com/p/&lt;provider&gt;/&lt;path&gt;
 Authorization: Bearer lsh_...</pre>
-  <pre>curl https://leash.gautamkhosla.com/p/github/repos/acme/app/pulls \
+  <pre>curl https://counterseal.gautamkhosla.com/p/github/repos/acme/app/pulls \
   -H "Authorization: Bearer lsh_..."</pre>
   <p>The broker checks the call, swaps your token for the real key, forwards it to the provider and returns the response unchanged, plus an <code>x-leash-decision</code> header (<code>allowed</code> or <code>approved</code>). Cookies from upstream are stripped. Redirects are never followed.</p>
 
@@ -100,7 +100,7 @@ Authorization: Bearer lsh_...</pre>
   <pre>{
   "error": "held_for_approval",
   "hold_id": "4f2a...",
-  "approve_url": "https://leash.gautamkhosla.com/app#hold=4f2a...",
+  "approve_url": "https://counterseal.gautamkhosla.com/app#hold=4f2a...",
   "rule": "rw.mutation",
   "message": "Counterseal held this request because it cannot be undone..."
 }</pre>
@@ -153,7 +153,7 @@ Authorization: Bearer lsh_...</pre>
 
   <h3 id="report-receipts">Agents logging their own actions</h3>
   <p>An agent can also record what it did, with a receipts API key (<code>lsr_</code>, made in the app under Receipts):</p>
-  <pre>curl -s https://leash.gautamkhosla.com/v1/receipts \
+  <pre>curl -s https://counterseal.gautamkhosla.com/v1/receipts \
   -H "authorization: Bearer lsr_..." -H 'content-type: application/json' \
   -d '{"receipt":{"agent":"deploy-agent","action":"deploy.prod v2.4.1","decision":"executed"}}'</pre>
   <p>Fields: <code>agent</code> and <code>action</code> (required, up to 80 characters), <code>subject</code> (up to 120), <code>decision</code> (<code>allowed</code>, <code>denied</code>, <code>held</code>, <code>approved</code>, <code>executed</code>, <code>failed</code>), <code>input_sha256</code>, <code>output_sha256</code>, <code>parent</code>, <code>run</code> (up to 80), <code>ts</code> (Unix ms), <code>meta</code> (up to 8 keys, values up to 120 characters). No control, bidi or invisible characters; unknown fields are refused. Up to 25 receipts per call, or 12 for a key that requires signatures. Everything you send is public: send hashes, not content. These entries carry no <code>source</code> field, so verifiers tell them apart from the broker's own.</p>
@@ -202,7 +202,7 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
   <p>Run any command with <code>npx leashcli</code>, or install it globally with <code>npm i -g leashcli</code>.</p>
 
   <h2 id="api">API</h2>
-  <p>Base URL <code>https://leash.gautamkhosla.com</code>. Account endpoints use your session (web cookie or CLI bearer). Web writes need the same Origin and an <code>x-leash: 1</code> header. Endpoints marked passkey or web only work from the web app.</p>
+  <p>Base URL <code>https://counterseal.gautamkhosla.com</code>. Account endpoints use your session (web cookie or CLI bearer). Web writes need the same Origin and an <code>x-leash: 1</code> header. Endpoints marked passkey or web only work from the web app.</p>
   <table>
     <tr><th>Endpoint</th><th>Purpose</th></tr>
     <tr><td><code>GET /v1/meta</code></td><td>Providers and the irreversible map. Public.</td></tr>

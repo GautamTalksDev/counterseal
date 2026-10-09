@@ -2,6 +2,10 @@
 // The one exception is an agent key made here: it is generated in this browser, downloaded at once, and dropped.
 import { BRAND } from '/brand.js';
 const $ = (id) => document.getElementById(id);
+// a "Move to Counterseal" link carries its one-time token in the fragment: read it, then take it out of the address bar
+// and the history at once, so it is never shown, bookmarked, logged or sent as a Referer
+let moveToken = null;
+{ const mv = location.hash.match(/^#move=([A-Za-z0-9_-]{43})$/); if (mv) { moveToken = mv[1]; history.replaceState(null, '', '/app'); } }
 const el = (tag, props = {}, ...kids) => { const n = document.createElement(tag); Object.assign(n, props); for (const k of kids) if (k != null) n.append(k); return n; };
 const b64u = { enc: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''), dec: (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)) };
 
@@ -130,6 +134,7 @@ function show(view) {
   const changed = current !== view;
   current = view;
   if (changed && view === 'receipts') load().catch(() => {});
+  if (changed && view === 'account') passkeysView().catch(() => {});
   for (const s of document.querySelectorAll('.view')) s.hidden = s.dataset.view !== view;
   for (const a of document.querySelectorAll('#snav a')) a.classList.toggle('on', a.dataset.view === view);
 }
@@ -187,6 +192,35 @@ $('pushOff').onclick = async () => {
     toast('Alerts are off for this device.'); pushState();
   } catch (e) { toast(e.message); }
 };
+
+// ---- the domain move
+async function moveIn() {
+  try {
+    const b = await api('POST', '/v1/move/begin', { token: moveToken });
+    $('moveName').textContent = b.name; $('moveIn').hidden = false;
+    $('moveCreate').onclick = async () => {
+      try {
+        const o = b.options;
+        const cred = await navigator.credentials.create({ publicKey: { ...o, challenge: b64u.dec(o.challenge), user: { ...o.user, id: b64u.dec(o.user.id) } } });
+        await api('POST', '/v1/move/finish', { token: moveToken, challengeId: b.challengeId, credential: { id: cred.id, attestationObject: b64u.enc(cred.response.attestationObject), clientDataJSON: b64u.enc(cred.response.clientDataJSON) } });
+        moveToken = null; $('moveIn').hidden = true; toast('Your passkey on this host is ready.'); boot();
+      } catch (e) { toast(e.message); }
+    };
+  } catch (e) { toast(e.message); }
+}
+$('moveBtn').onclick = async () => {
+  try { const r = await ceremony('/v1/me/move/begin', '/v1/me/move/finish'); location.assign(r.url); } catch (e) { toast(e.message); }
+};
+async function passkeysView() {
+  const p = await api('GET', '/v1/passkeys');
+  const P = $('passkeys'); P.replaceChildren();
+  for (const x of p.passkeys) {
+    const rm = el('button', { className: 'btn sm dan', textContent: 'Remove' });
+    rm.disabled = p.passkeys.length < 2;
+    rm.onclick = async () => { if (!confirm('Remove this passkey? It will no longer sign in.')) return; try { await api('DELETE', `/v1/passkeys/${x.id}`); passkeysView(); } catch (e) { toast(e.message); } };
+    P.append(el('div', {}, el('span', {}, el('b', { textContent: x.host ? new URL(x.host).host : 'passkey' }), el('span', { className: 'dim', textContent: `  added ${new Date(x.created_at).toLocaleDateString()}${x.last_used ? ', last used ' + new Date(x.last_used).toLocaleDateString() : ''}` })), rm));
+  }
+}
 
 // ---- receipts (Record)
 const download = (name, text) => {
@@ -256,6 +290,7 @@ async function boot() {
     const me = await api('GET', '/v1/me');
     $('signedOut').hidden = true; $('signedIn').hidden = false; $('logout').hidden = false;
     $('who').textContent = me.account.name;
+    $('movePanel').hidden = !me.host.legacy; $('moveHost').textContent = me.host.primary;
     $('avatar').textContent = (me.account.name.trim()[0] || '?').toUpperCase();
     meta = meta || (await api('GET', '/v1/meta'));
     const p = $('prov'); p.replaceChildren(...meta.providers.map((x) => el('option', { value: x.id, textContent: x.name })));
@@ -263,6 +298,11 @@ async function boot() {
     clearInterval(boot.poll); boot.poll = setInterval(() => load().catch(() => {}), 5000);
   } catch {
     $('signedOut').hidden = false; $('signedIn').hidden = true;
+    // on the old host, sign-in stays and sign-up moves to the product's host
+    try {
+      meta = meta || (await api('GET', '/v1/meta'));
+      if (meta.app && meta.app !== location.origin) { $('signupBox').hidden = true; $('signupMoved').hidden = false; $('signupLink').href = meta.app + '/app'; }
+    } catch { /* offline: the form still works or explains itself */ }
   }
 }
-boot();
+if (moveToken) { $('signedOut').hidden = false; $('signedIn').hidden = true; moveIn(); } else boot();

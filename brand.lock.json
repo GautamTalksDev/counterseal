@@ -1,10 +1,9 @@
 {
-  "origin": "https://leash.gautamkhosla.com",
+  "origin": "https://counterseal.gautamkhosla.com",
   "wordmark": "COUNTERSEAL",
   "tagline": "Every irreversible action gets a second seal.",
   "recordLine": "If it was recorded, you can prove it.",
-  "domain": "leash.gautamkhosla.com",
-  "nextDomain": "counterseal.gautamkhosla.com",
+  "domain": "counterseal.gautamkhosla.com",
   "sdk": "counterseal-sdk",
   "cli": "leashcli",
   "cliPlanned": "counterseal",

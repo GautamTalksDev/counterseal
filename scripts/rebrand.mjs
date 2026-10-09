@@ -14,7 +14,7 @@ import { BRAND } from '../server/src/brand.js';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const LOCK = join(ROOT, 'brand.lock.json');
 // order matters: longer values first, so "https://x" is replaced before "x"
-export const KEYS = ['origin', 'wordmark', 'tagline', 'recordLine', 'domain', 'nextDomain', 'sdk', 'cli', 'cliPlanned', 'name', 'repo'];
+export const KEYS = ['origin', 'wordmark', 'tagline', 'recordLine', 'domain', 'sdk', 'cli', 'cliPlanned', 'name', 'repo'];
 const TEXT = /\.(html|js|mjs|md|webmanifest|json|txt)$/;
 const SKIP = new Set(['fonts', 'img', 'node_modules', '.git', 'fixtures']);
 const GENERATED = new Set(['site/public/brand.js', 'site/public/receipts-sdk.js', 'site/public/websig.js', 'brand.lock.json']);

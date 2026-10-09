@@ -57,3 +57,17 @@ CREATE INDEX agent_keys_by_account ON agent_keys(account_id);
 ALTER TABLE tokens ADD COLUMN agent_key_id TEXT;
 -- signature nonces, each accepted once per key until its signature expires
 CREATE TABLE nonces (k TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
+
+-- The domain move. Each passkey records the RP ID (host) it was made for; NULL: made before the move, on the old host.
+ALTER TABLE passkeys ADD COLUMN rp_id TEXT;
+-- the host a challenge was issued on; it is refused on the other one (NULL: issued before the move)
+ALTER TABLE challenges ADD COLUMN origin TEXT;
+-- one-time "move to the new host" links: only the SHA-256 of the token, single use, 10 minutes
+CREATE TABLE move_links (
+  hash        TEXT PRIMARY KEY,
+  account_id  TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL,
+  used_at     INTEGER
+);
+CREATE INDEX move_links_by_account ON move_links(account_id);

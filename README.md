@@ -11,7 +11,7 @@ sign its own requests, so a stolen token alone is useless.
 
 The agent's signed request is the seal. Your passkey approval is the counterseal. The public log keeps the impression.
 
-[Website](https://leash.gautamkhosla.com) · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Security](SECURITY.md) · [Threat model](docs/THREAT_MODEL.md) · [Protocol](docs/PROTOCOL.md) · [Policy reference](docs/POLICY.md)
+[Website](https://counterseal.gautamkhosla.com) · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Security](SECURITY.md) · [Threat model](docs/THREAT_MODEL.md) · [Protocol](docs/PROTOCOL.md) · [Policy reference](docs/POLICY.md)
 
 </div>
 
@@ -149,25 +149,25 @@ npx leashcli token <credentialId> --agent-key <agentKeyId>
 
 | Provider | Base URL |
 |---|---|
-| GitHub | `https://leash.gautamkhosla.com/p/github` |
-| Cloudflare | `https://leash.gautamkhosla.com/p/cloudflare` (paths after `/client/v4`) |
-| Railway | `https://leash.gautamkhosla.com/p/railway/` (GraphQL) |
-| Stripe | `https://leash.gautamkhosla.com/p/stripe` |
-| Supabase (management API) | `https://leash.gautamkhosla.com/p/supabase` |
+| GitHub | `https://counterseal.gautamkhosla.com/p/github` |
+| Cloudflare | `https://counterseal.gautamkhosla.com/p/cloudflare` (paths after `/client/v4`) |
+| Railway | `https://counterseal.gautamkhosla.com/p/railway/` (GraphQL) |
+| Stripe | `https://counterseal.gautamkhosla.com/p/stripe` |
+| Supabase (management API) | `https://counterseal.gautamkhosla.com/p/supabase` |
 
 ### Verify a receipt
 
-Download a bundle from the app (Receipts) and check it at [/verify/](https://leash.gautamkhosla.com/verify/), or offline:
+Download a bundle from the app (Receipts) and check it at [/verify/](https://counterseal.gautamkhosla.com/verify/), or offline:
 
 ```bash
-node sdk/receipts.mjs verify receipt-42.json --key "$(curl -s https://leash.gautamkhosla.com/v1/log/key | jq -r .verifier_key)"
+node sdk/receipts.mjs verify receipt-42.json --key "$(curl -s https://counterseal.gautamkhosla.com/v1/log/key | jq -r .verifier_key)"
 ```
 
 Pin the verifier key once and keep it with your auditors; a bundle's own `log` field is only a hint.
 
 ### Free tool: Web Bot Auth checker
 
-[/tools/web-bot-auth/](https://leash.gautamkhosla.com/tools/web-bot-auth/) checks a Web Bot Auth signature (RFC 9421) from
+[/tools/web-bot-auth/](https://counterseal.gautamkhosla.com/tools/web-bot-auth/) checks a Web Bot Auth signature (RFC 9421) from
 any AI agent, in your browser. The same code is in `sdk/websig.mjs` and `sdk/verifier.mjs` for your own server.
 
 ## Limits (Workers Free)
