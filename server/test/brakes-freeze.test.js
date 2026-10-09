@@ -37,7 +37,7 @@ test('freeze from the command line stops every call of every token at once, read
   for (const tok of [a.token, b.token]) {
     for (const r of [await get(w, tok), await cust(w, tok, 5), await w.req('DELETE', '/p/stripe/v1/customers/cus_1', { bearer: tok, ...anon }), await w.req('HEAD', '/p/stripe/v1/customers', { bearer: tok, ...anon })]) {
       assert.equal(r.status, 423);
-      if (r.body.error) { assert.equal(r.body.error, 'account_frozen'); assert.match(r.body.message, /frozen: every agent token is stopped/); }
+      if (r.body.error) { assert.equal(r.body.error, 'account_frozen'); assert.match(r.body.message, /frozen: every agent token and every coding-agent approval is stopped/); }
     }
   }
   assert.equal(w.upstream.length, before, 'nothing reached the provider');
@@ -170,6 +170,33 @@ test('freezing voids approvals nobody used yet; approving waits until the freeze
   // approving works again, and the pending one can be decided
   assert.equal((await approve(w, u, h2.body.hold_id)).status, 200);
   assert.equal((await del(2)).status, 200);
+});
+
+test('a coding agent\'s guard is stopped by a freeze too: nothing new is asked, waiting ends at once, an approval nobody used is void', async () => {
+  const w = stripeWorld();
+  const u = await account(w);
+  const cli = await cliSession(w, u);
+  const gk = await w.req('POST', '/v1/guard/keys', { bearer: cli, ...anon, body: { label: 'laptop' } });
+  assert.equal(gk.status, 200, JSON.stringify(gk.body));
+  const ask = (n) => w.req('POST', '/v1/approvals', { bearer: gk.body.key, ...anon, body: { kind: 'shell', agent: 'codex', rule: 'sh.git-force', why: 'Rewrites the remote history.', summary: 'git push --force', detail: 'git push --force origin main' + n } });
+  const a1 = await ask(1), a2 = await ask(2);
+  assert.equal(a1.status, 202); assert.equal(a2.status, 202);
+  assert.equal((await approve(w, u, a1.body.id)).status, 200);
+  assert.equal((await w.req('GET', `/v1/approvals/${a1.body.id}`, { bearer: gk.body.key, ...anon })).body.status, 'approved');
+  // freeze: the approved one is void, the pending one cannot be approved, a new ask is refused, a poll ends with the reason
+  assert.equal((await w.req('POST', '/v1/me/freeze', { bearer: cli, ...anon, body: {} })).status, 200);
+  for (const r of [await ask(3), await w.req('GET', `/v1/approvals/${a2.body.id}?wait=0`, { bearer: gk.body.key, ...anon }), await w.req('GET', `/v1/approvals/${a1.body.id}`, { bearer: gk.body.key, ...anon }),
+    await w.req('POST', `/v1/approvals/${a1.body.id}/use`, { bearer: gk.body.key, ...anon, body: { hash: a1.body.hash } })]) {
+    assert.equal(r.status, 423, JSON.stringify(r.body)); assert.equal(r.body.error, 'account_frozen');
+  }
+  assert.equal((await approve(w, u, a2.body.id)).status, 423, 'and the human cannot approve while frozen');
+  assert.equal(db(w).prepare('SELECT status FROM holds WHERE id = ?').get(a1.body.id).status, 'expired');
+  // after the freeze, the old approval does not come back: ask again, approve, use
+  assert.equal((await unfreeze(w, u)).status, 200);
+  const again = await ask(1);
+  assert.equal(again.status, 202); assert.notEqual(again.body.id, a1.body.id);
+  assert.equal((await approve(w, u, again.body.id)).status, 200);
+  assert.equal((await w.req('POST', `/v1/approvals/${again.body.id}/use`, { bearer: gk.body.key, ...anon, body: { hash: again.body.hash } })).status, 200);
 });
 
 test('the phone sees it: devices are woken once when the account is frozen, alerts and /v1/me say so', async () => {

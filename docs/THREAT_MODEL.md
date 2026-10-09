@@ -168,8 +168,9 @@ call (no signature check, no body, no token rate limit row), so a looping agent 
 per-network limit every proxied call pays, and one note in the owner's audit log per token every 10 minutes. Approvals nobody
 used yet are voided when the freeze starts, and approving is refused while frozen, so nothing a human said yes to earlier
 fires after the freeze ends. Not covered: calls already in flight when the freeze lands; receipts API keys (`lsr_`),
-which cannot act on a provider. Modules that decide for an account without an `lsh_` token (approvals, deploy gates) must
-call `isFrozen` (`src/brakes.js`). Tests: `test/brakes-freeze.test.js`.
+which cannot act on a provider. A coding agent's guard is stopped the same way (asking, waiting and using an approval answer
+`423`, so it learns why instead of timing out); a module that decides for an account without an `lsh_` token (a deploy gate
+later) must check `frozen_at` or call `isFrozen` (`src/brakes.js`). Tests: `test/brakes-freeze.test.js`.
 
 ### The joints between the three parts
 

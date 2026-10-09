@@ -17,6 +17,7 @@ import { limit, readLimit, allow } from './ratelimit.js';
 import { notify } from './push.js';
 import { preview, PENDING_PER_ACCOUNT } from './broker.js';
 import { markSeen } from './admin.js';
+import { frozenError } from './brakes.js';
 import { int } from './ledger.js';
 import { BRAND } from './brand.js';
 
@@ -90,7 +91,7 @@ export async function revokeKey(env, sess, id) {
 export async function guardKey(env, request) {
   const m = (request.headers.get('authorization') || '').match(KEY);
   if (!m) throw new HttpError(401, 'guard_key_required', `Send your ${BRAND.name} guard key as: Authorization: Bearer lsg_...`);
-  const k = await env.DB.prepare('SELECT g.id, g.account_id, g.revoked, g.expires_at, g.last_used, a.receipts AS receipts_on FROM guard_keys g JOIN accounts a ON a.id = g.account_id WHERE g.hash = ?')
+  const k = await env.DB.prepare('SELECT g.id, g.account_id, g.revoked, g.expires_at, g.last_used, a.receipts AS receipts_on, a.frozen_at FROM guard_keys g JOIN accounts a ON a.id = g.account_id WHERE g.hash = ?')
     .bind(await sha256hex(m[1])).first();
   if (!k || k.revoked || (k.expires_at !== null && k.expires_at <= now())) throw new HttpError(401, 'guard_key_invalid', 'This guard key was revoked or has ended. Make a new one in the app, or run leashcli guard install again.');
   return k;
@@ -136,6 +137,7 @@ function readRequest(b) {
  *  comes back as it is (no second hold, no second alert); otherwise a new hold, an audit entry and an alert. */
 export async function create(c) {
   const k = c.g, env = c.env, t = now();
+  if (k.frozen_at) throw frozenError(); // Freeze: nothing new is asked, held or alerted while the account is frozen
   const r = readRequest(c.body);
   // the approver sees the exact command, never truncated: preview() makes invisible and direction characters visible.
   // Each hidden character becomes 8 visible ones, so a command made mostly of them is refused (before anything is
@@ -185,6 +187,7 @@ const readHold = (env, k, id) => env.DB.prepare("SELECT id, status, deny_reason,
 /** GET /v1/approvals/:id?wait=N: the decision, waiting up to N seconds for one. No D1 writes at all. */
 export async function status(c, id) {
   const k = c.g, env = c.env, t0 = now();
+  if (k.frozen_at) throw frozenError(); // a freeze ends every wait at once: the guard learns why instead of timing out
   const w = c.url.searchParams.get('wait');
   const wait = w === null ? 0 : int(w, 'wait', WAIT_MAX);
   await readLimit(env, 'gpoll:' + k.id, POLLS_PER_MINUTE, t0);
@@ -203,6 +206,7 @@ export async function status(c, id) {
 /** POST /v1/approvals/:id/use {hash}: an approval is spent once, on exactly the command it was given for */
 export async function use(c, id) {
   const k = c.g, env = c.env, t = now();
+  if (k.frozen_at) throw frozenError();
   await readLimit(env, 'guse:' + k.id, USES_PER_MINUTE, t);
   const hash = str(c.body.hash, 'hash', { max: 64, re: /^[0-9a-f]{64}$/ });
   const u = await env.DB.prepare("UPDATE holds SET status = 'used' WHERE id = ? AND token_id = ? AND req_hash = ? AND status = 'approved' AND expires_at > ? AND kind IN ('shell','tool') RETURNING method, host, rule, kind, context")

@@ -102,8 +102,9 @@ read (GraphQL, SQL) count as writes. A tripped token's writes are held with rule
 token, as for every hold), its reads pass, and your devices are told once. Resetting it needs a passkey: it starts a fresh
 window and closes the writes that were waiting.
 
-**Freeze.** Stops every `lsh_` token of the account (`423 account_frozen`, for reads too). The receipts API keys (`lsr_`)
-are separate and are not stopped.
+**Freeze.** Stops every `lsh_` token of the account (`423 account_frozen`, for reads too) and the Approvals API (asking,
+waiting for and using an approval answer `423` too). Approvals nobody used yet are void, and approving waits. The receipts
+API keys (`lsr_`) are separate and are not stopped.
 
 ## Recipes
 

@@ -126,7 +126,7 @@ general). They do not cap LLM tokens, and they do not cover SQL sent straight ov
   your devices are told once. `repeatsPer5Min: 3` trips on the fourth identical request (same method, path, query, content
   type and body) within 5 minutes.
 - **Freeze.** One tap in the app, `leashcli freeze`, or the Freeze button on a phone alert stops every agent token
-  (HTTP 423), voids approvals nobody used yet and pauses approving. Any signed-in session can freeze; only a passkey in the
+  (HTTP 423) and every coding-agent approval, voids approvals nobody used yet and pauses approving. Any signed-in session can freeze; only a passkey in the
   app unfreezes.
 
 A token without `limits` and `money` costs no extra database writes. See the [policy reference](docs/POLICY.md).

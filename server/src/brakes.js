@@ -27,7 +27,7 @@ import { BRAND } from './brand.js';
 const HOUR = 3600_000, FIVE_MIN = 300_000;
 
 // ---------------------------------------------------------------- Freeze
-export const frozenError = () => new HttpError(423, 'account_frozen', `This ${BRAND.name} account is frozen: every agent token is stopped. Its owner can unfreeze it with a passkey in the app.`);
+export const frozenError = () => new HttpError(423, 'account_frozen', `This ${BRAND.name} account is frozen: every agent token and every coding-agent approval is stopped. Its owner can unfreeze it with a passkey in the app.`);
 
 // A frozen account answers every call from its tokens with 423 and writes nothing, so a looping agent cannot burn the
 // database's daily row budget. The first refused call of each token is noted in the owner's audit log, at most once per
