@@ -142,6 +142,23 @@ test('removing a passkey needs a fresh passkey and signs out the other browsers;
   });
 });
 
+test('ceilings on what one account can create: 50 vault keys, 200 live tokens, 20 receipts keys', async () => {
+  const w = new World();
+  const a = await w.user('A', '192.0.2.1');
+  for (let i = 0; i < 50; i++) assert.equal((await w.req('POST', '/v1/credentials', { cookie: a.cookie, body: { provider: 'github', secret: 'ghp_' + String(i).padStart(36, 'x') } })).status, 200, 'key ' + i);
+  assert.equal((await w.req('POST', '/v1/credentials', { cookie: a.cookie, body: { provider: 'github', secret: GH } })).body.error, 'too_many_credentials');
+  const b = await w.user('B', '192.0.2.2');
+  const cred = (await w.req('POST', '/v1/credentials', { cookie: b.cookie, body: { provider: 'github', secret: GH } })).body.id;
+  const ids = [];
+  for (let i = 0; i < 200; i++) { const t = await w.req('POST', '/v1/tokens', { cookie: b.cookie, body: { credentialId: cred } }); assert.equal(t.status, 200, 'token ' + i); ids.push(t.body.id); }
+  assert.equal((await w.req('POST', '/v1/tokens', { cookie: b.cookie, body: { credentialId: cred } })).body.error, 'too_many_tokens');
+  await w.req('DELETE', `/v1/tokens/${ids[0]}`, { cookie: b.cookie });
+  assert.equal((await w.req('POST', '/v1/tokens', { cookie: b.cookie, body: { credentialId: cred } })).status, 200, 'a revoked token frees its place');
+  const c = await w.user('C', '192.0.2.3');
+  for (let i = 0; i < 20; i++) assert.equal((await w.req('POST', '/v1/keys', { cookie: c.cookie, body: { label: 'k' + i } })).status, 200);
+  assert.equal((await w.req('POST', '/v1/keys', { cookie: c.cookie, body: { label: 'one more' } })).body.error, 'too_many_keys');
+});
+
 test('phone alerts belong to the browser: a CLI session cannot add, remove or test a device; a moved browser counts toward its new account', async () => {
   const w = new World();
   await withVapid(w);

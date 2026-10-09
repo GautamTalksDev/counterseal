@@ -22,6 +22,9 @@ export async function addCredential(env, sess, body) {
   const label = str(body.label ?? P.name, 'label', { max: 60, re: /^[\p{L}\p{N} ._:/()-]+$/u });
   const secret = str(body.secret, 'secret', { min: 8, max: 4096, re: /^[\x21-\x7e]+$/ });
   if (P.keyHint && !P.keyHint.test(secret)) throw new HttpError(400, 'bad_secret', `That does not look like a ${P.name} key.`);
+  // every row an account can create has a ceiling (OWASP API4): the D1 budget is shared by everyone
+  const have = await env.DB.prepare('SELECT COUNT(*) AS n FROM credentials WHERE account_id = ?').bind(sess.accountId).first();
+  if (have.n >= MAX_CREDENTIALS) throw new HttpError(409, 'too_many_credentials', `Up to ${MAX_CREDENTIALS} keys in a vault. Delete one first.`);
   const id = randomId();
   const sealed = await seal(env, { id, accountId: sess.accountId, provider }, secret);
   await env.DB.prepare('INSERT INTO credentials (id, account_id, provider, label, hint, ct, iv, wrapped_dek, dek_iv, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
@@ -52,6 +55,8 @@ export async function mintToken(env, sess, body, byPasskey = false) {
   const hours = Number.isInteger(body.ttlHours) && body.ttlHours > 0 && body.ttlHours <= 24 * 90 ? body.ttlHours : 24 * 7;
   // binding to an agent key only ever narrows a token (it then needs the agent's signature too), so a CLI session may do it
   const ak = body.agentKeyId !== undefined && body.agentKeyId !== null ? await ownActive(env, sess.accountId, body.agentKeyId) : null;
+  const live = await env.DB.prepare('SELECT COUNT(*) AS n FROM tokens WHERE account_id = ? AND revoked = 0 AND expires_at > ?').bind(sess.accountId, now()).first();
+  if (live.n >= MAX_LIVE_TOKENS) throw new HttpError(409, 'too_many_tokens', `Up to ${MAX_LIVE_TOKENS} live tokens. Revoke some first.`);
   const token = 'lsh_' + b64u(rand(32));
   const id = randomId();
   // a token minted by a CLI session never outlives that session, and revoking the session revokes it (a sign-in phished
@@ -79,7 +84,7 @@ export async function mintFinish(env, sess, body) {
 }
 
 export async function listTokens(env, sess) {
-  const r = await env.DB.prepare('SELECT t.id, t.label, t.policy, t.minted_by, t.expires_at, t.revoked, t.created_at, t.last_used, c.provider, c.label AS credential, k.keyid AS agent_key, k.label AS agent_key_label, k.revoked_at AS agent_key_revoked FROM tokens t JOIN credentials c ON c.id = t.credential_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id WHERE t.account_id = ? ORDER BY t.created_at DESC').bind(sess.accountId).all();
+  const r = await env.DB.prepare('SELECT t.id, t.label, t.policy, t.minted_by, t.expires_at, t.revoked, t.created_at, t.last_used, c.provider, c.label AS credential, k.keyid AS agent_key, k.label AS agent_key_label, k.revoked_at AS agent_key_revoked FROM tokens t JOIN credentials c ON c.id = t.credential_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id WHERE t.account_id = ? ORDER BY t.created_at DESC LIMIT ?').bind(sess.accountId, LIST_TOKENS).all();
   return { tokens: r.results.map((t) => ({ ...t, policy: JSON.parse(t.policy) })) };
 }
 

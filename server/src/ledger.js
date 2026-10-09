@@ -27,6 +27,7 @@ export const int = (v, name, max = Number.MAX_SAFE_INTEGER) => {
 const month = (t) => new Date(t).toISOString().slice(0, 7);
 const day = (t) => new Date(t).toISOString().slice(0, 10);
 export const PUBLIC_PATH = /^\/v1\/(log|stats)(\/|$)/;
+export const MAX_RECEIPTS_KEYS = 20;
 export const CORS = { 'access-control-allow-origin': '*' };
 // same security headers as JSON responses (HSTS, CSP, CORP, nosniff, no-store); CORS stays open for public reads
 const text = (body, status = 200) => new Response(body, { status, headers: { ...API_HEADERS, 'content-type': 'text/plain; charset=utf-8', ...CORS } });
@@ -337,6 +338,8 @@ export const LEDGER_ROUTES = [
       if (ch.account_id !== c.s.accountId || ch.name !== signer) throw new HttpError(400, 'challenge_expired', 'Start again.');
       await checkSignerProof(signer, ch.challenge, c.body.signerProof, c.key.name, c.s.accountId);
     }
+    const live = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM api_keys WHERE account_id = ? AND revoked = 0').bind(c.s.accountId).first();
+    if (live.n >= MAX_RECEIPTS_KEYS) throw new HttpError(409, 'too_many_keys', `Up to ${MAX_RECEIPTS_KEYS} receipts keys. Revoke one first.`);
     const key = 'lsr_' + b64u(rand(32)); const id = randomId();
     // made by a CLI session: revoking that session revokes this key too
     const cli = c.s.kind === 'cli' ? await A.sessionId(c.s.hash) : null;
