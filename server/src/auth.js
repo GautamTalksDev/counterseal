@@ -55,7 +55,7 @@ export async function registerFinish(env, body, request) {
   // them off until their owner turns them on
   try {
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO accounts (id, name, created_at, receipts) VALUES (?, ?, ?, 1)').bind(accountId, ch.name, now()),
+      env.DB.prepare('INSERT INTO accounts (id, name, created_at, receipts, last_seen) VALUES (?, ?, ?, 1, ?)').bind(accountId, ch.name, now(), now()),
       env.DB.prepare('INSERT INTO passkeys (cred_id, account_id, alg, jwk, sign_count, created_at) VALUES (?, ?, ?, ?, ?, ?)')
         .bind(c.credId, accountId, c.alg, JSON.stringify(c.jwk), c.signCount, now()),
     ]);

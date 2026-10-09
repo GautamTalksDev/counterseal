@@ -9,6 +9,7 @@ import { limit } from './ratelimit.js';
 import { notify } from './push.js';
 import { verifyAgentSignature, d1Seen, ownActive } from './agentkeys.js';
 import { BRAND } from './brand.js';
+import { markSeen } from './admin.js';
 
 const HOLD_TTL = 30 * 60_000, GRANT_TTL = 10 * 60_000, MAX_BODY = 1_048_576, MAX_RESP = 10 * 1_048_576;
 
@@ -179,6 +180,8 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   if (!tok || tok.revoked || tok.expires_at < now()) throw new HttpError(401, 'token_invalid');
   // a token bound to an agent key whose key is gone or revoked never works again (fails closed)
   if (tok.agent_key_id && (!tok.agent_keyid || tok.agent_revoked)) throw new HttpError(401, 'agent_key_revoked', 'The agent key this token is bound to was revoked.');
+  const seen = markSeen(env, tok.account_id);
+  if (seen) { if (env.__ctx) env.__ctx.waitUntil(seen); else await seen; }
   const cred = await env.DB.prepare('SELECT * FROM credentials WHERE id = ? AND account_id = ?').bind(tok.credential_id, tok.account_id).first();
   if (!cred || cred.provider !== provider) throw new HttpError(403, 'wrong_provider', `This token is for ${cred ? cred.provider : 'another provider'}.`);
   const policy = JSON.parse(tok.policy);

@@ -4,6 +4,10 @@
 
 -- Record. The log itself lives in the ReceiptLog Durable Object; D1 keeps the control plane.
 ALTER TABLE accounts ADD COLUMN receipts INTEGER NOT NULL DEFAULT 0;  -- 1: this account's broker decisions are sealed in the public log
+-- the seam for a future paid plan (no billing exists): every account is on 'free'
+ALTER TABLE accounts ADD COLUMN plan TEXT NOT NULL DEFAULT 'free';
+-- the day the account last made a signed-in request or a proxied call (aggregate "active accounts" only)
+ALTER TABLE accounts ADD COLUMN last_seen INTEGER;
 
 -- receipts API keys (lsr_), for agents that log their own actions; only the SHA-256 of the key is stored
 CREATE TABLE api_keys (

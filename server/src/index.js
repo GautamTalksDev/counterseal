@@ -11,9 +11,10 @@ import { list as auditList, verifyChain, audit } from './audit.js';
 import { limit, readLimit, ipBucket } from './ratelimit.js';
 import { PROVIDERS, MAP_VERSION, COMMON } from './providers.js';
 import * as Push from './push.js';
-import { LEDGER_ROUTES, PUBLIC_PATH, CORS, logOf, apiKey, quotaFor, dayCapFor, usageOf, cleanupStatements, forgetAccount, deleteStatements, int } from './ledger.js';
+import { LEDGER_ROUTES, PUBLIC_PATH, CORS, logOf, apiKey, cachedHead, quotaFor, dayCapFor, usageOf, cleanupStatements, forgetAccount, deleteStatements, int } from './ledger.js';
 import { logKey } from './note.js';
 import { directoryTool } from './tools.js';
+import { stats, checkStatsToken, markSeen } from './admin.js';
 import { BRAND } from './brand.js';
 export { ReceiptLog } from './log.js';
 
@@ -41,7 +42,7 @@ const ROUTES = [
   ['POST', /^\/v1\/device\/approve\/begin$/, 'webw', (c) => A.deviceApproveBegin(c.env, c.s, c.body)],
   ['POST', /^\/v1\/device\/approve\/finish$/, 'webw', (c) => A.deviceApproveFinish(c.env, c.s, c.body)],
   ['GET', /^\/v1\/me$/, 'session', async (c) => {
-    const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts FROM accounts WHERE id = ?').bind(c.s.accountId).first();
+    const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan FROM accounts WHERE id = ?').bind(c.s.accountId).first();
     const u = await usageOf(c.env, c.s.accountId);
     const { receipts, ...rest } = account || {};
     return {
@@ -99,6 +100,12 @@ const ROUTES = [
   ['DELETE', new RegExp(`^/v1/agent-keys/${ID}$`), 'webw', (c) => K.revoke(c.env, c.s, c.m[1])],
   // the free Web Bot Auth checker's one server call: fetch an agent's public key directory (SSRF-safe)
   ['GET', /^\/v1\/tools\/directory$/, 'tool', (c) => directoryTool(c)],
+  // the operator's private launch numbers (aggregate counts only; 404 without the STATS_TOKEN secret)
+  ['GET', /^\/v1\/admin\/stats$/, 'admin', async (c) => {
+    let head = null;
+    try { head = await cachedHead({ key: await logKey(c.env), log: c.log }); } catch { /* the log is optional for these numbers */ }
+    return stats(c.env, head);
+  }],
   ...LEDGER_ROUTES,
 ];
 
@@ -191,11 +198,14 @@ export async function handle(request, rawEnv, opts = {}) {
       // reads of the public log and the tool: no storage write per request
       if (guard === 'pub') await readLimit(env, await ipBucket(env, request, 'pubr'), Number(env.PUB_RPM) || 600, t);
       if (guard === 'tool') await readLimit(env, await ipBucket(env, request, 'tool'), Number(env.TOOL_RPM) || 10, t);
+      if (guard === 'admin') { await readLimit(env, await ipBucket(env, request, 'admin'), 30, t); await checkStatsToken(env, request); }
       // receipts: the hard limits (quotas, daily capacity) are reserved in D1; the per-key rate limit costs no D1 write
       if (guard === 'key') { c.k = await apiKey(env, request); await readLimit(env, 'key:' + c.k.id, 1200, t); }
       if (guard === 'session' || guard === 'write' || guard === 'webw') {
         c.s = await A.session(env, request, guard !== 'session');
         if (guard === 'webw' && c.s.kind !== 'web') throw new HttpError(403, 'passkey_required', `This needs your passkey in the ${BRAND.name} app.`);
+        const seen = markSeen(env, c.s.accountId);
+        if (seen) waitUntil(seen);
         // reads cost no D1 write for their limit; writes are counted in D1 so the limit holds across isolates
         if (guard === 'session') await readLimit(env, 'acct:' + c.s.accountId, 300, t);
         else await limit(env.DB, 'acct:' + c.s.accountId, 300, 60_000, t);
