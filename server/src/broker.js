@@ -135,7 +135,14 @@ export async function denyHold(env, sess, holdId) {
 
 // ---------------------------------------------------------------- proxy
 const PASS_REQ = ['accept', 'accept-language', 'content-type', 'user-agent', 'if-none-match', 'if-match', 'idempotency-key', 'stripe-version', 'x-github-api-version', 'prefer', 'range'];
-const DROP_RESP = new Set(['set-cookie', 'set-cookie2', 'alt-svc', 'strict-transport-security', 'content-encoding', 'content-length', 'transfer-encoding', 'connection']);
+// Upstream answers are served from our origin, so nothing in them may act on a browser there: no cookies, no CORS grants
+// (an upstream's "Access-Control-Allow-Origin: *" would otherwise apply to counterseal), no clearing of site data, no
+// policies, reports, preloads or refreshes. Our own headers replace them (PROXY_RESP_HEADERS).
+const DROP_RESP = new Set(['set-cookie', 'set-cookie2', 'alt-svc', 'strict-transport-security', 'content-encoding', 'content-length', 'transfer-encoding', 'connection',
+  'access-control-allow-origin', 'access-control-allow-credentials', 'access-control-allow-headers', 'access-control-allow-methods', 'access-control-expose-headers', 'access-control-max-age',
+  'clear-site-data', 'content-security-policy', 'content-security-policy-report-only', 'permissions-policy', 'report-to', 'reporting-endpoints', 'nel', 'link', 'refresh',
+  'x-frame-options', 'cross-origin-opener-policy', 'cross-origin-embedder-policy', 'cross-origin-resource-policy', 'origin-agent-cluster', 'service-worker-allowed', 'x-content-type-options']);
+export const PROXY_RESP_HEADERS = { 'content-security-policy': "default-src 'none'; sandbox; frame-ancestors 'none'", 'x-content-type-options': 'nosniff', 'cross-origin-resource-policy': 'same-origin', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY' };
 
 /** One canonical path, used for matching and sent upstream unchanged: no traversal, no encoded slashes or dots that
  * could escape the provider base, no empty segments (checked before the trailing slash is dropped, so "/x//" cannot
@@ -285,6 +292,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   if (len > MAX_RESP) throw new HttpError(502, 'upstream_too_large');
   const out = new Headers();
   for (const [k, v] of res.headers) if (!DROP_RESP.has(k.toLowerCase())) out.set(k, v);
+  for (const [k, v] of Object.entries(PROXY_RESP_HEADERS)) out.set(k, v);
   out.set('x-leash-decision', d.decision === 'hold' ? 'approved' : 'allowed');
   out.set('cache-control', 'no-store');
   // redirects are never followed; a Location header pointing elsewhere is passed through as-is for the caller to judge

@@ -159,6 +159,21 @@ test('ceilings on what one account can create: 50 vault keys, 200 live tokens, 2
   assert.equal((await w.req('POST', '/v1/keys', { cookie: c.cookie, body: { label: 'one more' } })).body.error, 'too_many_keys');
 });
 
+test('a proxied answer cannot act on a browser at our origin: upstream CORS, cookies, site-data clearing and policies are dropped', async () => {
+  const w = new World();
+  const u = await w.user();
+  const cred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'github', secret: GH } })).body.id;
+  const tok = await tokenFor(w, u, cred);
+  w.reply = () => new Response('<script>alert(1)</script>', { status: 200, headers: { 'content-type': 'text/html', 'access-control-allow-origin': '*', 'access-control-allow-credentials': 'true', 'clear-site-data': '"cookies", "storage"', 'content-security-policy': "script-src *", link: '</evil.js>; rel=preload', refresh: '0; url=https://evil.test', 'set-cookie': 'a=1', etag: '"keep-me"', 'x-github-request-id': 'ABC' } });
+  const r = await w.req('GET', '/p/github/repos/acme/app', { bearer: tok, ...bare });
+  assert.equal(r.status, 200);
+  for (const h of ['access-control-allow-origin', 'access-control-allow-credentials', 'clear-site-data', 'link', 'refresh', 'set-cookie']) assert.equal(r.headers.get(h), null, h);
+  assert.equal(r.headers.get('content-security-policy'), "default-src 'none'; sandbox; frame-ancestors 'none'");
+  assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(r.headers.get('cross-origin-resource-policy'), 'same-origin');
+  assert.equal(r.headers.get('etag'), '"keep-me"', 'ordinary API headers pass through'); assert.equal(r.headers.get('x-github-request-id'), 'ABC');
+});
+
 test('phone alerts belong to the browser: a CLI session cannot add, remove or test a device; a moved browser counts toward its new account', async () => {
   const w = new World();
   await withVapid(w);
