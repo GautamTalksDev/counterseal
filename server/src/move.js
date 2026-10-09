@@ -23,7 +23,8 @@ function onOldHost(env) {
   if (hosts(env).length < 2 || !rp(env).legacy) throw new HttpError(400, 'not_on_old_host', 'You are already on the new host.');
 }
 function onNewHost(env) {
-  if (hosts(env).length < 2 || rp(env).legacy) throw new HttpError(403, 'csrf');
+  if (hosts(env).length < 2) throw new HttpError(400, 'no_move', 'This server has only one host, so there is nothing to move.');
+  if (rp(env).legacy) throw new HttpError(403, 'csrf');
 }
 
 export async function linkBegin(env, sess) {

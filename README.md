@@ -117,6 +117,11 @@ npx leashcli token <credentialId> --label "coding agent, laptop"
 
 The CLI package keeps its first name, `leashcli`; it is the same service.
 
+**Two hosts.** The product lives at counterseal.gautamkhosla.com. The old host, leash.gautamkhosla.com, keeps serving
+the API and the proxy exactly as before (so leashcli 0.1.1 and configured agents keep working) and its `/app` sign-in for
+passkeys made there; its other pages redirect to counterseal. An account made on the old host moves with a one-time
+link (Account, "Move with passkey") that adds a counterseal passkey to the same account. See docs/DEPLOY.md.
+
 ### Connect your agent (MCP)
 
 ```json

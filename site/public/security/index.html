@@ -27,6 +27,7 @@
   <a href="#approvals">How approvals work</a>
   <a href="#receipts">How the public log is protected</a>
   <a href="#agentkeys">How agent keys work</a>
+  <a href="#hosts">Two hosts</a>
   <a href="#controls">Controls, mapped to OWASP</a>
   <a href="#limits">What it does not protect against</a>
   <a href="#report">Report a vulnerability</a>
@@ -79,6 +80,13 @@
     <li><strong>Every request signed.</strong> A bound token needs an RFC 9421 signature (tag <code>leash-pop</code>) covering the method, the full URL and, with a body, its SHA-256 digest; a window of 5 minutes at most; a nonce accepted once. Without it the call is refused before the policy, before the token's rate limit, and before anything reaches the provider.</li>
     <li><strong>No downgrade.</strong> A bound token never accepts an unsigned request, and a Web Bot Auth signature is not accepted in its place. The proof text, receipts, checkpoints and request signatures each start differently, so a signature made for one can never pass as another.</li>
     <li><strong>On the record.</strong> Your audit entry names the agent key behind each signed call; the public receipt says a registered key signed it.</li>
+  </ul>
+
+  <h2 id="hosts">Two hosts</h2>
+  <ul>
+    <li><strong>One allow list of two origins.</strong> counterseal.gautamkhosla.com (new passkeys) and leash.gautamkhosla.com (passkeys made before the move, the API and the proxy). Each has its own RP ID, picked from the request's Origin, never from anything the client sends; a passkey only works on its own host, and a challenge only on the host that issued it.</li>
+    <li><strong>Host-only cookies, same-origin writes.</strong> Sessions are per host; a write is accepted only from the origin of the host it was sent to.</li>
+    <li><strong>Moving an account</strong> needs a fresh passkey check on the old host. The one-time link is 32 random bytes, stored only as a hash, single use, valid 10 minutes, at most 3 an hour, and sits in the URL fragment, so it never reaches a server log or a Referer. Every step is in your audit log.</li>
   </ul>
 
   <h2 id="controls">Controls, mapped to OWASP</h2>

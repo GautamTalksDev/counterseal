@@ -60,6 +60,7 @@ npx leashcli token &lt;key-id&gt; --label coding-agent</pre></li>
     <li><strong>Connect your agent.</strong> Add the MCP server to your agent's config (see <a href="#mcp">below</a>).</li>
   </ol>
   <div class="callout">You can also do all of this in the app without the CLI. The CLI is just faster. The CLI package is called <code>leashcli</code> (the product's earlier name); it is the same service.</div>
+  <div class="callout">Counterseal used to live at leash.gautamkhosla.com. That host still answers the API and the proxy exactly as before, so existing tokens, agents and <code>leashcli</code> 0.1.1 keep working, and its <code>/app</code> still signs in with passkeys made there. If your account was made there, sign in on the old host, open Account and choose <strong>Move with passkey</strong>: a one-time link (10 minutes) opens this host, where you make a passkey for the same account. Your old passkey keeps working on the old host until you remove it.</div>
 
   <h2 id="concepts">Concepts</h2>
   <table>
@@ -224,6 +225,9 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>GET /v1/my/receipts</code>, <code>GET /v1/my/receipts/:index/bundle</code></td><td>Your receipts with openings; a fresh bundle for one.</td></tr>
     <tr><td><code>GET /v1/log/checkpoint</code>, <code>/v1/log/key</code>, <code>/v1/log/proof/inclusion?index=&amp;size=</code>, <code>/v1/log/proof/consistency?first=&amp;second=</code>, <code>/v1/log/entries?start=&amp;count=</code>, <code>/v1/stats</code></td><td>The public log. Anyone, any origin (CORS open), no account.</td></tr>
     <tr><td><code>GET /v1/tools/directory?agent=</code></td><td>Fetch an agent's Web Bot Auth key directory for the checker. Public, 10 a minute per network.</td></tr>
+    <tr><td><code>POST /v1/me/move/begin, /finish</code></td><td>On the old host: a one-time link to add a passkey on this host. Passkey.</td></tr>
+    <tr><td><code>POST /v1/move/begin, /finish</code></td><td>On this host: register a passkey with that link's token (in the body).</td></tr>
+    <tr><td><code>GET /v1/passkeys</code>, <code>DELETE /v1/passkeys/:id</code></td><td>Your passkeys and their hosts; remove one (web only, never the last).</td></tr>
     <tr><td><code>POST /v1/me/delete/begin, /finish</code></td><td>Delete your account and all its data. Passkey. Finish body <code>{"confirm":"delete", challengeId, credential}</code>. Web only.</td></tr>
     <tr><td><code>ANY /p/:provider/*</code></td><td>The agent proxy. Bearer <code>lsh_</code> token (and the agent's signature when the token is bound).</td></tr>
   </table>

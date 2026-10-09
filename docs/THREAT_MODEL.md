@@ -107,6 +107,30 @@ is written to the audit log. A CLI session or an agent cannot do it.
 **J9. A log that is down never blocks a decision.** Sealing runs after the response; a failing, full or misconfigured log
 only increments the skipped count. Test: *A log that is misconfigured or down*.
 
+### The domain move (two hosts)
+
+**D1. RP ID confusion.** The service answers on counterseal.gautamkhosla.com and leash.gautamkhosla.com. WebAuthn
+ceremonies use the RP ID of the host the request came from, chosen from an allow list of exactly these two by the
+Origin header (or the URL for clients without one); a client never names it. Each passkey records its RP ID and is
+refused on the other host; a challenge records its origin and is refused on the other host; the authenticator data's RP
+ID hash and the client data's origin are checked as before. Tests: `test/domain.test.js`.
+
+**D2. Cross-host CSRF.** The two hosts are the same site (gautamkhosla.com), so SameSite alone does not separate them.
+Writes need the `x-leash` header (a preflight, refused) and an Origin equal to the origin of the host they were sent to;
+cookies are host-only (`__Host-`). Test: *CSRF*.
+
+**D3. The move link.** Whoever holds a live link can add a passkey to that account, so the link is made only on the
+old host, by a web session, after a fresh passkey assertion; it is 32 random bytes, stored as SHA-256, bound to the
+account, single use (consumed atomically when the new passkey is saved, and only for the account it was made for),
+valid 10 minutes, at most 3 an hour per account, and audited. It lives in the URL fragment and POST bodies, so it is not
+in request lines, logs or Referer headers, and the page removes it from the address bar at once. Residual: anyone who
+sees the link within those 10 minutes (a shoulder, a shared screen) could use it first; the owner would see
+`passkey_added` in the audit log and the extra passkey under Account, and can remove it. Tests: *Move to Counterseal*,
+*Move link: expiry, replay, wrong account, rate limit*.
+
+**D4. Old clients.** leashcli 0.1.1 and agents keep calling leash.gautamkhosla.com; `/v1` and `/p` are never
+redirected there.
+
 ## Residual risks
 
 - Irreversible operations the map does not cover. Mitigation: conservative defaults, versioned map, user `hold` rules.

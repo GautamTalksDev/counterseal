@@ -60,7 +60,8 @@
   <table>
     <tr><th>Data</th><th>Why</th></tr>
     <tr><td>The name you type at sign-up</td><td>So the app can greet you. It can be anything. It is never in a public receipt.</td></tr>
-    <tr><td>Your passkey's public key and a usage counter</td><td>To verify sign-ins and approvals, and to detect cloned authenticators.</td></tr>
+    <tr><td>Your passkeys' public keys, a usage counter, and the host each was made on</td><td>To verify sign-ins and approvals, and to detect cloned authenticators. A passkey works only on the host it was made on (counterseal.gautamkhosla.com, or leash.gautamkhosla.com for older ones).</td></tr>
+    <tr><td>Move links (only if you move from the old host)</td><td>A hash of the one-time link, your account, and when it was made, used and expires (10 minutes). Deleted a day after it expires.</td></tr>
     <tr><td>API keys you add to the vault, <strong>encrypted</strong></td><td>To call the provider on your agent's behalf. Each key has its own AES-256-GCM key, wrapped by a master key held outside the database. We keep the last four characters in clear so you can tell keys apart.</td></tr>
     <tr><td>Agent tokens and receipts API keys, as hashes</td><td>To recognise your agents. The token or key itself is shown to you once and never stored.</td></tr>
     <tr><td>Agent public keys (optional)</td><td>The public half of each agent key you register, its label and when it was last used, to check your agents' signatures. Never a private key: we refuse any key that contains one.</td></tr>
@@ -97,7 +98,7 @@
   </ul>
 
   <h2 id="where">Where it lives</h2>
-  <p>Counterseal runs on Cloudflare Workers, Cloudflare D1 (accounts, vault, holds, audit) and a Cloudflare Durable Object (the public log). Cloudflare is our only processor. If you turn on alerts, your browser's push service delivers an empty wake-up message. Requests are handled at the Cloudflare location nearest to you; the database lives in one Cloudflare region.</p>
+  <p>Counterseal answers at counterseal.gautamkhosla.com and, for existing passkeys, the API and the proxy, at its earlier address leash.gautamkhosla.com; both are the same service with the same data and the same policy. It runs on Cloudflare Workers, Cloudflare D1 (accounts, vault, holds, audit) and a Cloudflare Durable Object (the public log). Cloudflare is our only processor. If you turn on alerts, your browser's push service delivers an empty wake-up message. Requests are handled at the Cloudflare location nearest to you; the database lives in one Cloudflare region.</p>
   <p>Workers Logs are turned off for this service, so we do not keep request logs or our own log lines. Cloudflare itself may still process and briefly keep request metadata, such as IP addresses, to run and protect its network, under its own privacy policy. We never write your keys, tokens or request bodies to any log.</p>
 
   <h2 id="keep">How long we keep it</h2>
