@@ -338,7 +338,8 @@ test('approvalBody keeps within the contract for odd inputs', () => {
   assert.equal(b.context, undefined, 'no usable working directory or session: no context');
   assert.ok(!b.detail.includes('\u0000'));
   const c = approvalBody('codex', { kind: 'shell', command: 'x', cwd: '/a/b/c\\d', session: 'ok.1' }, { rule: 'sh.rm', why: 'w', text: 't' }, [{}]);
-  assert.deepEqual(c.context, { cwd: 'c_d', session: 'ok.1' });
+  assert.deepEqual(c.context, { cwd: 'd', session: 'ok.1' }, 'the last segment, whichever slash is used');
+  assert.equal(approvalBody('codex', { kind: 'shell', command: 'x', cwd: 'C:\\' }, { rule: 'sh.rm', why: 'w', text: 't' }, [{}]).context, undefined);
 });
 
 test('loadConfig: defaults, the environment, and values that make no sense', () => {
@@ -478,6 +479,67 @@ test('install: mints a key with the CLI sign-in, writes the config (600), copies
   assert.equal(s.status, 0, s.stdout + s.stderr);
   assert.match(s.stdout, /the server accepts the key/);
   assert.match(s.stdout, /claude-code \(user\): the hook is in/);
+});
+
+test('install --agents none makes a key only (for the plugin): no hook, no scripts, and status does not complain about them', async () => {
+  const t = await signedIn();
+  const r = await cli(t, ['install', '--agents', 'none']);
+  assert.equal(r.status, 0, r.stderr);
+  const g = rj(t.cfgPath);
+  assert.equal(g.keyOnly, true); assert.deepEqual(g.agents, []);
+  assert.match(g.key, /^lsg_/);
+  assert.equal(existsSync(join(t.xdg, 'leash', 'guard')), false);
+  assert.equal(existsSync(join(t.dir, '.claude', 'settings.json')), false);
+  const s = await cli(t, ['status']);
+  assert.equal(s.status, 0, s.stdout);
+  assert.match(s.stdout, /key only: no hook was installed by the CLI/);
+});
+
+test('with the plugin switched on in Claude Code, install adds no second hook there (a second hook would deny an approved command)', async () => {
+  const t = await signedIn();
+  writeFileSync(join(t.dir, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'counterseal@counterseal': true } }));
+  const before = readFileSync(join(t.dir, '.claude', 'settings.json'), 'utf8');
+  const r = await cli(t, ['install', '--agents', 'claude-code,codex']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /plugin is switched on in Claude Code, so no hook was added/);
+  assert.equal(readFileSync(join(t.dir, '.claude', 'settings.json'), 'utf8'), before);
+  assert.ok(existsSync(join(t.dir, '.codex', 'hooks.json')), 'the other agents still get theirs');
+  assert.deepEqual(rj(t.cfgPath).agents, ['codex']);
+  assert.match((await cli(t, ['status'])).stdout, /the Counterseal plugin is switched on/);
+  const { pluginEnabled } = await import('../guard.mjs');
+  assert.equal(pluginEnabled({ HOME: t.dir }), true);
+  assert.equal(pluginEnabled({ HOME: join(t.dir, 'nowhere') }), false);
+  writeFileSync(join(t.dir, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'counterseal@counterseal': false, 'other@x': true } }));
+  assert.equal(pluginEnabled({ HOME: t.dir }), false);
+});
+
+test('installing again replaces the key and revokes the old one; removing one agent keeps the key for the rest', async () => {
+  const t = await signedIn();
+  assert.equal((await cli(t, ['install', '--agents', 'claude-code,codex'])).status, 0);
+  const first = rj(t.cfgPath);
+  const r = await cli(t, ['install', '--agents', 'claude-code,codex']);
+  assert.match(r.stdout, new RegExp(`The guard key this replaces \\(${first.keyId}\\) was revoked`));
+  const second = rj(t.cfgPath);
+  assert.notEqual(second.key, first.key);
+  assert.equal([...t.stub.state.keys.values()].find((k) => k.id === first.keyId).revoked, true);
+  assert.equal([...t.stub.state.keys.values()].find((k) => k.id === second.keyId).revoked, false);
+  const u = await cli(t, ['uninstall', '--agents', 'codex']);
+  assert.match(u.stdout, /key was kept for the other agents/);
+  assert.equal(existsSync(t.cfgPath), true);
+  assert.equal(JSON.stringify(rj(join(t.dir, '.claude', 'settings.json'))).includes('guard.mjs'), true, 'the other agent keeps its hook');
+});
+
+test('Windows working directories are read as Git Bash paths, so the project rules still work', async () => {
+  const { posixPath } = await import('../guard.mjs');
+  assert.equal(posixPath('C:\\Users\\me\\proj'), '/c/Users/me/proj');
+  assert.equal(posixPath('d:/work/x/'), '/d/work/x');
+  assert.equal(posixPath('/home/u'), '/home/u');
+  assert.equal(posixPath('relative/dir'), null);
+  assert.equal(posixPath(undefined), null);
+  const t = await setup({ mode: { 'claude-code': 'retry' } });
+  denied(await hook(t, 'claude-code', claude('rm -rf ../x', 'C:\\Users\\me\\proj')));
+  assert.equal((await hook(t, 'claude-code', claude('rm -rf build/out', 'C:\\Users\\me\\proj'))).stdout, '');
+  assert.equal(t.stub.state.log[0].body.context.cwd, 'proj', 'the working directory is sent as its last segment only');
 });
 
 test('install --dry-run writes nothing and mints no key', async () => {

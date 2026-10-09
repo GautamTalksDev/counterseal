@@ -1,0 +1,23 @@
+{
+  "name": "counterseal",
+  "displayName": "Counterseal",
+  "version": "0.1.0",
+  "description": "Holds a coding agent's irreversible shell commands (terraform destroy, git push --force, DROP TABLE, rm -rf outside the project and more) until you approve them with a passkey. A seatbelt, not a sandbox.",
+  "author": {
+    "name": "GautamTalksDev",
+    "url": "https://github.com/GautamTalksDev"
+  },
+  "homepage": "https://counterseal.gautamkhosla.com/docs/#guard",
+  "repository": "https://github.com/GautamTalksDev/leash",
+  "license": "Apache-2.0",
+  "keywords": ["guard", "approvals", "passkey", "safety", "hooks", "irreversible"],
+  "userConfig": {
+    "tokens": {
+      "type": "string",
+      "title": "Counterseal proxy tokens (optional)",
+      "description": "Only for the Counterseal MCP server: provider=token pairs separated by commas, for example github=lsh_..., stripe=lsh_.... Leave empty if you only want the guard.",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}

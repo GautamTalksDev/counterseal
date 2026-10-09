@@ -1,0 +1,17 @@
+{
+  "name": "counterseal",
+  "description": "Counterseal: hold a coding agent's irreversible commands until you approve them with a passkey",
+  "owner": {
+    "name": "GautamTalksDev",
+    "url": "https://github.com/GautamTalksDev"
+  },
+  "plugins": [
+    {
+      "name": "counterseal",
+      "source": "./plugins/counterseal",
+      "description": "Holds irreversible shell commands (terraform destroy, git push --force, DROP TABLE, rm -rf outside the project and more) until you approve them with a passkey. A seatbelt, not a sandbox.",
+      "category": "security",
+      "tags": ["guard", "approvals", "passkey", "safety"]
+    }
+  ]
+}

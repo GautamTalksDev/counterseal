@@ -21,6 +21,10 @@ export function sqlBlock(text) {
 }
 export const COPIES = [
   ['sdk/shellmap.mjs', 'cli/shellmap.mjs'],
+  ['cli/guard.mjs', 'plugins/counterseal/scripts/guard.mjs'],
+  ['cli/shellmap.mjs', 'plugins/counterseal/scripts/shellmap.mjs'],
+  ['cli/leash.mjs', 'plugins/counterseal/scripts/leash.mjs'],
+  ['cli/sign.mjs', 'plugins/counterseal/scripts/sign.mjs'],
 ];
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
