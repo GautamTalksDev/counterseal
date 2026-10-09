@@ -377,7 +377,7 @@ async function attempt(kind) {
       catch (e) { return show('Signed with a key nobody registered', reqLines(s.headers), e.status, e.json(), 'The attacker copied the real keyid, but only the registered public key is used to check the signature.'); }
     }
   } catch (e) {
-    if (e instanceof BrokerError) return show(kind === 'stolen' ? 'A stolen token, no signature' : 'Refused', reqLines({}), e.status, e.json(), kind === 'stolen' ? 'The token was copied, but not the agent’s private key. The call stops here, before the policy, the rate limit or the provider.' : '');
+    if (e instanceof BrokerError) return show(kind === 'stolen' ? 'A stolen token, no signature' : 'Refused', reqLines({}), e.status, e.json(), kind === 'stolen' ? 'The token was copied, but not the agent’s private key. The call stops here, before the policy, the token’s rate limit or the provider.' : '');
     return show('Error', [], 500, { error: String(e.message || e) });
   }
 }

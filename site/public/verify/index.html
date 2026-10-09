@@ -55,7 +55,7 @@
     <li>The inclusion proof walks from that leaf to the checkpoint's root (RFC 9162).</li>
     <li>If the bundle carries an opening, it matches the entry's submitter commitment.</li>
   </ol>
-  <p>A <strong>broker</strong> receipt (entry <code>source: "broker"</code>) was written by the broker itself for a decision it made; nobody else can write one. Any other receipt is what an agent reported, with a receipts API key. To check offline, use <code>sdk/receipts.mjs verify bundle.json --key &lt;verifier key&gt;</code> from the repository. See the <a href="/docs/#receipts">docs</a>.</p>
+  <p>A <strong>broker</strong> receipt (entry <code>source: "broker"</code>) was written by the broker itself for a decision it made; no agent or API key holder can write one. Any other receipt is what an agent reported, with a receipts API key. To check offline, use <code>sdk/receipts.mjs verify bundle.json --key &lt;verifier key&gt;</code> from the repository. See the <a href="/docs/#receipts">docs</a>.</p>
 </article>
 </main>
 <footer class="foot">

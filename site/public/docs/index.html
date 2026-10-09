@@ -54,7 +54,7 @@
     <li><strong>Create an account</strong> at <a href="/app">/app</a> with a passkey. No password or email.</li>
     <li><strong>Sign in the CLI.</strong> It shows a code; open <a href="/app#device">/app#device</a>, type the code, check where the sign-in started, and approve with your passkey. Never type a code someone sent you:
       <pre>npx leashcli login</pre></li>
-    <li><strong>Vault a key.</strong> Paste it once; it is encrypted and never written to disk:
+    <li><strong>Vault a key.</strong> Paste it once; it is encrypted in the vault and never saved on your machine:
       <pre>npx leashcli add github prod</pre></li>
     <li><strong>Mint a token</strong> for your agent (or do it in the app under Agent tokens):
       <pre>npx leashcli creds                      # find the key id
@@ -68,7 +68,7 @@ npx leashcli token &lt;key-id&gt; --label coding-agent</pre></li>
   <table>
     <tr><th>Term</th><th>What it is</th></tr>
     <tr><td>Vault</td><td>Where your real API keys live, encrypted. Keys go in and never come out.</td></tr>
-    <tr><td>Agent token</td><td>An <code>lsh_</code> token tied to one vaulted key, with a policy and an expiry (7 days by default, up to 90). This is all your agent ever sees.</td></tr>
+    <tr><td>Agent token</td><td>An <code>lsh_</code> token tied to one vaulted key, with a policy and an expiry (7 days by default, up to 90; one minted from the command line ends with its sign-in). This is all your agent ever sees.</td></tr>
     <tr><td>Irreversible map</td><td>A versioned list, per provider, of calls that can't be undone. Calls on it are held.</td></tr>
     <tr><td>Hold</td><td>A call the broker stopped and is waiting on you to approve or deny.</td></tr>
     <tr><td>Approval</td><td>Your passkey signing off on one held request. It lets that exact request through once, within ten minutes.</td></tr>
@@ -78,7 +78,7 @@ npx leashcli token &lt;key-id&gt; --label coding-agent</pre></li>
   </table>
 
   <h2 id="mcp">Connecting your agent (MCP)</h2>
-  <p><code>npx leashcli mcp</code> runs a local MCP server that gives your agent a request tool for each provider in <code>LEASH_TOKENS</code>. Add it to any MCP client's server config. List several providers separated by commas:</p>
+  <p><code>npx leashcli mcp</code> runs a local MCP server that gives your agent one request tool, <code>leash_request</code>, that can call every provider in <code>LEASH_TOKENS</code>. Add it to any MCP client's server config. List several providers separated by commas:</p>
   <pre>{
   "mcpServers": {
     "leash": {
@@ -96,7 +96,7 @@ npx leashcli token &lt;key-id&gt; --label coding-agent</pre></li>
 Authorization: Bearer lsh_...</pre>
   <pre>curl https://counterseal.gautamkhosla.com/p/github/repos/acme/app/pulls \
   -H "Authorization: Bearer lsh_..."</pre>
-  <p>The broker checks the call, swaps your token for the real key, forwards it to the provider and returns the response unchanged, plus an <code>x-leash-decision</code> header (<code>allowed</code> or <code>approved</code>). Cookies from upstream are stripped. Redirects are never followed.</p>
+  <p>The broker checks the call, swaps your token for the real key, forwards it to the provider and returns the response with an <code>x-leash-decision</code> header (<code>allowed</code> or <code>approved</code>). Upstream cookies, CORS grants and browser policies are dropped, the answer is marked <code>no-store</code> with a sandboxing CSP, and an answer over 10 MB is refused. Redirects are never followed.</p>
 
   <h2 id="held">When a call is held</h2>
   <p>A held call returns <strong>HTTP 428</strong>:</p>
@@ -107,7 +107,7 @@ Authorization: Bearer lsh_...</pre>
   "rule": "rw.mutation",
   "message": "Counterseal held this request because it cannot be undone..."
 }</pre>
-  <p>Open the link, check the method, host, path, reason and the request preview, and approve with your passkey. Then retry the <strong>exact same request</strong> once. Turn on phone alerts in the app, or run <code>npx leashcli watch</code> for a terminal bell and link for every new hold.</p>
+  <p>Open the link, check the method, host, path, reason and the request preview, and approve with your passkey. Then retry the <strong>exact same request</strong> once. Turn on phone alerts in the app, or run <code>npx leashcli watch</code> for a terminal bell and link for every new hold (with leashcli 0.1.1 its links point at leash.gautamkhosla.com; if your account is on counterseal, open the hold from the app or the alert).</p>
 
   <h2 id="policy">Token policies</h2>
   <p>Each token can carry a policy that narrows what its key can do. A policy can never widen it.</p>
@@ -125,7 +125,7 @@ Authorization: Bearer lsh_...</pre>
     <tr><td><code>allow</code></td><td>If present, only these calls pass.</td></tr>
     <tr><td><code>deny</code></td><td>Always refused with 403. Checked first.</td></tr>
     <tr><td><code>hold</code></td><td>Held for approval even if the map doesn't require it.</td></tr>
-    <tr><td><code>default</code></td><td><code>allow</code>, <code>hold</code> or <code>deny</code> for calls that match no rule.</td></tr>
+    <tr><td><code>default</code></td><td><code>allow</code>, <code>hold</code> or <code>deny</code> for calls that match no rule. With an <code>allow</code> list, <code>allow</code> refuses what is not on it.</td></tr>
     <tr><td><code>readOnly</code></td><td>Only GET and HEAD.</td></tr>
     <tr><td><code>perMinute</code></td><td>Rate limit for this token, 1 to 600. Default 120.</td></tr>
     <tr><td><code>unattendedIrreversible</code></td><td>Irreversible calls allowed without approval. Can only be set with your passkey, in the app.</td></tr>
@@ -138,10 +138,10 @@ Authorization: Bearer lsh_...</pre>
   <pre>{ "allow": [{ "method": "GET", "path": "/v1/**" }], "default": "hold" }</pre>
 
   <h2 id="providers">Providers and the map</h2>
-  <p>The broker supports GitHub, Cloudflare, Railway, Stripe and Supabase. The current irreversible map, with the reason for every rule, is on the <a href="/#map">homepage</a> and at <code>GET /v1/meta</code>. Every DELETE is held on GitHub, Cloudflare, Stripe and Supabase, and every Railway mutation is held unless every field is a redeploy or restart. Also held: force pushes, repo transfers, Stripe refunds and payouts, Cloudflare cache purges, and any SQL on Supabase or D1 that is not a single plain read (SELECT, WITH ... SELECT, EXPLAIN without ANALYZE, SHOW), including Supabase migrations and D1 imports. Paths are matched in one canonical form (no empty segments, no <code>;</code> path parameters, one trailing slash dropped, GitHub owner and repo lowercased) and that same path is sent upstream. The map ignores case and a format suffix such as <code>.json</code>, and a HEAD counts as a GET. A body the broker cannot read one way on a route with a body rule is held: a watched parameter that appears twice, in both the body and the query string, or as a case variant, and JSON with repeated keys. A request that carries a method override (<code>_method</code>) is held on every provider and cannot be pre-approved.</p>
+  <p>The broker supports GitHub, Cloudflare, Railway, Stripe and Supabase. The current irreversible map, with the reason for every rule, is on the <a href="/#map">homepage</a> and at <code>GET /v1/meta</code>. Every DELETE is held on GitHub, Cloudflare, Stripe and Supabase, and every Railway mutation is held unless every field is a redeploy or restart. Also held: force pushes, repo transfers, Stripe refunds and payouts, Cloudflare purges of everything, a whole host or a URL prefix, and any SQL on Supabase or D1 that is not a single plain read (SELECT, WITH ... SELECT, EXPLAIN without ANALYZE, SHOW), including Supabase migrations and D1 imports. Paths are matched in one canonical form (no empty segments, no <code>;</code> path parameters, escapes of plain letters decoded, one trailing slash dropped) and that canonical path is sent upstream. Rules match it without regard to case, the map also ignores a format suffix such as <code>.json</code>, and a HEAD counts as a GET. A body the broker cannot read one way on a route with a body rule is held: a watched parameter that appears twice, in both the body and the query string, or as a case variant, and JSON with repeated keys. A request that carries a method override (<code>_method</code>) is held on every provider and cannot be pre-approved.</p>
 
   <h2 id="receipts">Receipts: the public log</h2>
-  <p><em>If it was recorded, you can prove it.</em> When receipts are on, every decision the broker makes on a write becomes an entry in a public, append-only Merkle log (RFC 6962), sealed by a signed checkpoint (C2SP signed note, Ed25519): an allowed write, a hold, an approval, a denial, and the approved call going through. Reads (GET and HEAD) are not recorded.</p>
+  <p><em>If it was recorded, you can prove it.</em> When receipts are on, every decision the broker makes on a write becomes an entry in a public, append-only Merkle log (RFC 6962), sealed by a signed checkpoint (C2SP signed note, Ed25519): an allowed write, a hold, an approval, a denial, and the approved call going through. Allowed reads (GET and HEAD) are not recorded; a read that is held or denied is.</p>
   <p>A broker receipt holds only this, and it is public and permanent:</p>
   <pre>{ "v": 2, "source": "broker", "submitter": "&lt;salted commitment&gt;", "received_at": 1791300000000,
   "receipt": { "agent": "broker", "action": "DELETE api.github.com", "decision": "held",
@@ -151,7 +151,7 @@ Authorization: Bearer lsh_...</pre>
   <ul>
     <li><strong>On or off.</strong> New accounts start with receipts on. Accounts made before receipts existed keep them off until you turn them on in the app. Turning them off needs a fresh passkey check and is itself written to your audit log.</li>
     <li><strong>Limits.</strong> 10,000 receipts per account per month, 2,000 per account per UTC day, and 10,000 appends per UTC day for the whole log (it runs on Cloudflare's free plan). When a limit is reached the broker still decides and still writes your audit log; the receipt is skipped and counted as skipped in the app.</li>
-    <li><strong>Your bundles.</strong> The app lists your receipts and downloads a bundle for each (the entry, its inclusion proof and a signed checkpoint). A bundle verifies offline, with no account and no network. Your copy carries an <em>opening</em> (account id and salt) that proves the entry is yours; downloads leave it out unless you keep it, and you should not publish bundles that carry it.</li>
+    <li><strong>Your bundles.</strong> The app lists your receipts and downloads a bundle for each (the entry, its inclusion proof and a signed checkpoint). A bundle verifies offline, with no account and no network. Your copy carries an <em>opening</em> (account id, key id and salt) that proves the entry is yours; downloads leave it out unless you keep it, and you should not publish bundles that carry it.</li>
   </ul>
 
   <h3 id="report-receipts">Agents logging their own actions</h3>
@@ -165,19 +165,19 @@ Authorization: Bearer lsh_...</pre>
   <h3 id="verify">Verifying a receipt</h3>
   <p>Open <a href="/verify/">Verify a receipt</a> and paste or open a bundle: it is checked in your browser against this log's key. Or offline with the SDK in this repository (<code>sdk/receipts.mjs</code>, zero dependencies):</p>
   <pre>node sdk/receipts.mjs verify bundle.json --key "&lt;verifier key from GET /v1/log/key&gt;"</pre>
-  <p>Pin the verifier key: publish <code>GET /v1/log/key</code> once and keep it with your auditors. A bundle's own <code>log</code> field is only a hint. Any two checkpoints can be linked with a consistency proof, so a log that rewrote history would be caught by anyone who kept an old checkpoint.</p>
+  <p>Pin the verifier key: fetch <code>GET /v1/log/key</code> once and keep it with your auditors. A bundle's own <code>log</code> field is only a hint. Any two checkpoints can be linked with a consistency proof, so a log that rewrote history would be caught by anyone who kept an old checkpoint.</p>
 
   <h2 id="agent-keys">Agent keys: prove who</h2>
   <p>Give each agent its own Ed25519 key. You register the public half with a proof of possession; the private half never leaves the agent's machine. A token bound to the key then only works on requests that key signed, so a token copied from a log, a config file or a screen is useless on its own, and every decision on a signed request records which agent key made it.</p>
   <pre>npx leashcli agent-key agent-key.json --label laptop-agent     # makes the key (file mode 600) and registers it
 npx leashcli token &lt;key-id&gt; --agent-key &lt;agent-key-id&gt;          # a token bound to it</pre>
-  <p>Then run the MCP server with <code>LEASH_AGENT_KEY=agent-key.json</code> next to <code>LEASH_TOKENS</code>; it signs every call. You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys arrive in leashcli 0.2.1; until it is published, use the app or the signer in <code>cli/sign.mjs</code>.</p>
+  <p>Then run the MCP server of leashcli 0.2.1 with <code>LEASH_AGENT_KEY=agent-key.json</code> next to <code>LEASH_TOKENS</code>; it signs every call. (0.2.1 is in the repository and not yet on npm: <code>npx leashcli</code> still runs 0.1.1, which cannot sign, so a bound token refuses its calls.) You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys arrive in leashcli 0.2.1; until it is published, use the app or the signer in <code>cli/sign.mjs</code>.</p>
   <p>The signature is an RFC 9421 HTTP Message Signature with this profile:</p>
-  <pre>Signature-Input: sig1=("@method" "@target-uri" "content-digest");created=1791300000;expires=1791300060;keyid="&lt;JWK thumbprint&gt;";alg="ed25519";nonce="&lt;random&gt;";tag="leash-pop"
+  <pre>Signature-Input: sig1=("@method" "@target-uri" "content-digest" "content-type");created=1791300000;expires=1791300060;keyid="&lt;JWK thumbprint&gt;";alg="ed25519";nonce="&lt;random&gt;";tag="leash-pop"
 Signature: sig1=:&lt;base64 Ed25519 signature&gt;:
 Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
   <ul>
-    <li><code>@method</code> and <code>@target-uri</code> are always covered, and <code>content-digest</code> whenever there is a body (RFC 9530). Only those plus <code>@authority</code>, <code>@path</code>, <code>@query</code> and <code>content-type</code> may be covered.</li>
+    <li><code>@method</code> and <code>@target-uri</code> are always covered, and <code>content-digest</code> (RFC 9530) and <code>content-type</code> whenever there is a body. Only those plus <code>@authority</code>, <code>@path</code> and <code>@query</code> may be covered.</li>
     <li>The window from <code>created</code> to <code>expires</code> is 5 minutes at most. A nonce is required and accepted once per key.</li>
     <li><code>keyid</code> is the RFC 7638 thumbprint of the registered key (RFC 8037 for Ed25519).</li>
     <li>A bound token never falls back to unsigned requests. A Web Bot Auth signature (tag <code>web-bot-auth</code>) is not accepted here.</li>
@@ -191,8 +191,8 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
   <table>
     <tr><th>Command</th><th>What it does</th></tr>
     <tr><td><code>leash login</code></td><td>Sign in this machine for 7 days. You type the code it shows in the app and approve with your passkey. Tokens it mints end with the sign-in; revoke it in the app under Account.</td></tr>
-    <tr><td><code>leash logout</code></td><td>End the session on the server (0.2.1) and forget it on this machine.</td></tr>
-    <tr><td><code>leash add &lt;provider&gt; [label]</code></td><td>Vault a key. Prompts for it; never written to disk.</td></tr>
+    <tr><td><code>leash logout</code></td><td>End the session on the server (0.2.1) and forget it on this machine. Tokens it minted keep working until they end or you revoke the sign-in in the app.</td></tr>
+    <tr><td><code>leash add &lt;provider&gt; [label]</code></td><td>Vault a key. Prompts for it; encrypted in the vault, never saved on your machine.</td></tr>
     <tr><td><code>leash creds</code></td><td>List vaulted keys (id, provider, label, last four).</td></tr>
     <tr><td><code>leash token &lt;key-id&gt; [--label x] [--ttl hours] [--policy file.json]</code></td><td>Mint an agent token. 0.2.1 adds <code>--agent-key &lt;id&gt;</code>.</td></tr>
     <tr><td><code>leash tokens</code></td><td>List active tokens.</td></tr>
@@ -229,8 +229,13 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>GET /v1/tools/directory?agent=</code></td><td>Fetch an agent's Web Bot Auth key directory for the checker. Public, 10 a minute per network.</td></tr>
     <tr><td><code>POST /v1/me/move/begin, /finish</code></td><td>On the old host: a one-time link to add a passkey on this host. Passkey.</td></tr>
     <tr><td><code>POST /v1/move/begin, /finish</code></td><td>On this host: register a passkey with that link's token (in the body).</td></tr>
-    <tr><td><code>GET /v1/passkeys</code>, <code>DELETE /v1/passkeys/:id</code></td><td>Your passkeys and their hosts; remove one (web only, never the last).</td></tr>
-    <tr><td><code>POST /v1/me/delete/begin, /finish</code></td><td>Delete your account and all its data. Passkey. Finish body <code>{"confirm":"delete", challengeId, credential}</code>. Web only.</td></tr>
+    <tr><td><code>GET /v1/passkeys</code>, <code>POST /v1/passkeys/:id/remove/begin, /finish</code></td><td>Your passkeys and their hosts; remove one with a passkey check, which also signs out your other browsers (web only, never the last).</td></tr>
+    <tr><td><code>POST /v1/device/start</code>, <code>POST /v1/device/poll</code></td><td>Command line sign-in (RFC 8628 device code): a code to type at <code>/app#device</code>, valid 5 minutes, 10 starts an hour per network; poll every <code>interval</code> seconds.</td></tr>
+    <tr><td><code>POST /v1/device/lookup</code>, <code>/v1/device/deny</code>, <code>/v1/device/approve/begin, /finish</code></td><td>In the app: where a sign-in started, then deny it, or approve it with a passkey. Web only.</td></tr>
+    <tr><td><code>GET /v1/sessions</code>, <code>DELETE /v1/sessions/:id</code></td><td>Command line sign-ins of the last 7 days; revoke one and every token, agent key and receipts key it made, even after it signed out (revoking is web only).</td></tr>
+    <tr><td><code>GET /v1/alerts</code></td><td>What a phone alert shows: waiting holds, and command line sign-ins and passkeys added in the last 15 minutes.</td></tr>
+    <tr><td><code>GET /v1/push/key</code>, <code>POST /v1/push/subscribe</code>, <code>/unsubscribe</code>, <code>/test</code></td><td>Phone and desktop alerts (Web Push, no payload), up to 10 devices. Web only.</td></tr>
+    <tr><td><code>POST /v1/me/delete/begin, /finish</code></td><td>Delete your account and everything linked to it (public log entries stay, unlinked). Passkey. Finish body <code>{"confirm":"delete", challengeId, credential}</code>. Web only.</td></tr>
     <tr><td><code>ANY /p/:provider/*</code></td><td>The agent proxy. Bearer <code>lsh_</code> token (and the agent's signature when the token is bound).</td></tr>
   </table>
 
@@ -239,16 +244,18 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><th>Status</th><th>Error</th><th>Meaning</th></tr>
     <tr><td>401</td><td><code>leash_token_required</code>, <code>token_invalid</code></td><td>Missing, expired or revoked token.</td></tr>
     <tr><td>401</td><td><code>agent_signature_required</code>, <code>bad_agent_signature</code>, <code>agent_signature_replayed</code>, <code>agent_key_revoked</code></td><td>The token is bound to an agent key and the request was not signed by it, was signed wrongly (the <code>reason</code> says how), reused a nonce, or the key was revoked.</td></tr>
-    <tr><td>401</td><td><code>api_key_required</code>, <code>api_key_invalid</code></td><td>Missing or revoked receipts API key.</td></tr>
+    <tr><td>401</td><td><code>api_key_required</code>, <code>api_key_invalid</code></td><td>Missing, revoked or expired receipts API key.</td></tr>
     <tr><td>402</td><td><code>quota</code>, <code>daily_quota</code></td><td>Your monthly or daily receipts are used up. Nothing was recorded.</td></tr>
-    <tr><td>403</td><td><code>leash_denied</code></td><td>A policy deny rule or readOnly blocked the call.</td></tr>
+    <tr><td>403</td><td><code>leash_denied</code></td><td>A policy deny rule, readOnly, or the allow list or default blocked the call.</td></tr>
     <tr><td>403</td><td><code>wrong_provider</code></td><td>The token belongs to a different provider.</td></tr>
     <tr><td>403</td><td><code>passkey_required</code></td><td>Needs the web app and your passkey.</td></tr>
     <tr><td>403</td><td><code>csrf</code></td><td>Web write without the right Origin or <code>x-leash</code> header.</td></tr>
     <tr><td>409</td><td><code>replay</code>, <code>key_taken</code>, <code>signer_taken</code></td><td>A signed receipt sent twice; a public key registered to another account.</td></tr>
+    <tr><td>409</td><td><code>too_many_credentials</code>, <code>too_many_tokens</code>, <code>too_many_keys</code>, <code>too_many_agent_keys</code>, <code>too_many_devices</code></td><td>A ceiling per account: 50 vault keys, 200 live tokens, 20 receipts keys, 20 agent keys, 10 alert devices.</td></tr>
     <tr><td>413</td><td><code>too_large</code></td><td>Request body over the limit.</td></tr>
     <tr><td>428</td><td><code>held_for_approval</code></td><td>Irreversible. Approve, then retry once.</td></tr>
     <tr><td>429</td><td><code>slow_down</code></td><td>Too many requests. The message says when to retry.</td></tr>
+    <tr><td>429</td><td><code>too_many_holds</code></td><td>20 requests from this token (or 100 on the account) are already waiting for approval; nothing new is held or alerted until a human decides.</td></tr>
     <tr><td>503</td><td><code>log_at_capacity</code></td><td>The public log reached its daily capacity. Nothing was recorded; try after 00:00 UTC.</td></tr>
   </table>
 </article>

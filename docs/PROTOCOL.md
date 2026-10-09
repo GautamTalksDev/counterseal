@@ -23,8 +23,8 @@ Written by the broker for its own decision (no API can set `source`):
 ```
 
 Broker decisions: `allowed` (a write the policy let through), `held`, `approved` (a passkey approved a hold; `meta.passkey`
-is true), `executed` (the approved call went through), `denied` (a policy denial or a human denying a hold). Reads (GET,
-HEAD) are not recorded. `parent` is the account's own audit entry hash (`/v1/audit` returns it as `hash`, with the entry's
+is true), `executed` (the approved call went through), `denied` (a policy denial or a human denying a hold). Allowed reads
+(GET, HEAD) are not recorded; a read that is held or denied is. `parent` is the account's own audit entry hash (`/v1/audit` returns it as `hash`, with the entry's
 `receipt` index); the audit detail names the path, the token, the agent key and the approving passkey's fingerprint.
 
 `submitter` is a per-entry salted commitment, so entries cannot be grouped by account:

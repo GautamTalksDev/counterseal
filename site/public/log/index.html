@@ -32,7 +32,7 @@
 <article class="prose">
   <p class="kicker">Record</p>
   <h1>The public log</h1>
-  <p class="lead">If it was recorded, you can prove it. Every decision the broker makes on a write is sealed here as a receipt. This page reads the log's public API and checks every signature and proof in your browser.</p>
+  <p class="lead">If it was recorded, you can prove it. Every decision the broker makes on a write is sealed here as a receipt. This page reads the log's public API and, in your browser, checks the latest checkpoint's signature, its consistency with the one you saw last, and the inclusion proof of any receipt you open.</p>
 
   <h2 id="head">The head</h2>
   <dl class="lx-head">
@@ -60,9 +60,9 @@
   <ul>
     <li><strong>Decision</strong>: what the broker did with one call: <code>allowed</code> (a write that went through), <code>held</code>, <code>approved</code>, <code>denied</code>, or <code>executed</code> (an approved call going through).</li>
     <li><strong>Action</strong>: the method and the provider's API host. Never the path, query string or body.</li>
-    <li><strong>Rule</strong>: the irreversible map rule that matched, and the map version. <code>agent_key</code> means a registered agent key signed the request; <code>passkey</code> means a passkey approved it.</li>
-    <li><strong>parent</strong>: the hash of the account's own private audit entry, so its owner can open the receipt later. <strong>submitter</strong> is a salted commitment, different for every entry, so entries cannot be linked to an account or to each other.</li>
-    <li>Entries with <code>source: "broker"</code> were written by the broker itself; nobody else can write one. Others were reported by an agent with a receipts API key.</li>
+    <li><strong>Rule</strong>: the rule that decided (an irreversible map rule, or a policy rule such as <code>policy.deny</code>), and the map version. <code>agent_key</code> means a registered agent key signed the request; <code>passkey</code> means a passkey approved it.</li>
+    <li><strong>parent</strong>: the hash of the account's own private audit entry, so its owner can open the receipt later. <strong>submitter</strong> is a salted commitment, different for every entry, so that field does not link entries to an account or to each other.</li>
+    <li>Entries with <code>source: "broker"</code> were written by the broker itself; no agent or API key holder can write one. Others were reported by an agent with a receipts API key.</li>
   </ul>
   <p>To check a receipt bundle you downloaded, open <a href="/verify/">Verify a receipt</a>. To check one offline, see <a href="/docs/#verify">the docs</a>.</p>
 </article>

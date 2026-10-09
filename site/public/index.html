@@ -101,7 +101,7 @@
     <p class="sub">Prompts can be ignored. A proxy can't. Counterseal holds your real keys, checks which agent is asking, stops what can't be undone and writes down every decision, so the rules hold even when the agent goes off script.</p>
     <div class="cards4">
       <article class="card rv"><div class="viz"><div class="chip-row"><code>ghp_9f3K&#8230;</code><span class="mini">AES-256-GCM</span></div><span class="down" aria-hidden="true">&#8595;</span><div class="chip-row acc"><code>lsh_7c1e&#8230;</code><span class="mini">acme/app &#183; 7d</span></div></div>
-        <h3>The key stays in the vault</h3><p>Each secret is encrypted with its own AES-256-GCM key. Agents get <code>lsh_</code> tokens: scoped, expiring, revocable. Leak one and you leaked nothing.</p></article>
+        <h3>The key stays in the vault</h3><p>Each secret is encrypted with its own AES-256-GCM key. Agents get <code>lsh_</code> tokens: scoped, expiring, revocable. Leak one and the real key stays safe: revoke the token, or bind it to an agent key so it is useless alone.</p></article>
       <article class="card rv"><div class="viz"><div class="sigrow"><code>sig1=:Kx9q&#8230;:</code><span class="okb">ed25519</span></div><div class="sigrow dim"><span>window 5 min &#183; nonce once</span></div></div>
         <h3>Prove who</h3><p>Give each agent its own Ed25519 key to sign its requests (RFC 9421). Bind a token to that key and the token alone is useless.</p></article>
       <article class="card rv"><div class="viz"><div class="rule"><i class="g"></i><code>GET /pulls</code><span>allowed</span></div><div class="rule"><i class="g"></i><code>POST /issues</code><span>allowed</span></div><div class="rule held"><i></i><code>POST /refunds</code><span>held</span></div></div>
@@ -172,7 +172,7 @@
       <div>
         <p class="kicker"><span class="num">II</span>Prove who</p>
         <h2 id="pw-h" class="h2">A stolen token is <em>just paper.</em></h2>
-        <p class="sub">Bind a token to an agent key and every request must carry that agent's own signature: an RFC 9421 HTTP Message Signature over the method, the full URL and the body, valid for five minutes at most, each nonce once. The private key never leaves the agent. Try to get past it.</p>
+        <p class="sub">Bind a token to an agent key and every request must carry that agent's own signature: an RFC 9421 HTTP Message Signature over the method, the full URL, the body and its content type, valid for five minutes at most, each nonce once. The private key never leaves the agent. Try to get past it.</p>
       </div>
     </div>
     <div class="tamper rv">
@@ -189,7 +189,7 @@
       </div>
       <div class="console big" aria-live="polite"><p class="desk-h" id="twTitle">The broker's answer</p><pre id="twOut" class="mono">Pick an attempt. Each one runs the broker's own signature checks, here in your browser.</pre></div>
     </div>
-    <p class="fine center">Run a site? <a href="/tools/web-bot-auth/">Check any agent's Web Bot Auth signature</a> with the free checker. It runs in your browser and stores nothing.</p>
+    <p class="fine center">Run a site? <a href="/tools/web-bot-auth/">Check any agent's Web Bot Auth signature</a> with the free checker. It runs in your browser and keeps nothing you paste.</p>
   </div>
 </section>
 
@@ -198,7 +198,7 @@
   <div class="wrap">
     <p class="kicker"><span class="num">III</span>Record</p>
     <h2 id="rc-h" class="h2">If it was recorded, <em>you can prove it.</em></h2>
-    <p class="sub">Every allow, hold, approval and denial on a write becomes a receipt in a public, append-only Merkle log (RFC 6962), sealed by a signed checkpoint. Anyone can check a receipt offline against the log's key. Receipts are on by default for new accounts; reads are not recorded.</p>
+    <p class="sub">Every allow, hold, approval and denial on a write becomes a receipt in a public, append-only Merkle log (RFC 6962), sealed by a signed checkpoint. Anyone can check a receipt offline against the log's key. Receipts are on by default for new accounts; allowed reads are not recorded.</p>
     <div class="ledger rv">
       <div class="tree-wrap">
         <div class="tree-h"><p class="desk-h">This tab's log</p><span class="mono dim" id="treeInfo"></span></div>
@@ -243,7 +243,7 @@
     <h2 id="su-h" class="h2">Sixty seconds to the <em>second seal.</em></h2>
     <ol class="setup">
       <li class="rv"><span class="sn">1</span><h3>Sign in</h3><p>Type the code it shows in the app, check where it started, approve with a passkey.</p><pre class="mono">npx leashcli login</pre></li>
-      <li class="rv"><span class="sn">2</span><h3>Vault a key</h3><p>Paste it once. It is encrypted and never written to disk.</p><pre class="mono">npx leashcli add stripe</pre></li>
+      <li class="rv"><span class="sn">2</span><h3>Vault a key</h3><p>Paste it once. It is encrypted in the vault and never saved on your machine.</p><pre class="mono">npx leashcli add stripe</pre></li>
       <li class="rv"><span class="sn">3</span><h3>Connect your agent</h3><p>Add the MCP server to any MCP client's config. Your agent now calls through Counterseal.</p><pre class="mono">{
   "mcpServers": {
     "leash": {
@@ -253,7 +253,7 @@
     }
   }
 }</pre></li>
-      <li class="rv"><span class="sn">4</span><h3>Give it a seal</h3><p>Make an agent key in the app: it is generated in your browser and only the public half is sent. Bind tokens to it and they only work on requests it signed.</p><a class="lnk-arrow" href="/docs/#agent-keys">Agent keys in the docs</a></li>
+      <li class="rv"><span class="sn">4</span><h3>Give it a seal</h3><p>Make an agent key in the app: it is generated in your browser and only the public half is sent. Bind tokens to it and they only work on requests it signed (signing from the MCP server needs leashcli 0.2.1, coming to npm).</p><a class="lnk-arrow" href="/docs/#agent-keys">Agent keys in the docs</a></li>
     </ol>
     <p class="fine">The CLI keeps its first name, <code>leashcli</code>; it is the same service.</p>
   </div>
@@ -265,11 +265,11 @@
     <p class="kicker">Security</p>
     <h2 id="se-h" class="h2">Built like it guards production. <em>Because it does.</em></h2>
     <div class="cards3">
-      <article class="card rv"><h3>Passkeys only</h3><p>No passwords to phish. The same tap that signs you in approves held calls.</p></article>
+      <article class="card rv"><h3>Passkeys only</h3><p>No passwords to phish. The same passkey that signs you in approves held calls.</p></article>
       <article class="card rv"><h3>The CLI can't approve</h3><p>An agent on your laptop can read the CLI's files, so a CLI session can never approve a hold.</p></article>
       <article class="card rv"><h3>Envelope encryption</h3><p>A key per secret, wrapped by a master key, bound to its row. Never logged, never returned by any API.</p></article>
       <article class="card rv"><h3>No downgrade</h3><p>A token bound to an agent key never accepts an unsigned request, and a replayed nonce is refused.</p></article>
-      <article class="card rv"><h3>Receipts nobody can forge</h3><p>Only the broker writes broker receipts. The log refuses to sign under a different name or key.</p></article>
+      <article class="card rv"><h3>Receipts no agent can forge</h3><p>Only the broker writes broker receipts; no agent or API key can. The log refuses to sign under a different name or key.</p></article>
       <article class="card rv"><h3>Locked-down web</h3><p>Strict CSP with Trusted Types, HSTS, no third-party requests. This page loads nothing from anywhere else.</p></article>
     </div>
     <p class="stat rv"><b>150+</b> automated tests &#183; zero runtime dependencies in the Worker, the CLI and the SDK &#183; <a href="/security/">How it is protected, and where it stops</a></p>

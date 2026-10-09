@@ -1,6 +1,6 @@
-// Second adversarial pass (10 Oct 2026 launch review): approval fatigue and push spam, a forkable audit chain, audit
+// Second adversarial pass (9 Oct 2026, before launch): approval fatigue and push spam, a forkable audit chain, audit
 // gaps, passkey removal, resource ceilings (OWASP API4), proxied answers acting on a browser at our origin, push
-// devices from a CLI session, and the site's security headers on pages the Worker serves.
+// devices from a CLI session, the site's security headers on pages the Worker serves, and policy globs that backtrack.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

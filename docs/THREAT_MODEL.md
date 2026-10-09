@@ -19,13 +19,13 @@ can read on the machine it runs on, an attacker who prompt-injects that agent ca
 |---|---|---|
 | The agent (honest but wrong, or prompt-injected) | Use its `lsh_` token; sign with its agent key; read the CLI config on its machine | See a real key; approve a hold; mint a token with pre-approved irreversible calls; turn receipts off |
 | Someone holding a leaked `lsh_` token, unbound | Make the calls that token's policy allows, until it expires or is revoked | Exceed the policy; get past a hold; read the key |
-| Someone holding a leaked `lsh_` token bound to an agent key | Nothing: every request is refused before the policy, the rate limit or the upstream | Use it without the agent's private key |
-| Someone holding a stolen CLI session | List holds; mint ordinary tokens; register agent keys and bind tokens to them, for at most 7 days | Approve holds; mint pre-approved tokens; read keys; delete vaulted keys; revoke agent keys; turn receipts on or off; approve or revoke CLI sign-ins; delete the account; keep anything it made after the owner revokes it |
+| Someone holding a leaked `lsh_` token bound to an agent key | Nothing: every request is refused before the policy, the token's rate limit or the upstream | Use it without the agent's private key |
+| Someone holding a stolen CLI session | List holds; mint ordinary tokens; register agent keys and bind tokens to them; deny holds; for at most 7 days | Approve holds; mint pre-approved tokens; read keys; delete vaulted keys; revoke agent keys; turn receipts on or off; approve or revoke CLI sign-ins; delete the account; keep anything it made after the owner revokes it |
 | A device-code phisher (starts `leashcli login` and sends someone the code) | Get a CLI session in that person's account if they sign in, type the code, ignore the country and network shown, confirm they ran it and approve with their passkey | Put the code in a link the app accepts; reuse a code; keep the session past 7 days or past a revoke; act unseen (audit entry and device alert at sign-in) |
 | Someone holding a receipts API key (`lsr_`) | Record receipts within the account's quotas (public, reported, never `source: "broker"`) | Make a broker receipt; record signed receipts without the signer; replay a signed receipt |
 | A phishing site | Ask for a passkey | Get an assertion the service accepts (origin and RP ID are bound into it) |
 | A malicious web page in the user's browser | Send requests | Write to the API (SameSite=Strict, Origin check, custom header, no CORS on private routes) |
-| Anyone on the internet | Read every public log entry, checkpoint and proof; use the signature checker | Learn a path, body, name, email, IP or account id from the log; link entries to each other or to an account |
+| Anyone on the internet | Read every public log entry, checkpoint and proof; use the signature checker | Learn a path, body, name, email, IP or account id from the log; link entries to each other or to an account through the submitter field (reported receipts carry whatever labels their agent chose) |
 | An attacker with a database dump | Read ciphertext, hashes, agent public keys, receipt openings | Decrypt keys without the master key; use token or session hashes |
 | The operator (holds the log key and the database) | Sign checkpoints; see which account sent which entry | Rewrite the log without anyone who kept a checkpoint noticing |
 
@@ -76,11 +76,12 @@ detect and remediate. Mitigations:
   differ, and asks "Did you just run leashcli login yourself?"; the approve button needs that confirmation and "No, deny
   it" comes first (the CLI gets `access_denied`).
 - *Small and short.* Codes: single use, 5 minutes, 8 characters from 28 without modulo bias. CLI sessions: 7 days, and
-  a token a CLI session mints never outlives it. Starts: 10 an hour per network; lookups and denials: 10 per 10 minutes
+  a token or receipts key a CLI session makes never outlives it. Starts: 10 an hour per network; lookups and denials: 10 per 10 minutes
   per account; approvals: 10 an hour per account.
 - *Detect and remediate.* Each sign-in is audited (`cli_signin_approved`, `cli_signed_in`, `cli_signin_denied`) and
   wakes the owner's devices: "A command line was signed in" opens a one-tap revoke, which deletes the session and
-  revokes every token, agent key and receipts key it made (`cli_session_revoked`). Revoking needs a web session.
+  revokes every token, agent key and receipts key it made (`cli_session_revoked`), also after the session signed itself
+  out or expired (the list and the alert come from the audit log). Revoking needs a web session.
 - The CLI prints whose account it signed in to, so a person whose own code was approved by someone else (signing them
   into a stranger's vault) notices at once.
 Residual: a person who types a code they were sent, ignores the warnings and approves has signed that command line in
@@ -88,6 +89,25 @@ for up to 7 days or until they revoke it; it still cannot approve a hold. A VPN 
 CLI sessions made before migration 0005 keep their 30-day lifetime, and the tokens they minted are not revoked with
 them (revoke those tokens one by one).
 Tests: `test/cli-signin.test.js`.
+
+**S12. Approval fatigue.** Someone holding a leaked, unbound token makes many distinct held requests, each an alert,
+hoping a tired human taps approve. A token can have at most 20 requests waiting and an account 100 (`429
+too_many_holds`, nothing held or alerted), and held requests wake the owner's devices at most once a minute per
+account; the alert says how many are waiting. Test: *approval fatigue* (`test/second-pass.test.js`).
+
+**S13. A forked audit chain.** Parallel writes for one account could both append after the same head, and
+`/v1/audit/verify` then reports the chain broken. The insert succeeds only if the head is still the one the entry commits
+to, in the same statement, and retries otherwise. Test: *the audit chain does not fork*.
+
+**S14. Losing the account through a passkey.** A stolen cookie could remove the owner's other passkeys, and a browser
+signed in with a passkey added through a leaked move link stayed in after that passkey was removed. Removing a passkey
+needs a fresh passkey ceremony and signs out every other web session; a passkey added through a move link alerts every
+device. Test: *removing a passkey*.
+
+**S15. Unbounded resources and catastrophic backtracking.** Ceilings per account (50 vault keys, 200 live tokens, 20
+receipts keys, 20 agent keys, 10 devices) and bounded lists keep one account from using up the shared D1 budget. Policy
+globs compile to regular expressions; three `**` against a long path backtracked for seconds, so a glob may use `**` at
+most twice and one wildcard per segment. Tests: *ceilings*, *policy globs*.
 
 ### The joints between the three parts
 
@@ -111,7 +131,7 @@ type or host. Tests: *Prove who*, *R2*.
 missing key fails closed (`agent_key_revoked`). Test: *Signature downgrade and cross-protocol*.
 
 **J5. Replay across the three parts.** One Ed25519 key may sign four kinds of text: an RFC 9421 signature base (starts
-with `"@`), a receipt's canonical JSON (starts with `{`), a receipts signer proof (`witness/signer-proof/v2\n`) and an
+with `"`, a quoted component name), a receipt's canonical JSON (starts with `{`), a receipts signer proof (`witness/signer-proof/v2\n`) and an
 agent key proof (`leash/agent-key-proof/v1\n`). <!-- brand:history --> Because the first bytes differ, a signature over one
 can never verify as another. Proof texts name the server origin or log name and the account, and challenges are single
 use and bound to the account. Test: an agent key proof is refused as a signer proof.

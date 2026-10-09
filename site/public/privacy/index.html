@@ -45,15 +45,15 @@
   <ul>
     <li>No passwords, no email address required, no tracking, no analytics, no ads, no third-party scripts.</li>
     <li>Your face or fingerprint never reaches us. We only ever see a public key and a signature.</li>
-    <li>API keys you vault are encrypted, and no API or person on our side can read them back to you or anyone else.</li>
-    <li>One cookie: your sign-in session. Nothing else is stored in your browser, unless you turn on phone alerts (a service worker and a push subscription).</li>
+    <li>API keys you vault are encrypted. No API returns them, and decrypting one needs the master key, which only the running service uses.</li>
+    <li>One cookie: your sign-in session. Nothing else is stored in your browser, unless you turn on phone alerts (a service worker and a push subscription) or open the public log (it remembers the last checkpoint it showed you, in this browser only).</li>
     <li>If receipts are on, a short record of each decision is published in a public log, permanently. It never contains a path, body, key, token, name, email or IP address. See <a href="#public">What is public</a>.</li>
     <li>You can delete your account and everything we hold about you yourself, at any time, in the app. Public log entries stay, but nothing on our side links them to you any more.</li>
   </ul>
 
   <h2 id="faceid">Face ID and passkeys</h2>
-  <p>When you sign in or approve a held call, Counterseal uses a <strong>passkey</strong> (the WebAuthn standard). Your phone or laptop asks you for Face ID, Touch ID, Windows Hello, a fingerprint or your device PIN. That check happens <strong>entirely on your device</strong>, inside its secure hardware.</p>
-  <p>If it passes, your device signs a one-time challenge from us with a private key that never leaves it. We receive the signature and check it against the <strong>public key</strong> you registered. We never receive, store or have any way to see your face, fingerprint, PIN or private key.</p>
+  <p>When you sign in or approve a held call, Counterseal uses a <strong>passkey</strong> (the WebAuthn standard). Your phone or laptop asks you for Face ID, Touch ID, Windows Hello, a fingerprint or your device PIN. That check happens <strong>on your device</strong>.</p>
+  <p>If it passes, your device signs a one-time challenge from us with a private key kept by your device or your passkey manager, never by us. We receive the signature and check it against the <strong>public key</strong> you registered. We never receive, store or have any way to see your face, fingerprint, PIN or private key.</p>
 
   <h2 id="demo">The demos on our homepage</h2>
   <p>Every demo on our homepage <strong>runs only in your browser</strong>. The live refund at the top, the signature attempts and the log you can try to rewrite use keys your browser makes for that page and then throws away. Nothing you do there is sent to us or stored. "Approve with passkey" in a demo is a stand-in button: it does not use your passkey, Face ID or camera. The homepage makes two requests to us: it loads the public list of irreversible calls (<code>/v1/meta</code>) and reads the public log's latest signed checkpoint (<code>/v1/stats</code>). Its fonts, images and videos come from this site; nothing loads from anywhere else.</p>
@@ -69,14 +69,14 @@
     <tr><td>Agent public keys (optional)</td><td>The public half of each agent key you register, its label and when it was last used, to check your agents' signatures. Never a private key: we refuse any key that contains one.</td></tr>
     <tr><td>Signature nonces</td><td>A random value from each signed agent request, with the key's fingerprint, so a signed request cannot be replayed. Deleted once the signature has expired (minutes).</td></tr>
     <tr><td>Held calls: method, host, path, rule, time, decision, and a preview of the request (query string and up to 2 KB of the body or SQL)</td><td>So you can see exactly what you are approving. The preview is deleted a day after you decide; the audit log keeps only a fingerprint (hash) of it.</td></tr>
-    <tr><td>Your audit log</td><td>Writes, holds, approvals (with a short fingerprint of the passkey that approved), token and key changes, hash-chained so tampering is detectable, and the index of each entry's public receipt.</td></tr>
+    <tr><td>Your audit log</td><td>Writes, holds and denials (with the method, host and the first 300 characters of the path), approvals (with a short fingerprint of the passkey that approved), token and key changes, hash-chained so tampering is detectable, and the index of each entry's public receipt.</td></tr>
     <tr><td>Receipt openings (if receipts are on)</td><td>For each of your public entries, a random salt and the id of the key that sent it, kept with the log so only you can prove the entry is yours.</td></tr>
     <tr><td>Receipts counters (if you use receipts)</td><td>How many receipts your account recorded this month and today, and how many decisions could not be sealed, to enforce the limits. Kept for about 13 months. Replay records of signed receipts: 30 minutes.</td></tr>
     <tr><td>When your account was last used (a time, updated at most once a day)</td><td>Only to count how many accounts were active in the last week, as a total. Nothing about what you did.</td></tr>
     <tr><td>Session records, as a hash</td><td>To keep you signed in. Web sessions expire after 12 hours and command line (CLI) sessions after 7 days; you can revoke a CLI session in the app.</td></tr>
     <tr><td>Where each command line sign-in started, coarse: the country and the network's name (for example "Deutsche Telekom") and number, as Cloudflare reports them. Never the IP address.</td><td>So the approval screen can show where a <code>leashcli login</code> started next to where you are (a sign-in from another country is a warning sign), and so you can review and revoke command line sign-ins. While you approve, your own browser's country and network are compared with it and not stored. Kept with the pending code (5 minutes; the network number only there) and with the CLI session it becomes (7 days at most). The country and network name of each sign-in, approval or denial also stay in your audit log.</td></tr>
     <tr><td>Push addresses of devices where you turned on alerts (optional)</td><td>To wake those devices when a call is held or a command line is signed in to your account. The push carries no content, so Google, Apple, Mozilla or Microsoft (whoever runs your browser's push service) learn only that a wake-up was sent, never why. Your device then fetches the alert text (the method, host and path of the held call, or the country and network a sign-in came from) from us over your own session; it is shown on your device and may appear on its lock screen.</td></tr>
-    <tr><td>A salted hash of your IP address (IPv6 grouped by /64)</td><td>Only for rate limiting, deleted after the limit window ends (a minute; a day for the sign-up limit). Some limits are kept only in memory and never stored.</td></tr>
+    <tr><td>A salted hash of your IP address (IPv6 grouped by /64)</td><td>Only for rate limiting, deleted after the limit window ends (a minute; an hour for command line sign-in starts; a day for the sign-up limit). Some limits are kept only in memory and never stored.</td></tr>
   </table>
 
   <h2 id="public">What is public</h2>
@@ -108,7 +108,7 @@
   <ul>
     <li>Sign-in challenges and device login codes: minutes. Rate limit records: until the window ends. Signature nonces: until the signature expires. Signed-receipt replay records: 30 minutes.</li>
     <li>Sessions: until they expire (12 hours on the web, 7 days for the command line), you sign out or you revoke them.</li>
-    <li>Vault keys, tokens, receipts keys and agent keys: until you delete or revoke them.</li>
+    <li>Vault keys: until you delete them. Tokens, receipts keys and agent keys: until you delete your account; revoked or expired ones are kept, marked as such, for your audit trail.</li>
     <li>Holds, audit log and receipt openings: until you delete your account.</li>
     <li>Public log entries: permanently.</li>
   </ul>

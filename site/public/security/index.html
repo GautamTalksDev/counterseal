@@ -65,6 +65,7 @@
     <li>You open the link (or the app, or the phone alert) and see the exact method, host, path, the rule that matched, why, and a preview of the request itself: the SQL, the GraphQL or the body.</li>
     <li>You approve with your passkey: Face ID, Touch ID, Windows Hello or a security key. The check happens on your device; the broker only verifies a signature.</li>
     <li>The approval covers <strong>that exact request</strong>, identified by a hash of its method, path, query, content type and body, <strong>once</strong>, for <strong>ten minutes</strong>. A different request, or the same one twice, is held again.</li>
+    <li>A token can have at most 20 requests waiting and an account 100, and held requests wake your devices at most once a minute, so a flood of requests cannot wear you down into approving one.</li>
   </ol>
 
   <h2 id="receipts">How the public log is protected</h2>
@@ -72,7 +73,7 @@
     <li><strong>Append only, one writer.</strong> The log is an RFC 6962 Merkle tree in one Durable Object, so appends are strictly in order and the tree cannot fork; each append is written in one storage transaction, so a failure leaves nothing half written.</li>
     <li><strong>Signed checkpoints.</strong> Every append returns a C2SP signed note (Ed25519) over the tree size and root, and an inclusion proof. Any two checkpoints can be linked with a consistency proof. The log refuses to sign under a different name or key than the one it started with.</li>
     <li><strong>Broker receipts cannot be forged.</strong> Only the broker writes entries with <code>source: "broker"</code>; the receipts API fills only the inner receipt and refuses unknown fields.</li>
-    <li><strong>Nothing secret goes public.</strong> Broker receipts carry the method, the provider host, the decision, the rule, the time and a hash of your audit entry; never a path, body, key, token, name, email, IP address or account id. Each entry's submitter is a salted commitment, so entries cannot be linked to an account or to each other.</li>
+    <li><strong>Nothing secret goes public.</strong> Broker receipts carry the method, the provider host, the decision, the rule, the time and a hash of your audit entry; never a path, body, key, token, name, email, IP address or account id. Each entry's submitter is a salted commitment, so that field does not link entries to an account or to each other.</li>
     <li><strong>Signed receipts.</strong> A receipts key bound to a signer accepts only receipts that signer signed, with a <code>ts</code> within 10 minutes, each signature once (also across keys); small-order and non-canonical keys and signatures are refused, and binding needs a proof of possession over a text that names the log and the account.</li>
     <li><strong>Limits.</strong> 10,000 receipts per account per month, 2,000 per account per day, 10,000 appends per day for the whole log, reserved before appending; a refused batch records and counts nothing. When a limit is hit, the broker still decides; the receipt is skipped and counted.</li>
   </ul>
@@ -80,38 +81,38 @@
   <h2 id="agentkeys">How agent keys work</h2>
   <ul>
     <li><strong>Proof of possession.</strong> Registering a key needs a signature over a fresh single-use challenge naming this server and your account. Private keys are refused. A key belongs to one account.</li>
-    <li><strong>Every request signed.</strong> A bound token needs an RFC 9421 signature (tag <code>leash-pop</code>) covering the method, the full URL and, with a body, its SHA-256 digest; a window of 5 minutes at most; a nonce accepted once. Without it the call is refused before the policy, before the token's rate limit, and before anything reaches the provider.</li>
+    <li><strong>Every request signed.</strong> A bound token needs an RFC 9421 signature (tag <code>leash-pop</code>) covering the method, the full URL and, with a body, its SHA-256 digest and content type; a window of 5 minutes at most; a nonce accepted once. Without it the call is refused before the policy, before the token's rate limit, and before anything reaches the provider.</li>
     <li><strong>No downgrade.</strong> A bound token never accepts an unsigned request, and a Web Bot Auth signature is not accepted in its place. The proof text, receipts, checkpoints and request signatures each start differently, so a signature made for one can never pass as another.</li>
     <li><strong>On the record.</strong> Your audit entry names the agent key behind each signed call; the public receipt says a registered key signed it.</li>
   </ul>
 
   <h2 id="hosts">Two hosts</h2>
   <ul>
-    <li><strong>One allow list of two origins.</strong> counterseal.gautamkhosla.com (new passkeys) and leash.gautamkhosla.com (passkeys made before the move, the API and the proxy). Each has its own RP ID, picked from the request's Origin, never from anything the client sends; a passkey only works on its own host, and a challenge only on the host that issued it.</li>
+    <li><strong>One allow list of two origins.</strong> counterseal.gautamkhosla.com (new passkeys) and leash.gautamkhosla.com (passkeys made before the move, the API and the proxy). Each has its own RP ID, picked from the request's Origin (or its URL) out of that list of two; a client never names an RP ID; a passkey only works on its own host, and a challenge only on the host that issued it.</li>
     <li><strong>Host-only cookies, same-origin writes.</strong> Sessions are per host; a write is accepted only from the origin of the host it was sent to.</li>
-    <li><strong>Moving an account</strong> needs a fresh passkey check on the old host. The one-time link is 32 random bytes, stored only as a hash, single use, valid 10 minutes, at most 3 an hour, and sits in the URL fragment, so it never reaches a server log or a Referer. Every step is in your audit log.</li>
+    <li><strong>Moving an account</strong> needs a fresh passkey check on the old host. The one-time link is 32 random bytes, stored only as a hash, single use, valid 10 minutes, at most 3 an hour, and sits in the URL fragment, so it never reaches a server log or a Referer. Making the link and the passkey it adds are in your audit log, and the new passkey alerts your devices.</li>
   </ul>
 
   <h2 id="cli">Signing in the command line</h2>
   <ul>
     <li><strong>The code is typed, never linked.</strong> <code>leashcli login</code> shows a code and a plain address. You type the code in the app yourself; the app never takes a code from a link and warns when a link tries. To phish a sign-in, someone has to get you to type a stranger's code by hand, on a page that tells you not to.</li>
     <li><strong>You see what you grant, and from where.</strong> Before your passkey, the app shows what the command line will be able to do, when the sign-in started, and the country and network it started from next to yours, with a warning when they differ. "No, deny it" comes first.</li>
-    <li><strong>Small and short.</strong> A code works once, for 5 minutes. A command line session lasts 7 days, and a token it mints ends with it. Sign-in starts (10 an hour per network), code lookups (10 per 10 minutes per account) and approvals (10 an hour per account) are limited.</li>
-    <li><strong>Seen and undone.</strong> Every sign-in is in your audit log and wakes your devices with "A command line was signed in"; one tap revokes it and every token, agent key and receipts key it made.</li>
+    <li><strong>Small and short.</strong> A code works once, for 5 minutes. A command line session lasts 7 days, and a token or receipts key it makes ends with it. Sign-in starts (10 an hour per network), code lookups (10 per 10 minutes per account) and approvals (10 an hour per account) are limited.</li>
+    <li><strong>Seen and undone.</strong> Every sign-in is in your audit log and wakes your devices with "A command line was signed in"; one tap revokes it and every token, agent key and receipts key it made, even after it signed itself out.</li>
   </ul>
 
   <h2 id="controls">Controls, mapped to OWASP</h2>
   <table>
     <tr><th>Area</th><th>Control</th><th>OWASP</th></tr>
-    <tr><td>Sign-in</td><td>Passkeys only (WebAuthn, user verification required, origin and RP ID checked, single-use 5-minute challenges, signature counters)</td><td>A07</td></tr>
+    <tr><td>Sign-in</td><td>Passkeys only (WebAuthn, user verification required, origin and RP ID checked, single-use 5-minute challenges, signature counters); removing a passkey needs a fresh passkey check and signs out your other browsers</td><td>A07</td></tr>
     <tr><td>Sessions</td><td><code>__Host-</code> cookie, HttpOnly, Secure, SameSite=Strict, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app with everything they made</td><td>A07</td></tr>
     <tr><td>CSRF</td><td>Web writes require the same Origin and an <code>x-leash: 1</code> header; CORS only on the public log's read endpoints</td><td>A01</td></tr>
     <tr><td>Authorization</td><td>Every query is scoped by account; another account's holds, tokens, keys, agent keys and receipts return 404 (tested)</td><td>A01, API1</td></tr>
-    <tr><td>Privilege separation</td><td>CLI sessions can mint tokens and register agent keys but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, change receipts, or approve or revoke command line sign-ins</td><td>A01, A06</td></tr>
+    <tr><td>Privilege separation</td><td>CLI sessions can mint and revoke tokens, deny holds, and make agent keys and receipts keys, but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, turn public receipts on or off, add alert devices, remove passkeys, or approve or revoke command line sign-ins</td><td>A01, A06</td></tr>
     <tr><td>Secrets</td><td>Envelope encryption with AAD per row; no API returns a secret; tokens, sessions and receipts keys stored as hashes</td><td>A04</td></tr>
     <tr><td>Injection</td><td>All SQL is parameterized; request bodies are size-capped while streaming and parsed as JSON only</td><td>A05</td></tr>
     <tr><td>SSRF</td><td>Upstream hosts fixed per provider; no redirects; push endpoints limited to known push services; the checker's directory fetch only reaches https public host names on port 443, the fixed well-known path, no redirects, 5 s, 64 KB</td><td>A01, API7</td></tr>
-    <tr><td>Rate limits</td><td>Per token (policy, default 120 a minute), per account, per IP (IPv6 by /64, salted hash), per receipts key; receipts quotas and a global daily cap</td><td>API4</td></tr>
+    <tr><td>Rate limits</td><td>Per token (policy, default 120 a minute), per account, per IP (IPv6 by /64, salted hash), per receipts key; receipts quotas and a global daily cap; at most 20 waiting holds per token and 100 per account; ceilings per account (50 vault keys, 200 live tokens, 20 receipts keys, 20 agent keys, 10 alert devices); policy globs limited so they cannot backtrack</td><td>API4</td></tr>
     <tr><td>Headers</td><td>Strict CSP with Trusted Types, no innerHTML anywhere, HSTS, COOP, CORP, <code>X-Frame-Options: DENY</code>, Permissions-Policy, self-hosted fonts, no third-party requests</td><td>A02</td></tr>
     <tr><td>Supply chain</td><td>Zero runtime dependencies in the Worker, the CLI and the SDK; GitHub Actions pinned by SHA</td><td>A03, A08</td></tr>
     <tr><td>Integrity</td><td>Hash-chained audit log with a verify endpoint; RFC 6962 log with signed checkpoints; approvals bound to the exact request</td><td>A08</td></tr>

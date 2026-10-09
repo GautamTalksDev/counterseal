@@ -21,7 +21,7 @@ The agent's signed request is the seal. Your passkey approval is the counterseal
 
 In **late April 2026**, an AI coding agent working on a staging credential mismatch searched a repo, found a Railway API token in
 an unrelated file, and called `volumeDelete`. PocketOS lost its production database **and every volume backup in nine
-seconds**. The token had been created to manage custom domains. Every prompt-level guardrail was switched on.
+seconds**. The token had been created to manage custom domains. Its prompt-level guardrails were switched on.
 ([AI Incident Database](https://incidentdatabase.ai/reports/7311), [PointGuard AI](https://pointguardai.com/ai-security-incidents/ai-agent-deletes-production-database-in-nine-seconds-and-apologizes))
 
 Prompts are not a permission system. Counterseal moves the decision out of the model, and keeps the proof:
@@ -115,8 +115,8 @@ npx leashcli creds                      # note the credential id
 npx leashcli token <credentialId> --label "coding agent, laptop"
 ```
 
-The CLI package keeps its first name, `leashcli`; it is the same service. A CLI sign-in lasts 7 days, and tokens it mints
-end with it. The code is typed in the app, never sent as a link: never type a code someone sent you, because whoever
+The CLI package keeps its first name, `leashcli`; it is the same service. A CLI sign-in lasts 7 days, and tokens and receipts
+keys it makes end with it. The code is typed in the app, never sent as a link: never type a code someone sent you, because whoever
 approves a code gives that command line their account. Each sign-in alerts your devices and can be revoked in the app
 (Account), with every token and key it made.
 
@@ -152,6 +152,9 @@ npx leashcli agent-key agent-key.json --label laptop-agent     # CLI 0.2.1 (in t
 npx leashcli token <credentialId> --agent-key <agentKeyId>
 # MCP env: { "LEASH_TOKENS": "github=lsh_...", "LEASH_AGENT_KEY": "/path/to/agent-key.json" }
 ```
+
+Signing from the MCP server needs CLI 0.2.1 too: `npx leashcli` still runs 0.1.1 from npm, which cannot sign, so a
+bound token would refuse its calls. Until 0.2.1 is published, run `cli/leash.mjs` from this repository.
 
 ### Any SDK or script
 
@@ -212,7 +215,7 @@ node dev/local.js 8790                          # http://localhost:8790 (passkey
 
 ## Deploy
 
-See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), one additive migration, `wrangler deploy`.
+See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), two additive migrations (0004, 0005), `wrangler deploy`.
 
 ## Status and roadmap
 
@@ -220,9 +223,10 @@ Brokers GitHub, Cloudflare, Railway, Stripe and Supabase; phone and desktop aler
 payload-free); public receipts; agent keys. Next: Vercel, Fly.io, AWS (SigV4 re-signing), Neon, PlanetScale; two-person
 approval; SSO for teams; external witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
 
-Counterseal follows the architecture of the IETF draft
-[Credential Broker for Agents (CB4A)](https://www.ietf.org/archive/id/draft-hartman-credential-broker-4-agents-00.html):
-policy decisions separated from credential delivery, short-lived scoped credentials, and approval tiers.
+Counterseal maps to the proxy-gateway model of the IETF draft
+[Credential Broker for Agents (CB4A)](https://www.ietf.org/archive/id/draft-hartman-credential-broker-4-agents-00.html)
+(-00, an individual draft): scoped credentials that only work through the broker, policy decisions outside the agent,
+and approval for the calls that matter.
 
 ## License
 

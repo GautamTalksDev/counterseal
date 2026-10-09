@@ -25,7 +25,7 @@ export async function checkSignature({ method = 'GET', url, headers = {}, direct
         `agent: ${clean(v.agent)}`,
         `keyid: ${clean(v.keyid)}`,
         `valid from ${iso(v.created)} to ${iso(v.expires)}`,
-        v.nonce ? 'The nonce was not checked: this tool stores nothing, so it cannot tell a replayed request. Your server must keep nonces (see the docs).'
+        v.nonce ? 'The nonce was not checked: this tool keeps no record of requests, so it cannot tell a replayed one. Your server must keep nonces (see the docs).'
           : 'No nonce: a signature without one can be replayed until it expires (5 minutes at most).',
         '',
         'This checks the signature against the key directory shown above. It does not say who runs that origin.',

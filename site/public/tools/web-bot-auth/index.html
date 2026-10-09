@@ -52,7 +52,7 @@
     <li><code>tag="web-bot-auth"</code>, <code>created</code> and <code>expires</code> (a window of 1 hour or less, not expired, not from the future), and <code>keyid</code>, the RFC 7638 thumbprint of a key in the directory.</li>
     <li>The covered components include <code>@authority</code> (or <code>@target-uri</code>) and the request's own <code>Signature-Agent</code> member; members with an unsupported type or a path are ignored.</li>
     <li>The RFC 9421 signature base is rebuilt from the exact <code>Signature-Input</code> text and verified with Ed25519.</li>
-    <li><strong>Not checked:</strong> replay. This tool stores nothing, so it cannot tell a request it has seen before. Your server must keep nonces.</li>
+    <li><strong>Not checked:</strong> replay. This tool keeps no record of requests, so it cannot tell one it has seen before. Your server must keep nonces.</li>
   </ul>
 
   <h2 id="fetch">Fetching the directory</h2>

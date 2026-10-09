@@ -15,9 +15,9 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 |---|---|
 | The agent never holds a real key | Envelope-encrypted vault; agents hold `lsh_` proxy tokens; no API returns a secret |
 | Irreversible calls wait for a human | Versioned irreversible map; approval needs a fresh passkey assertion from a web session and covers one exact request (method, host, path, query, content type, body hash) once, within 10 minutes |
-| A leaked token alone is useless (for bound tokens) | A token bound to an agent key needs an RFC 9421 signature by that key on every request: method, full URL, body digest and content type covered, 5 minute window, each nonce once; checked before the policy, the rate limit and any upstream call; never downgraded to unsigned |
+| A leaked token alone is useless (for bound tokens) | A token bound to an agent key needs an RFC 9421 signature by that key on every request: method, full URL, body digest and content type covered, 5 minute window, each nonce once; checked before the policy, the token's rate limit and any upstream call; never downgraded to unsigned |
 | A decision on the record cannot be quietly rewritten | Per-account hash-chained audit log (`/v1/audit/verify`); with receipts on, each decision is also an entry in a public RFC 6962 Merkle log with Ed25519-signed C2SP checkpoints; consistency proofs show the log only grew |
-| Nobody can forge a broker receipt | `source: "broker"` is set only by the broker, outside the receipt; the receipts API fills only the inner receipt and refuses unknown fields |
+| No agent or API key holder can forge a broker receipt | `source: "broker"` is set only by the broker, outside the receipt; the receipts API fills only the inner receipt and refuses unknown fields |
 | Public receipts leak nothing private | Broker receipts carry the method, the provider host, the decision, rule id, map version, two booleans, the time and the hash of the private audit entry; per-entry salted submitter commitments; never a path, query, body, key, token, account id, name, email or IP (tested) |
 | A signed reported receipt was signed by that key | Receipts keys bound to an Ed25519 signer (proof of possession naming the log and the account) accept only receipts that signer signed, with a `ts` within 10 minutes, each signature once; small-order and non-canonical keys and signatures are refused |
 
@@ -26,11 +26,11 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | Area | Control | OWASP |
 |---|---|---|
 | Sign-in | Passkeys only (WebAuthn, user verification required, origin and RP ID checked, single-use 5-minute challenges, signature counters); a passkey already registered gets 409 | A07 |
-| Sessions | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app together with every token, agent key and receipts key they made; a token a CLI session mints never outlives it | A07 |
+| Sessions | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app together with every token, agent key and receipts key they made, even after they signed out; a token or receipts key a CLI session makes never outlives it | A07 |
 | CLI sign-in (device code) | Against device-code phishing (RFC 8628 section 5.4, the IETF cross-device flows BCP): the code is never in a link (no `verification_uri_complete`; the app ignores a code in its address and warns); the person types it, sees what is granted and the country and network the sign-in started from next to their own (Cloudflare request data, never an IP), and must confirm they ran it before the passkey; "No, deny it" sends `access_denied`. Codes: 8 characters from a 28-character alphabet without modulo bias, single use, 5 minutes. Limits: 10 starts an hour per network, 10 lookups or denials per 10 minutes and 10 approvals an hour per account. Each sign-in is audited and wakes the owner's devices with a one-tap revoke | A07, API2, API4 |
 | CSRF | Web writes require an `Origin` equal to the host they were sent to, from an allow list of two (counterseal and the old leash host), and an `x-leash: 1` header; CORS only on the public log's read endpoints | A01 |
-| Two hosts | Each host has its own RP ID, chosen by the request's Origin from that allow list, never by the client; passkeys and challenges are refused on the other host; host-only cookies; the old host serves `/v1`, `/p` and `/app` and redirects other pages | A01, A07 |
-| Moving an account | One-time link made after a fresh passkey assertion on the old host: 32 random bytes, stored hashed, single use, bound to the account, 10 minutes, 3 an hour, in the URL fragment and POST bodies only, audited | A07 |
+| Two hosts | Each host has its own RP ID, chosen by the request's Origin (or its URL) from that allow list; a client never names one; passkeys and challenges are refused on the other host; host-only cookies; the old host serves `/v1`, `/p` and `/app` and redirects other pages | A01, A07 |
+| Moving an account | One-time link made after a fresh passkey assertion on the old host: 32 random bytes, stored hashed, single use, bound to the account, 10 minutes, 3 an hour, in the URL fragment and POST bodies only, audited; the passkey it adds alerts the owner's devices | A07 |
 | Authorization | Every query is scoped by `account_id`; another account's holds, tokens, credentials, agent keys, receipts keys and receipts return 404 (tested) | A01, API1 |
 | Privilege separation | CLI sessions can mint tokens and register agent keys, but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, turn receipts on or off, approve, deny or revoke CLI sign-ins, or delete the account | A01, A06 |
 | Secrets | AES-256-GCM per secret, data key wrapped by a master key (Workers secret), AAD binds account, row and provider; tokens, sessions and receipts keys stored as hashes; agent keys public only (a JWK with `d` is refused) | A04 |
@@ -88,3 +88,21 @@ the content type; tighter limits on reads that reach the log's Durable Object; t
 log key whose private part does not match its public part is refused; receipt batches halved (25, 12 signed) for a CPU
 margin on Workers Free; proxied paths are never written to log lines. Tests: `server/test/joints.test.js`,
 `server/test/merge-hardening.test.js`, `server/test/migration.test.js`.
+
+## Second pass before launch, 9 Oct 2026
+
+- CLI sign-in against device-code phishing (see the CLI sign-in row above and threat model S11); a command line that
+  signs itself out cannot hide what it made; the sign-in page is always counterseal, where accounts are made.
+- Approval fatigue: at most 20 waiting holds per token and 100 per account (`429 too_many_holds`), and held requests
+  alert devices at most once a minute per account.
+- The audit hash chain no longer forks when one account writes in parallel (the insert checks the head it commits to).
+  Agent keys and receipts keys made and revoked are now in the audit log.
+- Removing a passkey needs a fresh passkey ceremony and signs out the account's other browsers; a passkey added through
+  a move link alerts every device.
+- Ceilings per account (OWASP API4): 50 vault keys, 200 live tokens, 20 receipts keys; list responses are bounded.
+- Policy globs: `**` at most twice and one wildcard per segment (three `**` against a long path backtracked for seconds).
+- Proxied answers cannot act on a browser at the counterseal origin: upstream CORS, Clear-Site-Data, policies, Link and
+  Refresh are dropped; a sandboxing CSP, nosniff and CORP are set.
+- Push devices can be added, removed or tested only from a web session.
+- Pages served through the Worker get the site's security headers even if `_headers` is not applied to them.
+Tests: `server/test/cli-signin.test.js`, `server/test/second-pass.test.js`.

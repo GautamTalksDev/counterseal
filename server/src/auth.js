@@ -17,7 +17,7 @@ import { BRAND } from './brand.js';
 import { limit, callerKey } from './ratelimit.js';
 import { notify } from './push.js';
 
-// CLI sessions last 7 days (30 before 10 Oct 2026): a sign-in phished out of someone is a smaller prize, and nothing a
+// CLI sessions last 7 days (30 before migration 0005): a sign-in phished out of someone is a smaller prize, and nothing a
 // CLI session makes outlives it (see broker.js mintToken). Device codes last 5 minutes (RFC 8628 says "short").
 export const WEB_TTL = 12 * 3600_000, CLI_TTL = 7 * 86400_000, CH_TTL = 5 * 60_000, DEVICE_TTL = 5 * 60_000, DEVICE_INTERVAL = 5;
 
