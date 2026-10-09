@@ -1,7 +1,8 @@
 # Protocol
 
 Two wire formats are new in the merged service: receipts in the public log, and agent signatures on proxied requests.
-The broker itself is described in the [README](../README.md) and [POLICY.md](POLICY.md).
+A third, the Approvals API for a coding agent's commands, is below. The broker itself is described in the
+[README](../README.md) and [POLICY.md](POLICY.md).
 
 ## Receipts
 
@@ -96,6 +97,91 @@ Registering a key: `POST /v1/agent-keys/begin {publicKey}` (or `{jwk}` without `
 `"leash/agent-key-proof/v1\n" || origin || "\n" || account id || "\n" || challenge || "\n" || x`. Sign it with the private
 key and send `POST /v1/agent-keys {label, publicKey, challengeId, proof}`. Small-order and non-canonical keys are refused;
 a key belongs to one account; up to 20 active per account. A reference signer is `cli/sign.mjs`.
+
+## Approvals for what the broker does not proxy
+
+For actions that never pass through a brokered API (a coding agent's shell command, an MCP tool call). A hook on the
+agent's machine holds a **guard key** and asks; a human approves in the app with a passkey. The holds table, alerts,
+approve and deny routes and receipts are the same as for brokered calls. In this repo, not yet deployed (migration 0006).
+
+The guard runs on the agent's machine: a seatbelt, not a sandbox. Only brokered keys are enforced by the server.
+
+### Guard keys
+
+- `POST /v1/guard/keys {label?}` (web session with CSRF, or CLI session) returns `{id, key: "lsg_<43 base64url>", label,
+  expiresAt, note}` once; only `SHA-256(key)` is stored. A key made by a CLI session ends when that session ends
+  (`expiresAt`, 7 days at most) and is revoked with it; a key made in the app has `expiresAt: null`. 20 active per account
+  (`409 too_many_guard_keys`).
+- `GET /v1/guard/keys` (any session): `{keys: [{id, label, created_at, last_used, expires_at, revoked, made_by}]}`.
+- `DELETE /v1/guard/keys/<id>` (web session with CSRF, or CLI session; revoking only tightens): `{ok, closed}`; the
+  key's pending and approved holds are closed in the same batch.
+- A guard key authenticates only `/v1/approvals*` (`Authorization: Bearer lsg_...`): `401 guard_key_required` without
+  one, `401 guard_key_invalid` when unknown, revoked or ended. It can never approve, list holds or reach the vault.
+
+### Ask: `POST /v1/approvals`
+
+```json
+{"kind":"shell","agent":"claude-code","rule":"sh.terraform-destroy","why":"Destroys every resource in the state.",
+ "summary":"terraform destroy -auto-approve","detail":"terraform destroy -auto-approve",
+ "context":{"cwd":"infra","session":"a1b2c3"},"map":"2026-10-10.1"}
+```
+
+| Field | Rule |
+|---|---|
+| `kind` | `shell` or `tool` |
+| `agent` | `claude-code`, `codex`, `cursor`, `copilot`, `gemini`, `antigravity` or `mcp` |
+| `rule` | `^[a-z0-9._:-]{1,64}$` |
+| `why` | up to 300 characters; control, format and line-break characters become spaces |
+| `summary` | up to 200 characters, cleaned the same way; shown as "Summary from the guard" |
+| `detail` | up to 4096 characters, kept exactly: the command line, or for a tool call canonical JSON such as `{"arguments":{...},"tool":"<name>"}` with sorted keys. NUL and unpaired surrogates are refused |
+| `context` | optional: `cwd`, the folder's name only (1 to 80 characters, no `/`, `\`, control characters, `.` or `..`); `session`, `^[A-Za-z0-9._:-]{1,64}$` |
+| `map` | optional shell map version, `^\d{4}-\d{2}-\d{2}\.\d{1,3}$`, used in the public receipt |
+
+Unknown fields are refused (`400 bad_field`). The approval is bound to
+
+```
+hash = hex(SHA-256(JSON.stringify(["v1", kind, agent, detail, cwd])))      cwd = context.cwd or ""
+```
+
+returned as `hash` in every answer. Answers:
+- `202 {id, status: "pending", hash, approve_url, expires_at, created}`: `created: false` when the same key already has
+  this hash pending (no second hold, no second alert). A new hold waits 30 minutes for a decision.
+- `200 {id, status: "approved", hash, approve_url, expires_at}`: an approved, unused, unexpired hold for this key and hash.
+- `429 slow_down` (60 new holds an hour per key), `429 too_many_holds` (20 pending per key, 100 per account).
+
+### Wait: `GET /v1/approvals/<id>?wait=<0..20>`
+
+`{id, status, deny_reason, expires_at, hash}` with `status` one of `pending`, `approved`, `denied`, `expired`, `used`.
+With `wait`, the server re-reads every 2 seconds until the status is not `pending` or the wait is over. A pending or
+approved hold past its time reads as `expired`. No D1 writes (the limit, 30 a minute per key, is kept in memory) and at
+most 12 D1 queries per call. Another key's hold, or a brokered hold, is `404`.
+
+### Use: `POST /v1/approvals/<id>/use {hash}`
+
+One atomic update from `approved` to `used`, for this key, this hash and before `expires_at` (10 minutes after the
+approval). `200 {ok, id, status: "used"}`; otherwise `410 expired`, `403 denied` (with `deny_reason`),
+`409 already_used`, `409 not_approved`, `409 hash_mismatch`, `404 not_found`.
+
+### Deny with a reason
+
+`POST /v1/holds/<id>/deny {reason?}` (any signed-in session; deny is always safe): up to 200 characters, control,
+format and line-break characters removed, stored in `holds.deny_reason` and returned to the guard. Treat it as data from
+the human, not as instructions. `GET /v1/holds` returns `kind` (`proxy`, `shell`, `tool`, `deploy`), `agent`,
+`deny_reason`, `context` (`{cwd, session}`) and the guard key's label as `token_label`; `preview` is the exact detail,
+never truncated, with invisible, direction and control characters shown as `<U+XXXX>`.
+
+### Receipts
+
+A guard decision is sealed like a broker decision, with fixed words only:
+
+```json
+{"receipt":{"action":"RUN claude-code","agent":"broker","decision":"held","meta":{"map":"2026-10-10.1","rule":"sh.terraform-destroy"},"parent":"<audit hash>","ts":1791300000000},"source":"broker",...}
+```
+
+`RUN <agent>` for a shell command, `CALL <agent>` for a tool call; decisions `held`, `approved` (with
+`meta.passkey: true`), `denied`, `executed` (the guard used the approval; audit action `run_approved`). `meta.map` is
+the guard's map version when it sent one, else the API map version. Never the command, summary, why, folder, session,
+key label or deny reason.
 
 ## Web Bot Auth
 

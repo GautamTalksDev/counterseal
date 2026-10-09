@@ -104,7 +104,7 @@ sequenceDiagram
 
 A token can carry `unattendedIrreversible` rules for calls an agent may run unattended, **but only a passkey holder can mint
 such a token**. A CLI session cannot, because an agent running on the same laptop can read the CLI's config file. The same
-goes for approving holds, revoking agent keys and turning public receipts off.
+goes for approving holds (a coding agent's commands included), revoking agent keys and turning public receipts off.
 
 ## Quickstart
 
@@ -156,6 +156,32 @@ npx leashcli token <credentialId> --agent-key <agentKeyId>
 Signing from the MCP server needs CLI 0.2.1 too: `npx leashcli` still runs 0.1.1 from npm, which cannot sign, so a
 bound token would refuse its calls. Until 0.2.1 is published, run `cli/leash.mjs` from this repository.
 
+### Approvals for what Counterseal does not proxy (a coding agent's commands)
+
+Some irreversible actions never pass through an API Counterseal brokers: `terraform destroy`, `railway volume delete`,
+`gh repo delete`, `prisma migrate reset`, `DROP TABLE` through `psql`, `git push --force`. For those, a hook on the
+agent's machine (the `leashcli guard` hook, in progress) holds a **guard key** (`lsg_`) and asks the Approvals API:
+
+```bash
+# ask (Bearer lsg_): the exact command, why it is held, and the folder it runs in
+curl -s -X POST https://counterseal.gautamkhosla.com/v1/approvals -H "authorization: Bearer $LSG" -H 'content-type: application/json' \
+  -d '{"kind":"shell","agent":"claude-code","rule":"sh.terraform-destroy","why":"Destroys every resource in the state.","summary":"terraform destroy","detail":"terraform destroy -auto-approve","context":{"cwd":"infra"}}'
+# -> 202 {"id","status":"pending","hash","approve_url","expires_at"}; your phone buzzes; approve in the app with your passkey
+curl -s "https://counterseal.gautamkhosla.com/v1/approvals/$ID?wait=20" -H "authorization: Bearer $LSG"   # long-poll, writes nothing
+curl -s -X POST "https://counterseal.gautamkhosla.com/v1/approvals/$ID/use" -H "authorization: Bearer $LSG" -H 'content-type: application/json' -d "{\"hash\":\"$HASH\"}"
+```
+
+- An approval covers that exact command (with its agent and folder), once, within 10 minutes. You can deny with a reason;
+  the agent gets the reason back.
+- A guard key can ask and read its own approvals; it can never approve (that always needs your passkey in the app). Make
+  one in the app (Account, Guard keys) or from a signed-in `leashcli`; a key made by a CLI sign-in ends with it.
+- **The guard runs on the agent's machine: a seatbelt, not a sandbox.** An agent that can edit its hook settings or run a
+  script around the hook is not stopped by it. For a hard stop, give the agent a Counterseal token instead of the real key.
+- Public receipts say only `RUN claude-code` (or `CALL mcp`), the decision, the rule id and the map version; never the
+  command, folder or label.
+
+The full contract (request fields, errors, budgets) is in [docs/PROTOCOL.md](docs/PROTOCOL.md#approvals-for-what-the-broker-does-not-proxy).
+
 ### Any SDK or script
 
 | Provider | Base URL |
@@ -195,6 +221,7 @@ server/        Cloudflare Worker: API, proxy, vault, WebAuthn, policy, audit, th
   src/providers.js   the irreversible map (versioned; every rule has a test)
   src/ledger.js      receipts: the public log API, the receipts API, broker receipts
   src/agentkeys.js   agent keys: proof of possession, RFC 9421 broker signatures
+  src/approvals.js   the Approvals API and guard keys: approvals for a coding agent's commands and tool calls
   test/              node:test suite: virtual passkeys, fake upstream, migration on data from the live code
   bench/cpu.mjs      CPU of the hot paths
   dev/local.js       full local server on node:sqlite
@@ -220,7 +247,8 @@ See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), two additi
 ## Status and roadmap
 
 Brokers GitHub, Cloudflare, Railway, Stripe and Supabase; phone and desktop alerts for held calls (Web Push,
-payload-free); public receipts; agent keys. Next: Vercel, Fly.io, AWS (SigV4 re-signing), Neon, PlanetScale; two-person
+payload-free); public receipts; agent keys. In this repo, not yet deployed: the Approvals API and guard keys for a
+coding agent's commands. Next: Vercel, Fly.io, AWS (SigV4 re-signing), Neon, PlanetScale; two-person
 approval; SSO for teams; external witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
 
 Counterseal maps to the proxy-gateway model of the IETF draft

@@ -19,6 +19,7 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | A decision on the record cannot be quietly rewritten | Per-account hash-chained audit log (`/v1/audit/verify`); with receipts on, each decision is also an entry in a public RFC 6962 Merkle log with Ed25519-signed C2SP checkpoints; consistency proofs show the log only grew |
 | No agent or API key holder can forge a broker receipt | `source: "broker"` is set only by the broker, outside the receipt; the receipts API fills only the inner receipt and refuses unknown fields |
 | Public receipts leak nothing private | Broker receipts carry the method, the provider host, the decision, rule id, map version, two booleans, the time and the hash of the private audit entry; per-entry salted submitter commitments; never a path, query, body, key, token, account id, name, email or IP (tested) |
+| A coding agent's held command waits for your passkey (guard, not yet deployed) | The guard asks `POST /v1/approvals` with a guard key (`lsg_`) that can ask and read its own approvals, never approve; an approval covers one exact command, its agent and folder name (SHA-256 bound), once, within 10 minutes, consumed atomically. Enforced on the agent's machine: a seatbelt, not a sandbox |
 | A signed reported receipt was signed by that key | Receipts keys bound to an Ed25519 signer (proof of possession naming the log and the account) accept only receipts that signer signed, with a `ts` within 10 minutes, each signature once; small-order and non-canonical keys and signatures are refused |
 
 ## Controls, mapped to OWASP Top 10 (2025) and OWASP API Security Top 10 (2023)
@@ -26,13 +27,14 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | Area | Control | OWASP |
 |---|---|---|
 | Sign-in | Passkeys only (WebAuthn, user verification required, origin and RP ID checked, single-use 5-minute challenges, signature counters); a passkey already registered gets 409 | A07 |
-| Sessions | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app together with every token, agent key and receipts key they made, even after they signed out; a token or receipts key a CLI session makes never outlives it | A07 |
+| Sessions | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app together with every token, agent key, receipts key and guard key they made, even after they signed out; a token, receipts key or guard key a CLI session makes never outlives it | A07 |
+| Guard keys and approvals | `lsg_` keys shown once, stored as SHA-256, 20 active per account; they authenticate only `/v1/approvals*`. Asking: fixed vocabularies (kind, agent, rule id), sizes capped, unknown fields refused, a folder name never a path, NUL and unpaired surrogates refused; 60 new holds an hour and 20 waiting per key, 100 waiting per account, one alert a minute per account. Waiting: a long poll of at most 20 s that writes nothing to D1. Using: one atomic update bound to key, hash and expiry. Deny reasons: 200 characters, control, format and line-break characters removed | A01, A04, API4, API6 |
 | CLI sign-in (device code) | Against device-code phishing (RFC 8628 section 5.4, the IETF cross-device flows BCP): the code is never in a link (no `verification_uri_complete`; the app ignores a code in its address and warns); the person types it, sees what is granted and the country and network the sign-in started from next to their own (Cloudflare request data, never an IP), and must confirm they ran it before the passkey; "No, deny it" sends `access_denied`. Codes: 8 characters from a 28-character alphabet without modulo bias, single use, 5 minutes. Limits: 10 starts an hour per network, 10 lookups or denials per 10 minutes and 10 approvals an hour per account. Each sign-in is audited and wakes the owner's devices with a one-tap revoke | A07, API2, API4 |
 | CSRF | Web writes require an `Origin` equal to the host they were sent to, from an allow list of two (counterseal and the old leash host), and an `x-leash: 1` header; CORS only on the public log's read endpoints | A01 |
 | Two hosts | Each host has its own RP ID, chosen by the request's Origin (or its URL) from that allow list; a client never names one; passkeys and challenges are refused on the other host; host-only cookies; the old host serves `/v1`, `/p` and `/app` and redirects other pages | A01, A07 |
 | Moving an account | One-time link made after a fresh passkey assertion on the old host: 32 random bytes, stored hashed, single use, bound to the account, 10 minutes, 3 an hour, in the URL fragment and POST bodies only, audited; the passkey it adds alerts the owner's devices | A07 |
 | Authorization | Every query is scoped by `account_id`; another account's holds, tokens, credentials, agent keys, receipts keys and receipts return 404 (tested) | A01, API1 |
-| Privilege separation | CLI sessions can mint tokens and register agent keys, but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, turn receipts on or off, approve, deny or revoke CLI sign-ins, or delete the account | A01, A06 |
+| Privilege separation | CLI sessions can mint tokens, register agent keys, make guard keys and deny holds, but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, turn receipts on or off, approve, deny or revoke CLI sign-ins, or delete the account | A01, A06 |
 | Secrets | AES-256-GCM per secret, data key wrapped by a master key (Workers secret), AAD binds account, row and provider; tokens, sessions and receipts keys stored as hashes; agent keys public only (a JWK with `d` is refused) | A04 |
 | Input | Parameterized SQL; bodies capped while streaming (16 KB for the API, 256 KB for receipts, 1 MB for the proxy); strict JSON; strict receipt schema; plain-decimal query parameters | A05, API8 |
 | SSRF | Upstream hosts fixed per provider, no redirects; push endpoints limited to known push services; the Web Bot Auth checker's directory fetch reaches only https public host names on port 443, at the fixed well-known path, no redirects, 5 s, 64 KB | A01, API7 |
@@ -47,7 +49,11 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 ## What it does not protect against
 
 - A human approving something they should not. The approve screen shows the exact method, host and path, the reason, and
-  a preview of the request (query string, SQL or GraphQL, body; at most 2 KB).
+  a preview of the request (query string, SQL or GraphQL, body; at most 2 KB). For a coding agent's command it shows the
+  whole command (up to 4,096 characters, never cut) with hidden characters made visible.
+- An agent getting around its guard. The coding-agent guard runs on the agent's machine and matches a map of commands: an
+  agent that edits its hook settings, wraps a command in a script, or runs something the map does not know is not
+  stopped by it. It is a seatbelt, not a sandbox; for a hard stop, give the agent a Counterseal token, not the real key.
 - A person who approves a CLI sign-in someone sent them. The screen shows where it started and asks whether they ran it,
   and the alert and one-tap revoke limit the damage (a CLI session cannot approve holds), but a person who approves
   anyway has signed that command line in for up to 7 days. Country and network checks can be fooled by a VPN.
@@ -106,3 +112,13 @@ margin on Workers Free; proxied paths are never written to log lines. Tests: `se
 - Push devices can be added, removed or tested only from a web session.
 - Pages served through the Worker get the site's security headers even if `_headers` is not applied to them.
 Tests: `server/test/cli-signin.test.js`, `server/test/second-pass.test.js`.
+
+## Approvals API, 9 Oct 2026 (branch `feat/approvals`, migration 0006, not deployed)
+
+Guard keys and `POST /v1/approvals` for what the broker does not proxy (a coding agent's shell commands, MCP tool calls),
+on the existing holds, approve, deny and receipts paths. Threat model section G; tests in
+`server/test/approvals.test.js` (a guard key can never approve, use once, wrong hash, expiry, deny reasons, input
+validation, the exact command on the card, the long poll's zero writes, limits, receipt privacy, revocation with the key
+and with the CLI session that made it, D1 budgets) and the migration test on live-shaped data. Guard keys follow the
+second pass: they end with the CLI session that made them and are revoked with it even after it signed out, guard holds
+share the account's 100 waiting holds and its one alert a minute, and guard key events are in the audit log.

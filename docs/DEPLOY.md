@@ -5,10 +5,12 @@ Object (`ReceiptLog`, the public log) and static assets. It fits the Workers Fre
 
 ## Upgrading the live service (from the broker-only version)
 
-The live database keeps every row. Migrations `0004_record_and_prove.sql` and `0005_cli_signin.sql` only add tables,
-indexes and defaulted or nullable columns, so the code that runs today keeps working on the migrated database, and the
-new code keeps working with everything the old code wrote (`server/test/migration.test.js` runs the deployed code,
-migrates, then runs the new code). CLI sessions made before 0005 keep their 30-day lifetime; new ones last 7 days.
+The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005_cli_signin.sql` and
+`0006_approvals.sql` only add tables, indexes and defaulted or nullable columns, so the code that runs today keeps
+working on the migrated database, and the new code keeps working with everything the old code wrote
+(`server/test/migration.test.js` runs the deployed code, migrates, then runs the new code). CLI sessions made before 0005
+keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as `kind: "proxy"` (a brokered API
+call); 0006 adds the guard keys table and the coding-agent approvals (branch `feat/approvals`, not yet deployed).
 
 ```bash
 cd server
@@ -18,7 +20,7 @@ npx -y wrangler@4 d1 time-travel info leash
 # 2. new secrets (names only; values never leave your machine)
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK        # the log's Ed25519 signing key; prints the public part to stderr: keep it
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx -y wrangler@4 secret put STATS_TOKEN   # optional: /v1/admin/stats
-# 3. the additive migrations (applies 0004 and 0005; 0001 to 0003 are already applied)
+# 3. the additive migrations (applies 0004 to 0006; 0001 to 0003 are already applied)
 npx -y wrangler@4 d1 migrations apply leash --remote
 # 4. the code (creates the ReceiptLog Durable Object through the "v1" migration in wrangler.jsonc)
 npx -y wrangler@4 deploy
@@ -70,7 +72,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" |
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))" | npx -y wrangler@4 secret put IP_SALT
 node dev/vapid-keygen.mjs | npx -y wrangler@4 secret put VAPID_PRIVATE_JWK   # phone alerts (Web Push); optional
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK          # the public log
-npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0005
+npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0006
 npx -y wrangler@4 deploy
 ```
 
@@ -90,6 +92,7 @@ Without `VAPID_PRIVATE_JWK`, phone alerts are off. Without `LOG_KEY_JWK`, the br
 | `PUB_RPM` | 600 | public log reads per IP per minute (in memory per isolate) |
 | `PUB_DO_RPM` | 120 | public reads that reach the Durable Object (entries, proofs) per IP per minute |
 | `TOOL_RPM` | 10 | Web Bot Auth checker directory lookups per IP per minute |
+| `GUARD_RPM` | 240 | requests with a guard key (`/v1/approvals*`) per IP per minute (in memory per isolate); each key also has 60 new holds an hour (D1) and 30 polls and 30 uses a minute (in memory) |
 
 Secrets: `LEASH_KEK`, `IP_SALT` (required), `VAPID_PRIVATE_JWK` (phone alerts), `LOG_KEY_JWK` (receipts), `STATS_TOKEN`
 (the private stats endpoint; at least 32 characters, or the endpoint stays 404).
@@ -114,6 +117,10 @@ after sign-ins.
 | Proxied read, bound token | about 5 (plus the nonce) | none |
 | Proxied write that is sealed | about 8 (plus audit, usage, global usage, receipt index) | 1 request, about 7 rows |
 | Held call, sealed | about 8 | 1 request, about 7 rows |
+| Coding-agent approval asked (`POST /v1/approvals`), sealed | about 9, plus one per device alerted (at most one alert a minute) | 1 request, about 7 rows |
+| Same command asked again while pending or approved | 0 | none |
+| Waiting for a decision (`GET /v1/approvals/<id>?wait=20`) | 0 (at most 12 D1 queries, all reads) | none |
+| Approval used (`POST /v1/approvals/<id>/use`), sealed | about 6 | 1 request, about 7 rows |
 | Receipts API, one unsigned receipt | about 3 | 1 request |
 | Public log read (stats, checkpoint, key) | 0 | 0 within 10 s of the last head read per isolate |
 | Public log read (entries, proofs) | 0 | 1 |
@@ -141,6 +148,19 @@ Workers). Medians, with the 95th percentile in brackets:
 | Receipts API, 25 unsigned (the cap) | 2.5 ms (5.0) | 3.9 ms |
 | Receipts API, 12 signed (the cap) | 3.3 ms (5.6) | 1.6 ms |
 | `/v1/stats` | 0.1 ms (0.5) | |
+
+The Approvals API (branch `feat/approvals`), measured later the same day on a busier machine, with the same run's
+baseline for comparison (that run measured a proxied GET, unbound, at 1.6 ms (3.8) and a held DELETE, bound, sealed at
+3.3 ms (6.7), so these numbers read about twice the table above):
+
+| Path | Worker CPU | Durable Object CPU |
+|---|---|---|
+| `POST /v1/approvals`, 3 KB command, held, sealed | 2.2 ms (4.1) | 1.3 ms |
+| `GET /v1/approvals/<id>` (no wait) | 0.6 ms (5.0) | |
+| `GET /v1/approvals/<id>?wait=20` (11 reads; waiting itself is not CPU) | 1.0 ms (6.0) | |
+| Approve a guard hold (passkey verify), sealed | 2.5 ms (6.9) | 1.3 ms |
+| `POST /v1/approvals/<id>/use`, sealed | 1.4 ms (4.0) | 1.3 ms |
+| `POST /v1/holds/<id>/deny` with a reason, sealed | 0.9 ms (1.8) | 0.9 ms |
 
 These are Node numbers, not a load test on Workers. Run one before raising the batch caps in `server/src/receipts.js`.
 

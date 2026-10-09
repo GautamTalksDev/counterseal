@@ -30,6 +30,7 @@
   <a href="#mcp">Connecting your agent (MCP)</a>
   <a href="#proxy">Calling through the proxy</a>
   <a href="#held">When a call is held</a>
+  <a href="#guard">Approvals for commands</a>
   <a href="#policy">Token policies</a>
   <a href="#providers">Providers and the map</a>
   <b>Record</b>
@@ -70,7 +71,8 @@ npx leashcli token &lt;key-id&gt; --label coding-agent</pre></li>
     <tr><td>Vault</td><td>Where your real API keys live, encrypted. Keys go in and never come out.</td></tr>
     <tr><td>Agent token</td><td>An <code>lsh_</code> token tied to one vaulted key, with a policy and an expiry (7 days by default, up to 90; one minted from the command line ends with its sign-in). This is all your agent ever sees.</td></tr>
     <tr><td>Irreversible map</td><td>A versioned list, per provider, of calls that can't be undone. Calls on it are held.</td></tr>
-    <tr><td>Hold</td><td>A call the broker stopped and is waiting on you to approve or deny.</td></tr>
+    <tr><td>Hold</td><td>A call the broker stopped, or a command a coding agent's guard asked about, waiting on you to approve or deny.</td></tr>
+    <tr><td>Guard key</td><td>An <code>lsg_</code> key the guard on a coding agent's machine uses to ask for approvals. It can ask and read the answer; it can never approve.</td></tr>
     <tr><td>Approval</td><td>Your passkey signing off on one held request. It lets that exact request through once, within ten minutes.</td></tr>
     <tr><td>Audit log</td><td>Your private, append-only, hash-chained record of every write, hold and decision on your account.</td></tr>
     <tr><td>Receipt</td><td>A public entry in the log for one decision: method and provider host, the decision, the rule, the time, and the hash of your audit entry. Never the path or the body.</td></tr>
@@ -108,6 +110,30 @@ Authorization: Bearer lsh_...</pre>
   "message": "Counterseal held this request because it cannot be undone..."
 }</pre>
   <p>Open the link, check the method, host, path, reason and the request preview, and approve with your passkey. Then retry the <strong>exact same request</strong> once. Turn on phone alerts in the app, or run <code>npx leashcli watch</code> for a terminal bell and link for every new hold (with leashcli 0.1.1 its links point at leash.gautamkhosla.com; if your account is on counterseal, open the hold from the app or the alert).</p>
+
+  <h2 id="guard">Approvals for a coding agent's commands</h2>
+  <p>Some irreversible actions never pass through an API the broker holds a key for: <code>terraform destroy</code>, <code>railway volume delete</code>, <code>gh repo delete</code>, <code>prisma migrate reset</code>, <code>DROP TABLE</code> through <code>psql</code>, <code>git push --force</code>. For those, a guard on the agent's machine asks the Approvals API with a guard key and waits for your passkey:</p>
+  <pre>curl -s https://counterseal.gautamkhosla.com/v1/approvals \
+  -H "authorization: Bearer lsg_..." -H 'content-type: application/json' \
+  -d '{"kind":"shell","agent":"claude-code","rule":"sh.terraform-destroy",
+       "why":"Destroys every resource in the state.","summary":"terraform destroy",
+       "detail":"terraform destroy -auto-approve","context":{"cwd":"infra"}}'
+# 202 {"id":"...","status":"pending","hash":"...","approve_url":"...","expires_at":...}
+
+curl -s "https://counterseal.gautamkhosla.com/v1/approvals/&lt;id&gt;?wait=20" -H "authorization: Bearer lsg_..."
+# {"status":"approved"} or "denied" (with "deny_reason"), "expired", "pending"
+
+curl -s https://counterseal.gautamkhosla.com/v1/approvals/&lt;id&gt;/use \
+  -H "authorization: Bearer lsg_..." -H 'content-type: application/json' -d '{"hash":"&lt;hash&gt;"}'
+# 200: run it now, once</pre>
+  <ul>
+    <li><strong>One exact command, once.</strong> An approval covers that command with its agent and folder name, once, within 10 minutes. Asking again for the same command while it waits does not send a second alert.</li>
+    <li><strong>Deny with a reason.</strong> The guard hands your reason back to the agent (200 characters at most), so "not today, use staging" reaches it.</li>
+    <li><strong>Guard keys only ask.</strong> A guard key can ask and read its own approvals; approving always needs your passkey in the app. Make one under Account, Guard keys, or from a signed-in <code>leashcli</code>, where it ends with that sign-in. Each key can ask for 60 new approvals an hour, with 20 waiting at a time.</li>
+    <li><strong>A seatbelt, not a sandbox.</strong> The guard runs on the agent's machine and matches a map of commands; an agent that edits its hook settings or wraps a command in a script is not stopped by it. Commands not on the map are left to your agent's own permission settings. For a hard stop, give your agent a Counterseal token instead of the real key.</li>
+    <li><strong>Receipts.</strong> A guard decision's public receipt says only <code>RUN claude-code</code> (or <code>CALL mcp</code> for a tool call), the decision, the rule and the map version. Never the command, folder or key label.</li>
+  </ul>
+  <p>Fields: <code>kind</code> (<code>shell</code> or <code>tool</code>), <code>agent</code> (<code>claude-code</code>, <code>codex</code>, <code>cursor</code>, <code>copilot</code>, <code>gemini</code>, <code>antigravity</code> or <code>mcp</code>), <code>rule</code>, <code>why</code> (up to 300 characters), <code>summary</code> (up to 200), <code>detail</code> (the exact command or canonical tool call, up to 4,096), optional <code>context</code> (<code>cwd</code>, the folder's name only; <code>session</code>) and <code>map</code> (the guard's map version). The full contract is in <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
 
   <h2 id="policy">Token policies</h2>
   <p>Each token can carry a policy that narrows what its key can do. A policy can never widen it.</p>
@@ -215,9 +241,11 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>GET, POST /v1/tokens</code></td><td>List or mint agent tokens. <code>agentKeyId</code> binds the token to an agent key.</td></tr>
     <tr><td><code>POST /v1/tokens/passkey/begin, /finish</code></td><td>Mint a token with pre-approved irreversible operations. Passkey.</td></tr>
     <tr><td><code>DELETE /v1/tokens/:id</code></td><td>Revoke a token.</td></tr>
-    <tr><td><code>GET /v1/holds</code></td><td>Calls waiting for you, each with a <code>preview</code> of what it would do (query string, SQL or GraphQL, body; at most 2 KB).</td></tr>
+    <tr><td><code>GET /v1/holds</code></td><td>Calls and commands waiting for you, each with its <code>kind</code> (<code>proxy</code>, <code>shell</code>, <code>tool</code>, <code>deploy</code>) and a <code>preview</code> of what it would do (for a call: query string, SQL or GraphQL, body, at most 2 KB; for a command: the whole command).</td></tr>
     <tr><td><code>POST /v1/holds/:id/approve/begin, /finish</code></td><td>Approve a hold. Passkey.</td></tr>
-    <tr><td><code>POST /v1/holds/:id/deny</code></td><td>Deny a hold.</td></tr>
+    <tr><td><code>POST /v1/holds/:id/deny</code></td><td>Deny a hold. Optional <code>{"reason"}</code> (200 characters), handed back to a guard.</td></tr>
+    <tr><td><code>GET, POST /v1/guard/keys</code>, <code>DELETE /v1/guard/keys/:id</code></td><td>Guard keys (<code>lsg_</code>, shown once). Revoking one closes its open approvals.</td></tr>
+    <tr><td><code>POST /v1/approvals</code>, <code>GET /v1/approvals/:id?wait=</code>, <code>POST /v1/approvals/:id/use</code></td><td>Ask for, wait for (up to 20 s) and use an approval for a coding agent's command. Bearer <code>lsg_</code> guard key.</td></tr>
     <tr><td><code>GET /v1/audit</code>, <code>GET /v1/audit/verify</code></td><td>Read your audit log (with the receipt index of each sealed entry); check the hash chain.</td></tr>
     <tr><td><code>GET /v1/agent-keys</code>, <code>POST /v1/agent-keys/begin</code>, <code>POST /v1/agent-keys</code></td><td>List agent keys; register one with a proof of possession over the text from <code>begin</code>.</td></tr>
     <tr><td><code>DELETE /v1/agent-keys/:id</code></td><td>Revoke an agent key. Web only.</td></tr>
@@ -245,17 +273,21 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td>401</td><td><code>leash_token_required</code>, <code>token_invalid</code></td><td>Missing, expired or revoked token.</td></tr>
     <tr><td>401</td><td><code>agent_signature_required</code>, <code>bad_agent_signature</code>, <code>agent_signature_replayed</code>, <code>agent_key_revoked</code></td><td>The token is bound to an agent key and the request was not signed by it, was signed wrongly (the <code>reason</code> says how), reused a nonce, or the key was revoked.</td></tr>
     <tr><td>401</td><td><code>api_key_required</code>, <code>api_key_invalid</code></td><td>Missing, revoked or expired receipts API key.</td></tr>
+    <tr><td>401</td><td><code>guard_key_required</code>, <code>guard_key_invalid</code></td><td>Missing, revoked or ended guard key (a key made by a command line sign-in ends with it).</td></tr>
+    <tr><td>403</td><td><code>denied</code></td><td>You denied this command; <code>deny_reason</code> carries your reason.</td></tr>
+    <tr><td>409</td><td><code>hash_mismatch</code>, <code>not_approved</code>, <code>already_used</code></td><td>The approval is for a different command, is still waiting, or was used.</td></tr>
+    <tr><td>410</td><td><code>expired</code></td><td>The approval was not used within 10 minutes, or nobody decided within 30. Ask again.</td></tr>
     <tr><td>402</td><td><code>quota</code>, <code>daily_quota</code></td><td>Your monthly or daily receipts are used up. Nothing was recorded.</td></tr>
     <tr><td>403</td><td><code>leash_denied</code></td><td>A policy deny rule, readOnly, or the allow list or default blocked the call.</td></tr>
     <tr><td>403</td><td><code>wrong_provider</code></td><td>The token belongs to a different provider.</td></tr>
     <tr><td>403</td><td><code>passkey_required</code></td><td>Needs the web app and your passkey.</td></tr>
     <tr><td>403</td><td><code>csrf</code></td><td>Web write without the right Origin or <code>x-leash</code> header.</td></tr>
     <tr><td>409</td><td><code>replay</code>, <code>key_taken</code>, <code>signer_taken</code></td><td>A signed receipt sent twice; a public key registered to another account.</td></tr>
-    <tr><td>409</td><td><code>too_many_credentials</code>, <code>too_many_tokens</code>, <code>too_many_keys</code>, <code>too_many_agent_keys</code>, <code>too_many_devices</code></td><td>A ceiling per account: 50 vault keys, 200 live tokens, 20 receipts keys, 20 agent keys, 10 alert devices.</td></tr>
+    <tr><td>409</td><td><code>too_many_credentials</code>, <code>too_many_tokens</code>, <code>too_many_keys</code>, <code>too_many_agent_keys</code>, <code>too_many_guard_keys</code>, <code>too_many_devices</code></td><td>A ceiling per account: 50 vault keys, 200 live tokens, 20 receipts keys, 20 agent keys, 20 guard keys, 10 alert devices.</td></tr>
     <tr><td>413</td><td><code>too_large</code></td><td>Request body over the limit.</td></tr>
     <tr><td>428</td><td><code>held_for_approval</code></td><td>Irreversible. Approve, then retry once.</td></tr>
     <tr><td>429</td><td><code>slow_down</code></td><td>Too many requests. The message says when to retry.</td></tr>
-    <tr><td>429</td><td><code>too_many_holds</code></td><td>20 requests from this token (or 100 on the account) are already waiting for approval; nothing new is held or alerted until a human decides.</td></tr>
+    <tr><td>429</td><td><code>too_many_holds</code></td><td>20 requests from this token or guard key (or 100 on the account) are already waiting for approval; nothing new is held or alerted until a human decides.</td></tr>
     <tr><td>503</td><td><code>log_at_capacity</code></td><td>The public log reached its daily capacity. Nothing was recorded; try after 00:00 UTC.</td></tr>
   </table>
 </article>

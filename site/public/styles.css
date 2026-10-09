@@ -171,3 +171,8 @@ a.ul{text-decoration:underline;text-underline-offset:3px}
 .hold .row{flex-wrap:wrap}
 .hold .reason-row{margin-top:10px}
 .hold .reason-row input{min-width:200px}
+.hold-guard .what{font-family:var(--sans);font-size:14.5px;word-break:normal}
+.hold-guard .what .agent{font-family:var(--mono);font-size:14px}
+.hold>p.small{margin:8px 0 0;font-size:12.5px}
+.hold-top{flex-wrap:wrap;gap:6px 12px}
+.badge{white-space:nowrap}

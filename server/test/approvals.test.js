@@ -73,7 +73,7 @@ test('guard keys: shown once (only a hash kept), listed, made from the app or a 
   await timeShift(7 * 86400_000 + 60_000, async () => assert.equal((await create(w, ck.body.key)).body.error, 'guard_key_invalid'));
   // at most 20 active keys
   for (let i = 0; i < 18; i++) assert.equal((await w.req('POST', '/v1/guard/keys', { cookie: u.cookie, body: { label: 'k' + i } })).status, 200);
-  assert.equal((await w.req('POST', '/v1/guard/keys', { cookie: u.cookie, body: { label: 'one too many' } })).body.error, 'too_many_keys');
+  assert.equal((await w.req('POST', '/v1/guard/keys', { cookie: u.cookie, body: { label: 'one too many' } })).body.error, 'too_many_guard_keys');
   // the audit log has both
   const acts = w.env.DB.raw.prepare("SELECT action FROM audit WHERE action LIKE 'guard_key_%'").all().map((r) => r.action);
   assert.ok(acts.includes('guard_key_created') && acts.includes('guard_key_revoked'));

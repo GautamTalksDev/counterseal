@@ -67,6 +67,13 @@
     <li>The approval covers <strong>that exact request</strong>, identified by a hash of its method, path, query, content type and body, <strong>once</strong>, for <strong>ten minutes</strong>. A different request, or the same one twice, is held again.</li>
     <li>A token can have at most 20 requests waiting and an account 100, and held requests wake your devices at most once a minute, so a flood of requests cannot wear you down into approving one.</li>
   </ol>
+  <h3 id="guard">A coding agent's commands</h3>
+  <ul>
+    <li><strong>Guard keys only ask.</strong> The guard on the agent's machine holds a guard key that can ask for an approval and read the answer. Approving always needs your passkey in the app. A key made by a command line sign-in ends with it, and revoking it closes its open approvals.</li>
+    <li><strong>One exact command, once.</strong> An approval is bound to a hash of the exact command, the agent and the folder's name, used once, within ten minutes. The card shows the whole command, with hidden and control characters made visible.</li>
+    <li><strong>No flood of alerts.</strong> Each guard key can ask for 60 new approvals an hour, with 20 waiting; asking again for the same command sends no new alert, and alerts go out at most once a minute.</li>
+    <li><strong>A seatbelt, not a sandbox.</strong> The guard runs on the agent's machine. An agent that edits its hook settings or wraps a command in a script is not stopped by it. Only keys kept in the vault are enforced by the server, so for a hard stop give your agent a Counterseal token instead of the real key.</li>
+  </ul>
 
   <h2 id="receipts">How the public log is protected</h2>
   <ul>
@@ -97,8 +104,8 @@
   <ul>
     <li><strong>The code is typed, never linked.</strong> <code>leashcli login</code> shows a code and a plain address. You type the code in the app yourself; the app never takes a code from a link and warns when a link tries. To phish a sign-in, someone has to get you to type a stranger's code by hand, on a page that tells you not to.</li>
     <li><strong>You see what you grant, and from where.</strong> Before your passkey, the app shows what the command line will be able to do, when the sign-in started, and the country and network it started from next to yours, with a warning when they differ. "No, deny it" comes first.</li>
-    <li><strong>Small and short.</strong> A code works once, for 5 minutes. A command line session lasts 7 days, and a token or receipts key it makes ends with it. Sign-in starts (10 an hour per network), code lookups (10 per 10 minutes per account) and approvals (10 an hour per account) are limited.</li>
-    <li><strong>Seen and undone.</strong> Every sign-in is in your audit log and wakes your devices with "A command line was signed in"; one tap revokes it and every token, agent key and receipts key it made, even after it signed itself out.</li>
+    <li><strong>Small and short.</strong> A code works once, for 5 minutes. A command line session lasts 7 days, and a token, receipts key or guard key it makes ends with it. Sign-in starts (10 an hour per network), code lookups (10 per 10 minutes per account) and approvals (10 an hour per account) are limited.</li>
+    <li><strong>Seen and undone.</strong> Every sign-in is in your audit log and wakes your devices with "A command line was signed in"; one tap revokes it and every token, agent key, receipts key and guard key it made, even after it signed itself out.</li>
   </ul>
 
   <h2 id="controls">Controls, mapped to OWASP</h2>
@@ -108,7 +115,7 @@
     <tr><td>Sessions</td><td><code>__Host-</code> cookie, HttpOnly, Secure, SameSite=Strict, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app with everything they made</td><td>A07</td></tr>
     <tr><td>CSRF</td><td>Web writes require the same Origin and an <code>x-leash: 1</code> header; CORS only on the public log's read endpoints</td><td>A01</td></tr>
     <tr><td>Authorization</td><td>Every query is scoped by account; another account's holds, tokens, keys, agent keys and receipts return 404 (tested)</td><td>A01, API1</td></tr>
-    <tr><td>Privilege separation</td><td>CLI sessions can mint and revoke tokens, deny holds, and make agent keys and receipts keys, but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, turn public receipts on or off, add alert devices, remove passkeys, or approve or revoke command line sign-ins</td><td>A01, A06</td></tr>
+    <tr><td>Privilege separation</td><td>CLI sessions can mint and revoke tokens, deny holds, make and revoke guard keys, and make agent keys and receipts keys, but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, turn public receipts on or off, add alert devices, remove passkeys, or approve or revoke command line sign-ins</td><td>A01, A06</td></tr>
     <tr><td>Secrets</td><td>Envelope encryption with AAD per row; no API returns a secret; tokens, sessions and receipts keys stored as hashes</td><td>A04</td></tr>
     <tr><td>Injection</td><td>All SQL is parameterized; request bodies are size-capped while streaming and parsed as JSON only</td><td>A05</td></tr>
     <tr><td>SSRF</td><td>Upstream hosts fixed per provider; no redirects; push endpoints limited to known push services; the checker's directory fetch only reaches https public host names on port 443, the fixed well-known path, no redirects, 5 s, 64 KB</td><td>A01, API7</td></tr>
@@ -126,6 +133,7 @@
   <ul>
     <li><strong>A human approving something they shouldn't.</strong> The approval screen shows exactly what will happen and why. Read it.</li>
     <li><strong>Approving a command line sign-in someone sent you.</strong> The screen shows where it started and asks whether you ran it; the alert and one-tap revoke limit the damage, and the session cannot approve holds, but a person who approves anyway has signed that command line in. Country and network checks can be fooled by a VPN.</li>
+    <li><strong>An agent getting around its guard.</strong> The coding-agent guard runs on the agent's machine and matches a map of commands. It does not stop an agent that edits its hook settings, wraps a command in a script, or runs something the map does not know.</li>
     <li><strong>An over-scoped key used outside the broker.</strong> Rotate the keys you give the vault and keep them only there.</li>
     <li><strong>Calls the map doesn't know are irreversible.</strong> The map is conservative: every DELETE is held on GitHub, Cloudflare, Stripe and Supabase, every Railway mutation except redeploy and restart, and SQL unless it is plainly read-only. Add <code>hold</code> rules to your policy for anything else you care about.</li>
     <li><strong>A compromised agent machine.</strong> An agent key on a machine an attacker controls signs for the attacker. Revoke the key; the bound tokens stop at once.</li>

@@ -42,6 +42,8 @@ test('GET /v1/admin/stats: 404 without the secret or with a wrong token; counts 
   assert.equal(s.tokens.minted, 1);
   assert.deepEqual([s.decisions.holds.total, s.decisions.approvals.total, s.decisions.denials.total], [2, 1, 1]);
   assert.equal(s.receipts.logEntries, 4, 'held, approved, held, denied');
+  assert.deepEqual(s.guard, { keys: 0, activeKeys: 0, keysLast7d: 0, holdsLast7dByKind: { proxy: 2 } });
+  assert.deepEqual(s.decisions.commandsRunAfterApproval, { total: 0, last7d: 0 });
   // nothing that identifies anyone
   const text = JSON.stringify(s);
   for (const secret of ['Jane', 'Other', '203.0.113', '198.51.100', tok, cred, await w.accountId(u.cookie), await w.accountId(v.cookie), 'api.github.com', '/repos/']) assert.ok(!text.includes(secret), secret);

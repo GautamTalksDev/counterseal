@@ -55,7 +55,7 @@ export async function createKey(env, sess, body) {
   const label = body.label === undefined ? 'guard' : str(body.label, 'label', { max: 60, re: LABEL });
   const t = now();
   const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM guard_keys WHERE account_id = ? AND revoked = 0 AND (expires_at IS NULL OR expires_at > ?)').bind(sess.accountId, t).first();
-  if (n.n >= MAX_KEYS) throw new HttpError(409, 'too_many_keys', `Up to ${MAX_KEYS} active guard keys. Revoke one first.`);
+  if (n.n >= MAX_KEYS) throw new HttpError(409, 'too_many_guard_keys',`Up to ${MAX_KEYS} active guard keys. Revoke one first.`);
   // made by a CLI session: it never outlives that session, and revoking the session revokes it
   const cli = sess.kind === 'cli' ? await sessionId(sess.hash) : null;
   const expiresAt = cli ? sess.expiresAt : null;

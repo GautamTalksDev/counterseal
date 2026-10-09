@@ -20,7 +20,8 @@ can read on the machine it runs on, an attacker who prompt-injects that agent ca
 | The agent (honest but wrong, or prompt-injected) | Use its `lsh_` token; sign with its agent key; read the CLI config on its machine | See a real key; approve a hold; mint a token with pre-approved irreversible calls; turn receipts off |
 | Someone holding a leaked `lsh_` token, unbound | Make the calls that token's policy allows, until it expires or is revoked | Exceed the policy; get past a hold; read the key |
 | Someone holding a leaked `lsh_` token bound to an agent key | Nothing: every request is refused before the policy, the token's rate limit or the upstream | Use it without the agent's private key |
-| Someone holding a stolen CLI session | List holds; mint ordinary tokens; register agent keys and bind tokens to them; deny holds; for at most 7 days | Approve holds; mint pre-approved tokens; read keys; delete vaulted keys; revoke agent keys; turn receipts on or off; approve or revoke CLI sign-ins; delete the account; keep anything it made after the owner revokes it |
+| Someone holding a stolen CLI session | List holds; mint ordinary tokens; register agent keys and bind tokens to them; make and revoke guard keys; deny holds; for at most 7 days | Approve holds; mint pre-approved tokens; read keys; delete vaulted keys; revoke agent keys; turn receipts on or off; approve or revoke CLI sign-ins; delete the account; keep anything it made after the owner revokes it |
+| Someone holding a guard key (`lsg_`), for example the agent the guard runs next to | Ask for approvals (60 new an hour, 20 waiting); read and use its own approvals | Approve anything; see another key's or a brokered hold; list holds; reach the vault; outlive the CLI session that made it; alert more than once a minute |
 | A device-code phisher (starts `leashcli login` and sends someone the code) | Get a CLI session in that person's account if they sign in, type the code, ignore the country and network shown, confirm they ran it and approve with their passkey | Put the code in a link the app accepts; reuse a code; keep the session past 7 days or past a revoke; act unseen (audit entry and device alert at sign-in) |
 | Someone holding a receipts API key (`lsr_`) | Record receipts within the account's quotas (public, reported, never `source: "broker"`) | Make a broker receipt; record signed receipts without the signer; replay a signed receipt |
 | A phishing site | Ask for a passkey | Get an assertion the service accepts (origin and RP ID are bound into it) |
@@ -80,8 +81,9 @@ detect and remediate. Mitigations:
   per account; approvals: 10 an hour per account.
 - *Detect and remediate.* Each sign-in is audited (`cli_signin_approved`, `cli_signed_in`, `cli_signin_denied`) and
   wakes the owner's devices: "A command line was signed in" opens a one-tap revoke, which deletes the session and
-  revokes every token, agent key and receipts key it made (`cli_session_revoked`), also after the session signed itself
-  out or expired (the list and the alert come from the audit log). Revoking needs a web session.
+  revokes every token, agent key, receipts key and guard key it made, closing the guard keys' open approvals
+  (`cli_session_revoked`), also after the session signed itself out or expired (the list and the alert come from the
+  audit log). Revoking needs a web session.
 - The CLI prints whose account it signed in to, so a person whose own code was approved by someone else (signing them
   into a stranger's vault) notices at once.
 Residual: a person who types a code they were sent, ignores the warnings and approves has signed that command line in
@@ -155,6 +157,53 @@ is written to the audit log. A CLI session or an agent cannot do it.
 **J9. A log that is down never blocks a decision.** Sealing runs after the response; a failing, full or misconfigured log
 only increments the skipped count. Test: *A log that is misconfigured or down*.
 
+### Approvals for a coding agent's commands (guard keys, migration 0006, not yet deployed)
+
+A hook on the agent's machine (the guard) holds a guard key and asks `POST /v1/approvals` before running a command on its
+map; the human approves in the app with a passkey. **The guard is enforced on the agent's machine, not by the server: a
+seatbelt, not a sandbox.** Only brokered keys are a hard stop.
+
+**G1. The agent approves its own command.** A guard key authenticates only `/v1/approvals*`; every approve route needs a
+web session and a fresh passkey ceremony, as in S2. Test: *a guard key can only ask* (`test/approvals.test.js`).
+
+**G2. Approval stretching and replay.** An approval is bound to `SHA-256(["v1", kind, agent, detail, cwd])`: the exact
+command or tool call, the agent and the folder name. It is used once, by one atomic update that also checks the key and
+the 10-minute window; another command gets `409 hash_mismatch`. An approved guard hold can never let a brokered request
+through (different token ids). Tests: *ask, approve with a passkey, use exactly once*; *expiry*.
+
+**G3. Approval fatigue and alert floods.** A guard key gets 60 new holds an hour, 20 waiting at a time, and an account
+100 waiting; the same command asked again is the same hold and no new alert; alerts for held requests go out at most once a
+minute per account (the alert says how many are waiting). Test: *limits*.
+
+**G4. A misleading summary.** The `summary` comes from the guard (or from anyone holding its key). The card labels it
+"Summary from the guard" and puts it under the exact `detail`, which is what the hash binds, shown in full (never
+truncated) with invisible, direction and control characters made visible (`<U+XXXX>`), so an escape sequence or a
+carriage return cannot hide part of a command. Test: *the hold card gets the exact command*.
+
+**G5. Prompt injection through a deny reason.** The reason is written by the approver (a web or CLI session of the
+account), capped at 200 characters and cleaned of control, format and line-break characters; guards hand it to the agent
+as data. A stolen CLI session could deny with a misleading reason; it cannot approve.
+
+**G6. A phished CLI session leaves a guard key behind.** A guard key made by a CLI session ends with that session (at
+most 7 days) and is revoked with it, closing its open approvals. Revoking a guard key closes its approvals at once.
+Tests: *revoking a guard key closes its open approvals*; `test/cli-signin.test.js`.
+
+**G7. Privacy of held commands.** Commands can carry secrets (a connection string in a `psql` line). The exact command is
+kept in the hold's preview, shown only to the account's sessions, and dropped about a day after the hold is closed (the
+sweep); the audit log keeps only its SHA-256. The summary and folder name stay with the hold; the deny reason stays with
+the hold and in the private audit log. A phone alert shows the
+guard's label and the summary, which can appear on a lock screen (privacy page). Public receipts carry only `RUN` or
+`CALL`, the agent's name from a fixed list, the decision, the rule id and the map version. Test: *public receipts for a
+guard decision carry fixed words only* checks the command, summary, why, folder, session, label and reason never reach
+the public log or its storage.
+
+**G8. Waiting must not cost the free plan.** A long poll re-reads every 2 seconds for at most 20 seconds: at most 12 D1
+queries and no writes (its limit is in memory). Test: *the long poll*.
+
+Residual: the guard can be bypassed by an agent that edits its hook settings, wraps the command in a script the map does
+not read, or calls the tool another way; hook runners that time out may fail open unless set to block (the guard's install
+sets that where the agent supports it). Commands not on the map are left to the agent's own permission settings.
+
 ### The domain move (two hosts)
 
 **D1. RP ID confusion.** The service answers on counterseal.gautamkhosla.com and leash.gautamkhosla.com. WebAuthn
@@ -182,6 +231,8 @@ redirected there.
 ## Residual risks
 
 - Irreversible operations the map does not cover. Mitigation: conservative defaults, versioned map, user `hold` rules.
+- The coding-agent guard runs on the agent's machine and can be bypassed there (G-section). Mitigation: say so plainly;
+  for a hard stop, the agent gets a Counterseal token instead of the real key.
 - The human approves the wrong thing. Mitigation: the approve screen shows method, host, path, rule, reason and a preview.
 - A person approves a CLI sign-in someone sent them (S11). Mitigation: typed codes, context and warnings, 7-day
   sessions, alerts and one-tap revoke of the session and all it made.

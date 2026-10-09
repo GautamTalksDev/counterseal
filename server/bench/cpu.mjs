@@ -85,6 +85,39 @@ await measure('approve a hold (passkey verify + sealed)', async (i) => {
   const credential = await u.auth.get(bb.body.options);
   return request('POST', `/v1/holds/${h.body.hold_id}/approve/finish`, { cookie: u.cookie, body: { challengeId: bb.body.challengeId, credential } });
 });
+// approvals for a coding agent's commands (guard keys, lsg_): ask, poll, approve, use
+const gkey = (await w.req('POST', '/v1/guard/keys', { cookie: u.cookie, body: { label: 'bench guard' } })).body.key;
+// outside the timing: close earlier holds and reset the per-key create limit, so the caps (20 waiting, 60 an hour) do not stop the bench
+const fresh = () => { w.env.DB.raw.prepare("UPDATE holds SET status = 'expired' WHERE status = 'pending'").run(); w.env.DB.raw.prepare("DELETE FROM ratelimits WHERE bucket LIKE 'gcreate:%' OR bucket LIKE 'pushhold:%' OR bucket LIKE 'acct:%'").run(); };
+const askBody = (i) => ({ kind: 'shell', agent: 'claude-code', rule: 'sh.terraform-destroy', why: 'Destroys every resource in the state.', summary: 'terraform destroy', detail: `terraform destroy -auto-approve -target=module.m${i} ` + 'x'.repeat(3000), context: { cwd: 'infra', session: 's1' }, map: '2026-10-10.1' });
+await measure('POST /v1/approvals, 3 KB command (held + push check + sealed)', (i) => { fresh(); return request('POST', '/v1/approvals', { bearer: gkey, body: askBody(i) }); }, (st) => st === 202);
+fresh();
+const pending = (await w.req('POST', '/v1/approvals', { bearer: gkey, body: askBody('poll'), origin: null, xleash: false })).body;
+await measure('GET /v1/approvals/:id (poll, no wait)', () => request('GET', `/v1/approvals/${pending.id}`, { bearer: gkey }));
+// a full 20 s long poll on a pending hold: 11 reads; the 2 s timer is stubbed (waiting costs no CPU on Workers)
+w.env.__sleep = async () => {};
+await measure('GET /v1/approvals/:id?wait=20 (11 reads, timer stubbed)', () => request('GET', `/v1/approvals/${pending.id}?wait=20`, { bearer: gkey }));
+delete w.env.__sleep;
+await measure('approve a guard hold (passkey verify + sealed)', async (i) => {
+  fresh();
+  const h = (await w.req('POST', '/v1/approvals', { bearer: gkey, body: askBody('a' + i), origin: null, xleash: false })).body;
+  const bb = await w.req('POST', `/v1/holds/${h.id}/approve/begin`, { cookie: u.cookie, body: {} });
+  const credential = await u.auth.get(bb.body.options);
+  return request('POST', `/v1/holds/${h.id}/approve/finish`, { cookie: u.cookie, body: { challengeId: bb.body.challengeId, credential } });
+});
+await measure('POST /v1/approvals/:id/use (atomic use + sealed)', async (i) => {
+  fresh();
+  const h = (await w.req('POST', '/v1/approvals', { bearer: gkey, body: askBody('u' + i), origin: null, xleash: false })).body;
+  const bb = await w.req('POST', `/v1/holds/${h.id}/approve/begin`, { cookie: u.cookie, body: {} });
+  const ok = await w.req('POST', `/v1/holds/${h.id}/approve/finish`, { cookie: u.cookie, body: { challengeId: bb.body.challengeId, credential: await u.auth.get(bb.body.options) } });
+  if (ok.status !== 200) throw new Error('approve failed: ' + JSON.stringify([h, bb.body, ok.body]).slice(0, 500));
+  return request('POST', `/v1/approvals/${h.id}/use`, { bearer: gkey, body: { hash: h.hash } });
+});
+await measure('POST /v1/holds/:id/deny with a reason (sealed)', async (i) => {
+  fresh();
+  const h = (await w.req('POST', '/v1/approvals', { bearer: gkey, body: askBody('d' + i), origin: null, xleash: false })).body;
+  return request('POST', `/v1/holds/${h.id}/deny`, { cookie: u.cookie, body: { reason: 'Not today: use the staging workspace.' } });
+});
 const { LIMITS } = await import('../src/receipts.js');
 await measure(`POST /v1/receipts, ${LIMITS.MAX_BATCH} unsigned (the cap)`, (i) => request('POST', '/v1/receipts', { bearer: rkey, body: { receipts: Array.from({ length: LIMITS.MAX_BATCH }, (_, j) => ({ agent: 'a', action: `x${i}.${j}`, input_sha256: 'a'.repeat(64) })) } }));
 await measure(`POST /v1/receipts, ${LIMITS.MAX_SIGNED_BATCH} signed (the cap)`, async (i) => {
