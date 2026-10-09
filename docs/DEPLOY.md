@@ -5,12 +5,13 @@ Object (`ReceiptLog`, the public log) and static assets. It fits the Workers Fre
 
 ## Upgrading the live service (from the broker-only version)
 
-The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005_cli_signin.sql` and
-`0006_approvals.sql` only add tables, indexes and defaulted or nullable columns, so the code that runs today keeps
+The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005_cli_signin.sql`,
+`0006_approvals.sql` and `0010_provider_host.sql` only add tables, indexes and defaulted or nullable columns, so the code that runs today keeps
 working on the migrated database, and the new code keeps working with everything the old code wrote
 (`server/test/migration.test.js` runs the deployed code, migrates, then runs the new code). CLI sessions made before 0005
 keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as `kind: "proxy"` (a brokered API
-call); 0006 adds the guard keys table and the coding-agent approvals (branch `feat/approvals`, not yet deployed).
+call); 0006 adds the guard keys table and the coding-agent approvals (branch `feat/approvals`, not yet deployed). 0010 adds one
+nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed).
 
 ```bash
 cd server
@@ -20,7 +21,7 @@ npx -y wrangler@4 d1 time-travel info leash
 # 2. new secrets (names only; values never leave your machine)
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK        # the log's Ed25519 signing key; prints the public part to stderr: keep it
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx -y wrangler@4 secret put STATS_TOKEN   # optional: /v1/admin/stats
-# 3. the additive migrations (applies 0004 to 0006; 0001 to 0003 are already applied)
+# 3. the additive migrations (applies 0004 to 0006 and 0010; 0001 to 0003 are already applied)
 npx -y wrangler@4 d1 migrations apply leash --remote
 # 4. the code (creates the ReceiptLog Durable Object through the "v1" migration in wrangler.jsonc)
 npx -y wrangler@4 deploy
@@ -72,7 +73,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" |
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))" | npx -y wrangler@4 secret put IP_SALT
 node dev/vapid-keygen.mjs | npx -y wrangler@4 secret put VAPID_PRIVATE_JWK   # phone alerts (Web Push); optional
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK          # the public log
-npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0006
+npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0006, then 0010 (0007 to 0009 are numbers other features will use)
 npx -y wrangler@4 deploy
 ```
 

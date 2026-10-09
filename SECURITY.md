@@ -59,8 +59,12 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
   anyway has signed that command line in for up to 7 days. Country and network checks can be fooled by a VPN.
 - An upstream API key that is itself over-scoped being used outside the broker. Keep keys you vault only in the vault.
 - Calls the map does not know are irreversible. The map is versioned and conservative (every `DELETE` on GitHub,
-  Cloudflare, Stripe and Supabase, every Railway mutation except redeploy and restart, SQL unless plainly read-only); add
-  `hold` rules to your policy for anything else.
+  Cloudflare, Stripe, Supabase, Vercel, Neon, Fly.io and Resend, every Railway mutation except redeploy and restart, SQL
+  unless plainly read-only); add `hold` rules to your policy for anything else.
+- SQL that never passes through a management API. The map covers management APIs only: SQL sent straight over a database
+  connection string (to Neon, Supabase or any Postgres) never passes through Counterseal.
+- A Shopify mutation added after the map version whose name does not contain `delete` or `destroy`. Shopify's mutations are
+  held by name (patterns plus reviewed lists), not by an allow list, and are checked against each Shopify release.
 - A compromised agent machine: its agent key signs for whoever controls it, and a CLI session there can mint new
   tokens. Revoke the key; bound tokens stop at once. Approvals still need your passkey.
 - The truth of reported receipts: they prove what an agent sent, when, and (if signed) with which key.
@@ -85,6 +89,33 @@ Every item has a test in `server/test/bypass.test.js`: repeated or case-variant 
 or case-folded keys are unreadable and held), Cloudflare purge read from parsed JSON, GraphQL parameters outside the body,
 method overrides held everywhere, path variants and HEAD for GET, non-UTF-8 bodies refused, glob compilation, SQL through
 other doors (migrations, D1 import, time travel restore).
+
+## Five more providers, 10 Oct 2026 (map `2026-10-10.1`, migration `0010`)
+
+Vercel, Neon, Fly.io, Resend and Shopify. Each is mapped from the provider's own published reference (Vercel, Neon, Fly.io
+and Resend from their OpenAPI documents, Shopify from its Admin GraphQL schema, all 484 mutations of 2026-01, 2026-07 and
+2026-10), and every rule cites the reference page of its endpoint in `server/src/providers.js`. Every item has a test in
+`server/test/map-1010.test.js`, run in every spelling (case, trailing slash, format suffix, encoded letters), with the
+parser-differential patterns of the 9 Oct hardening (repeated and escaped keys, query-string and form copies, method
+overrides, non-UTF-8 bodies).
+
+- **Shopify's store address is the one upstream address that is not fixed in code.** It is where a vaulted key is sent, so it
+  is the SSRF surface and is held to the strictest check in the code (`storeHost`): printable ASCII, exactly one label of
+  letters, digits and hyphens that starts and ends with a letter or digit, then exactly `.myshopify.com`. A port, user info,
+  path, query, fragment, IP address, trailing dot, further subdomain, punycode (`xn--` or any `--` in the third and fourth
+  places) or non-ASCII character is refused. It is checked when the key is added and again before every upstream call, the
+  key is sealed together with its address (the address is part of the AES-GCM additional data, so a row moved to another
+  store does not decrypt), and the database refuses anything else (a CHECK constraint on migration 0010).
+- **Only the Admin GraphQL endpoint is brokered on Shopify** (`/admin/api/<version>/graphql.json`). Every other path on the
+  store (the legacy REST API, storefront pages, app proxies) is refused with `404 unsupported_path` before anything is sent,
+  so a key never reaches a page it was not meant for.
+- **Public receipts never carry a store.** The host word for Shopify is `myshopify.com`; the store address is in the owner's
+  private audit log and holds only.
+- **Resend: a send to more than one person is held** (a list, a list hidden in one string, `cc`, `bcc`, batches, broadcasts,
+  inbox replies and forwards, enabling an automation); one recipient passes. Sent email cannot be unsent.
+- **Minting a new key is held on every new provider** (Vercel tokens, Neon and Resend API keys, Fly.io deploy tokens, Shopify
+  delegate tokens): an agent that could mint one would hold a real key that does not go through Counterseal.
+- A GraphQL read is a POST, so on Shopify (as on GitHub and Railway) it is recorded like any other POST.
 
 ## The merge, 9 Oct 2026
 

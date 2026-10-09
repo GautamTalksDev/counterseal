@@ -23,6 +23,9 @@ Written by the broker for its own decision (no API can set `source`):
 {"receipt":{"action":"DELETE api.github.com","agent":"broker","decision":"held","meta":{"agent_key":true,"map":"2026-10-09.1","rule":"gh.delete"},"parent":"<SHA-256 of the audit entry>","ts":1791300000000},"received_at":1791300000000,"source":"broker","submitter":"<hex>","v":2}
 ```
 
+The host word is the provider's fixed API host (`api.vercel.com`, `console.neon.tech`, `api.machines.dev`, `api.resend.com`, ...). For Shopify, whose
+calls go to the merchant's own store, it is only `myshopify.com`: the store address is never in the public log.
+
 Broker decisions: `allowed` (a write the policy let through), `held`, `approved` (a passkey approved a hold; `meta.passkey`
 is true), `executed` (the approved call went through), `denied` (a policy denial or a human denying a hold). Allowed reads
 (GET, HEAD) are not recorded; a read that is held or denied is. `parent` is the account's own audit entry hash (`/v1/audit` returns it as `hash`, with the entry's

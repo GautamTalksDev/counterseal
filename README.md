@@ -57,7 +57,7 @@ flowchart LR
       AU[(Audit log<br/>hash-chained, private)]
       LOG[(Public log<br/>RFC 6962 Merkle tree,<br/>Durable Object)]
     end
-    L -- "real key, injected server side" --> U[GitHub · Cloudflare · Railway · Stripe · Supabase]
+    L -- "real key, injected server side" --> U[GitHub · Cloudflare · Railway · Stripe · Supabase<br/>Vercel · Neon · Fly.io · Resend · Shopify]
     H -- "phone alert" --> Ph[Your phone<br/>passkey / Face ID]
     Ph -- "WebAuthn assertion" --> H
     AU -- "receipt: method, host, decision, hashes" --> LOG
@@ -191,6 +191,13 @@ The full contract (request fields, errors, budgets) is in [docs/PROTOCOL.md](doc
 | Railway | `https://counterseal.gautamkhosla.com/p/railway/` (GraphQL) |
 | Stripe | `https://counterseal.gautamkhosla.com/p/stripe` |
 | Supabase (management API) | `https://counterseal.gautamkhosla.com/p/supabase` |
+| Vercel | `https://counterseal.gautamkhosla.com/p/vercel` |
+| Neon | `https://counterseal.gautamkhosla.com/p/neon` (paths after `/api/v2`) |
+| Fly.io (Machines API) | `https://counterseal.gautamkhosla.com/p/fly` (paths after `/v1`; vault the whole token line `fly tokens create` prints, `FlyV1 fm2_...`) |
+| Resend | `https://counterseal.gautamkhosla.com/p/resend` |
+| Shopify (Admin GraphQL API only) | `https://counterseal.gautamkhosla.com/p/shopify/admin/api/2026-07/graphql.json`; add the key with its store address: `leashcli add shopify --host your-store.myshopify.com` |
+
+The irreversible map covers 10 APIs: GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify. Management APIs only; SQL sent straight over a database connection string never passes through Counterseal. The map version is `2026-10-10.1`; every rule has its reason and the reference page it comes from in [server/src/providers.js](server/src/providers.js).
 
 ### Verify a receipt
 
@@ -242,13 +249,13 @@ node dev/local.js 8790                          # http://localhost:8790 (passkey
 
 ## Deploy
 
-See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), two additive migrations (0004, 0005), `wrangler deploy`.
+See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), four additive migrations (0004, 0005, 0006, 0010), `wrangler deploy`.
 
 ## Status and roadmap
 
-Brokers GitHub, Cloudflare, Railway, Stripe and Supabase; phone and desktop alerts for held calls (Web Push,
+Brokers GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify; phone and desktop alerts for held calls (Web Push,
 payload-free); public receipts; agent keys. In this repo, not yet deployed: the Approvals API and guard keys for a
-coding agent's commands. Next: Vercel, Fly.io, AWS (SigV4 re-signing), Neon, PlanetScale; two-person
+coding agent's commands. Next: AWS (SigV4 re-signing), PlanetScale; two-person
 approval; SSO for teams; external witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
 
 Counterseal maps to the proxy-gateway model of the IETF draft

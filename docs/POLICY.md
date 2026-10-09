@@ -42,6 +42,10 @@ The irreversible map is stricter than your rules: it ignores case on every provi
 suffix such as `.json`, treats `HEAD` as `GET`, and holds any request that carries a method override (`_method`). A
 method override hold cannot be pre-approved with `unattendedIrreversible`.
 
+Paths for the newer providers are relative to their base, like Cloudflare's: Neon after `/api/v2`, Fly.io after `/v1`. Shopify is brokered through one path only, `/admin/api/<version>/graphql.json`
+(a version such as `2026-07`, or `unstable`); every other path on the store is refused with `404 unsupported_path` before anything is sent. A Shopify key is stored with its store address
+(`your-store.myshopify.com`), and a token goes only to that store. Shopify reads are POSTs too, so a `hold` or `deny` rule for Shopify names the GraphQL path, not a resource.
+
 ## Order of evaluation
 
 1. `deny`

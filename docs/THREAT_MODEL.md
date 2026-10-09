@@ -111,6 +111,18 @@ receipts keys, 20 agent keys, 10 devices) and bounded lists keep one account fro
 globs compile to regular expressions; three `**` against a long path backtracked for seconds, so a glob may use `**` at
 most twice and one wildcard per segment. Tests: *ceilings*, *policy globs*.
 
+**S16. A vaulted key sent where an attacker chose (Shopify's store address).** Shopify is the one provider whose upstream
+address comes from the user. Someone with a command line session or a script could try to add a Shopify key with an address
+of their own (`evil.example.com`, `127.0.0.1`, `store.myshopify.com:443`, `a@b.myshopify.com`, a punycode or Unicode lookalike),
+or an address that ends in `.myshopify.com` but is not one store, or point a Shopify token at a storefront page or app proxy
+that forwards headers to a third party. Mitigations: `storeHost` accepts only printable ASCII that is exactly one DNS label then
+`.myshopify.com` (no port, user info, path, IP address, trailing dot, nested subdomain or punycode); it runs when the key is added
+and before every call; the address is part of the key's AES-GCM additional data, so a database row changed to another store
+fails to decrypt (`vault_error`) and a row that no longer passes the check stops the call (`bad_host`); migration 0010 adds a
+database CHECK; only `/admin/api/<version>/graphql.json` is brokered, everything else is refused with `unsupported_path`
+before the key is read; redirects are never followed. Public receipts carry `myshopify.com`, never the store. Tests:
+*Shopify store host*, *Shopify store host cannot be changed behind the broker*, *Shopify privacy*.
+
 ### The joints between the three parts
 
 **J1. Receipt forgery.** A receipts API key holder tries to publish something that looks like a broker decision. The
