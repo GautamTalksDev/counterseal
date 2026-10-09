@@ -5,13 +5,14 @@ import { summarize, PROVIDERS, MAP_VERSION } from './providers.js';
 import { normalisePolicy, decide } from './policy.js';
 import { audit } from './audit.js';
 import { newChallenge, takeChallenge, checkAssertion, rp, hosts, appOrigin, sessionId } from './auth.js';
-import { limit } from './ratelimit.js';
+import { limit, allow } from './ratelimit.js';
 import { notify } from './push.js';
 import { verifyAgentSignature, d1Seen, ownActive } from './agentkeys.js';
 import { BRAND } from './brand.js';
 import { markSeen } from './admin.js';
 
 const HOLD_TTL = 30 * 60_000, GRANT_TTL = 10 * 60_000, MAX_BODY = 1_048_576, MAX_RESP = 10 * 1_048_576;
+export const PENDING_PER_TOKEN = 20, PENDING_PER_ACCOUNT = 100, MAX_CREDENTIALS = 50, MAX_LIVE_TOKENS = 200, LIST_TOKENS = 500;
 
 // ---------------------------------------------------------------- credentials
 export async function addCredential(env, sess, body) {
@@ -234,13 +235,22 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
     if (!g) {
       let h = await env.DB.prepare("SELECT id, expires_at FROM holds WHERE token_id = ? AND req_hash = ? AND status = 'pending' AND expires_at > ?").bind(tok.id, reqHash, now()).first();
       if (!h) {
+        // Approval fatigue: someone holding a leaked token could make thousands of distinct held requests, each one an
+        // alert, hoping a tired human taps approve. A token gets at most 20 waiting requests and an account 100; past
+        // that, nothing new is held or alerted until a human has looked.
+        const n = await env.DB.prepare("SELECT (SELECT COUNT(*) FROM holds WHERE token_id = ?1 AND status = 'pending' AND expires_at > ?3) AS tok, (SELECT COUNT(*) FROM holds WHERE account_id = ?2 AND status = 'pending' AND expires_at > ?3) AS acct")
+          .bind(tok.id, tok.account_id, now()).first();
+        if (n.tok >= PENDING_PER_TOKEN || n.acct >= PENDING_PER_ACCOUNT) {
+          throw new HttpError(429, 'too_many_holds', `${n.tok >= PENDING_PER_TOKEN ? `${n.tok} requests from this token are` : `${n.acct} requests are`} already waiting for approval, so this one was not held or sent. Stop and ask your human to review the waiting requests first.`);
+        }
         h = { id: randomId(), expires_at: now() + HOLD_TTL };
         const pv = preview(url.search, bodyText);
         await env.DB.prepare('INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
           .bind(h.id, tok.account_id, tok.id, reqHash, method, P.host, where.path, d.rule, d.why, now(), h.expires_at, pv).run();
         await audit(env, tok.account_id, 'token:' + tok.id, 'hold', { ...where, rule: d.rule, hold: h.id, preview_sha256: await sha256hex(pv || '') }, seal);
-        // wake the owner's devices after responding; the push itself carries nothing
-        const p = notify(env, tok.account_id, env.__pushFetch || fetch).catch(() => {});
+        // wake the owner's devices after responding; the push itself carries nothing. At most one alert a minute per
+        // account for held requests: the alert says how many are waiting, so a flood of holds is one buzz, not hundreds
+        const p = (async () => { if (await allow(env.DB, 'pushhold:' + tok.account_id, 1, 60_000, now())) await notify(env, tok.account_id, env.__pushFetch || fetch); })().catch(() => {});
         if (env.__ctx) env.__ctx.waitUntil(p); else await p;
       }
       // the approve link goes where the owner can sign in: the product's host once they have a passkey there

@@ -42,11 +42,13 @@ async function vapidHeader(env, k, endpoint) {
 export async function subscribe(env, sess, body) {
   const endpoint = checkEndpoint(body.endpoint);
   const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM push_subs WHERE account_id = ?').bind(sess.accountId).first();
-  const dup = await env.DB.prepare('SELECT id FROM push_subs WHERE endpoint = ?').bind(endpoint).first();
-  if (dup) await env.DB.prepare('UPDATE push_subs SET account_id = ?, created_at = ? WHERE id = ?').bind(sess.accountId, now(), dup.id).run();
+  const dup = await env.DB.prepare('SELECT id, account_id FROM push_subs WHERE endpoint = ?').bind(endpoint).first();
+  if (dup && dup.account_id === sess.accountId) await env.DB.prepare('UPDATE push_subs SET created_at = ? WHERE id = ?').bind(now(), dup.id).run();
   else {
+    // a browser that moves to another account takes its device slot with it, within the new account's cap
     if (n.n >= MAX_SUBS) throw new HttpError(409, 'too_many_devices', `Up to ${MAX_SUBS} devices. Turn alerts off on one first.`);
-    await env.DB.prepare('INSERT INTO push_subs (id, account_id, endpoint, created_at) VALUES (?, ?, ?, ?)').bind(randomId(), sess.accountId, endpoint, now()).run();
+    if (dup) await env.DB.prepare('UPDATE push_subs SET account_id = ?, created_at = ?, last_ok_at = NULL WHERE id = ?').bind(sess.accountId, now(), dup.id).run();
+    else await env.DB.prepare('INSERT INTO push_subs (id, account_id, endpoint, created_at) VALUES (?, ?, ?, ?)').bind(randomId(), sess.accountId, endpoint, now()).run();
   }
   return { ok: true };
 }

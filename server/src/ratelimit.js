@@ -22,6 +22,11 @@ export async function limit(db, bucket, max, windowMs, now) {
   }
 }
 
+/** the same fixed window, as a yes or no instead of a 429 (for work that is skipped, not refused: a phone alert) */
+export async function allow(db, bucket, max, windowMs, now) {
+  try { await limit(db, bucket, max, windowMs, now); return true; } catch (e) { if (e instanceof HttpError && e.status === 429) return false; throw e; }
+}
+
 // Reads of the public log, the receipts API and the free signature tool never cost a D1 write for their limit. In
 // order of preference:
 // 1. a Workers Rate Limiting binding (env.READ_LIMITER) if configured, shared across isolates in a location;

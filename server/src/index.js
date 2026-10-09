@@ -96,9 +96,11 @@ const ROUTES = [
   ['GET', /^\/v1\/passkeys$/, 'session', (c) => Move.listPasskeys(c.env, c.s)],
   ['DELETE', new RegExp(`^/v1/passkeys/${ID}$`), 'webw', (c) => Move.removePasskey(c.env, c.s, c.m[1])],
   ['GET', /^\/v1\/push\/key$/, 'session', (c) => Push.publicKey(c.env)],
-  ['POST', /^\/v1\/push\/subscribe$/, 'write', (c) => Push.subscribe(c.env, c.s, c.body)],
-  ['POST', /^\/v1\/push\/unsubscribe$/, 'write', (c) => Push.unsubscribe(c.env, c.s, c.body)],
-  ['POST', /^\/v1\/push\/test$/, 'write', async (c) => { await limit(c.env.DB, 'pushtest:' + c.s.accountId, 3, 60_000, now()); return Push.notify(c.env, c.s.accountId, c.env.__pushFetch || fetch); }],
+  // alerts are a browser feature: only a web session adds, removes or tests a device (a stolen CLI session could
+  // otherwise fill the account's 10 device slots, or learn when holds happen through a device of its own)
+  ['POST', /^\/v1\/push\/subscribe$/, 'webw', (c) => Push.subscribe(c.env, c.s, c.body)],
+  ['POST', /^\/v1\/push\/unsubscribe$/, 'webw', (c) => Push.unsubscribe(c.env, c.s, c.body)],
+  ['POST', /^\/v1\/push\/test$/, 'webw', async (c) => { await limit(c.env.DB, 'pushtest:' + c.s.accountId, 3, 60_000, now()); return Push.notify(c.env, c.s.accountId, c.env.__pushFetch || fetch); }],
   ['GET', /^\/v1\/credentials$/, 'session', (c) => B.listCredentials(c.env, c.s)],
   ['POST', /^\/v1\/credentials$/, 'write', (c) => B.addCredential(c.env, c.s, c.body)],
   // deleting a vaulted key breaks every token on it; an agent holding a CLI session must not be able to do that
