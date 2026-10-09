@@ -22,8 +22,9 @@ export async function generateAgentKey() {
 export const importAgentKey = (jwk) => crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: jwk.x, d: jwk.d }, { name: 'Ed25519' }, false, ['sign']);
 
 /** headers to add to one request: Signature-Input, Signature and, when there is a body, Content-Digest.
- *  Covers @method, @target-uri and content-digest. key: CryptoKey (Ed25519 private); kid: keyid(x). */
-export async function signBrokerRequest({ method, url, body }, { key, kid, now = Math.floor(Date.now() / 1000), expiresIn = 60, nonce } = {}) {
+ *  Covers @method, @target-uri and, with a body, content-digest and content-type (send exactly that Content-Type).
+ *  key: CryptoKey (Ed25519 private); kid: keyid(x). */
+export async function signBrokerRequest({ method, url, body, contentType }, { key, kid, now = Math.floor(Date.now() / 1000), expiresIn = 60, nonce } = {}) {
   if (!(expiresIn > 0 && expiresIn <= 300)) throw new Error('expiresIn must be 1 to 300 seconds');
   const bytes = body == null ? new Uint8Array(0) : typeof body === 'string' ? te.encode(body) : new Uint8Array(body);
   const target = new URL(url).href;
@@ -34,6 +35,7 @@ export async function signBrokerRequest({ method, url, body }, { key, kid, now =
     out['content-digest'] = `sha-256=:${b64(await crypto.subtle.digest('SHA-256', bytes))}:`;
     comps.push('content-digest');
     lines.push(`"content-digest": ${out['content-digest']}`);
+    if (contentType) { comps.push('content-type'); lines.push(`"content-type": ${String(contentType).trim()}`); }
   }
   const n = nonce || b64u(crypto.getRandomValues(new Uint8Array(24)));
   const params = `(${comps.map(sf).join(' ')});created=${now};expires=${now + expiresIn};keyid=${sf(kid)};alg="ed25519";nonce=${sf(n)};tag=${sf(POP_TAG)}`;

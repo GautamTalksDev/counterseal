@@ -44,7 +44,7 @@ async function call(w, tok, method, path, { body, ak, sign = {} } = {}) {
   const url = 'https://leash.test/p/github' + path;
   const raw = body === undefined ? undefined : JSON.stringify(body);
   const headers = { ...(raw !== undefined ? { 'content-type': 'application/json' } : {}) };
-  if (ak) Object.assign(headers, await signBrokerRequest({ method, url, body: raw }, { key: ak.key, kid: ak.keyid, ...sign }));
+  if (ak) Object.assign(headers, await signBrokerRequest({ method, url, body: raw, contentType: headers['content-type'] }, { key: ak.key, kid: ak.keyid, ...sign }));
   return w.req(method, url, { bearer: tok, ...anon, raw, headers });
 }
 const publicEntries = async (w) => (await w.req('GET', '/v1/log/entries?start=0&count=100', anon)).body.entries;
@@ -226,13 +226,18 @@ test('Prove who: a token bound to an agent key works only on requests that key s
   const reason = async (r) => (await r).body.reason || (await r).body.error;
   assert.match(await reason(w.req('GET', url + '/pulls', { bearer: t, ...anon, headers: await signBrokerRequest({ method: 'GET', url }, { key: ak.key, kid: ak.keyid }) })), /does not verify/);
   assert.match(await reason(w.req('DELETE', url, { bearer: t, ...anon, headers: await signBrokerRequest({ method: 'GET', url }, { key: ak.key, kid: ak.keyid }) })), /does not verify/);
-  const sb = await signBrokerRequest({ method: 'POST', url: url + '/issues', body: '{"title":"a"}' }, { key: ak.key, kid: ak.keyid });
+  const sb = await signBrokerRequest({ method: 'POST', url: url + '/issues', body: '{"title":"a"}', contentType: 'application/json' }, { key: ak.key, kid: ak.keyid });
   assert.match(await reason(w.req('POST', url + '/issues', { bearer: t, ...anon, raw: '{"title":"b"}', headers: { ...sb, 'content-type': 'application/json' } })), /Content-Digest does not match/);
   const other = await generateAgentKey();
   assert.match(await reason(w.req('GET', url, { bearer: t, ...anon, headers: await signBrokerRequest({ method: 'GET', url }, { key: await importAgentKey(other), kid: ak.keyid }) })), /does not verify/);
   assert.match(await reason(w.req('GET', url, { bearer: t, ...anon, headers: await signBrokerRequest({ method: 'GET', url }, { key: await importAgentKey(other), kid: await keyid(other.x) }) })), /keyid is not the agent key/);
   const old = Math.floor(Date.now() / 1000) - 400;
   assert.match(await reason(w.req('GET', url, { bearer: t, ...anon, headers: await signBrokerRequest({ method: 'GET', url }, { key: ak.key, kid: ak.keyid, now: old }) })), /expired/);
+  // a content type the signature does not cover (the approval hash binds it, and the upstream reads the body by it)
+  const ct = await signBrokerRequest({ method: 'POST', url: url + '/issues', body: 'title=a' }, { key: ak.key, kid: ak.keyid });
+  assert.match(await reason(w.req('POST', url + '/issues', { bearer: t, ...anon, raw: 'title=a', headers: { ...ct, 'content-type': 'application/x-www-form-urlencoded' } })), /must cover content-type/);
+  const ct2 = await signBrokerRequest({ method: 'POST', url: url + '/issues', body: '{"t":1}', contentType: 'application/json' }, { key: ak.key, kid: ak.keyid });
+  assert.match(await reason(w.req('POST', url + '/issues', { bearer: t, ...anon, raw: '{"t":1}', headers: { ...ct2, 'content-type': 'text/plain' } })), /does not verify/, 'a swapped content type breaks the signature');
   // a body the signature does not cover
   const nb = await signBrokerRequest({ method: 'POST', url: url + '/issues' }, { key: ak.key, kid: ak.keyid });
   assert.match(await reason(w.req('POST', url + '/issues', { bearer: t, ...anon, raw: '{"title":"c"}', headers: { ...nb, 'content-type': 'application/json' } })), /must cover content-digest/);

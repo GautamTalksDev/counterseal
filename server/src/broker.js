@@ -175,7 +175,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   const m = authz.match(/^Bearer (lsh_[A-Za-z0-9_-]{43})$/);
   if (!m) throw new HttpError(401, 'leash_token_required', `Send your ${BRAND.name} token as: Authorization: Bearer lsh_...`);
   // one query: the token, whether its account has public receipts on, and the agent key it is bound to (if any)
-  const tok = await env.DB.prepare('SELECT t.*, a.receipts AS receipts_on, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?').bind(await sha256hex(m[1])).first();
+  const tok = await env.DB.prepare('SELECT t.*, a.receipts AS receipts_on, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?').bind(await sha256hex(m[1])).first();
   if (!tok || tok.revoked || tok.expires_at < now()) throw new HttpError(401, 'token_invalid');
   // a token bound to an agent key whose key is gone or revoked never works again (fails closed)
   if (tok.agent_key_id && (!tok.agent_keyid || tok.agent_revoked)) throw new HttpError(401, 'agent_key_revoked', 'The agent key this token is bound to was revoked.');
@@ -267,7 +267,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
     env.DB.prepare('UPDATE tokens SET last_used = ? WHERE id = ?').bind(now(), tok.id),
     env.DB.prepare('UPDATE credentials SET last_used = ? WHERE id = ?').bind(now(), cred.id),
   ]);
-  if (agentKey) await env.DB.prepare('UPDATE agent_keys SET last_used = ? WHERE id = ?').bind(now(), tok.agent_key_id).run();
+  if (agentKey && !(tok.agent_last_used > now() - 60_000)) await env.DB.prepare('UPDATE agent_keys SET last_used = ? WHERE id = ?').bind(now(), tok.agent_key_id).run();
   // writes are on the record; an approved call was already sealed as "executed", so its result is not sealed twice
   if (method !== 'GET' && method !== 'HEAD') await audit(env, tok.account_id, 'token:' + tok.id, 'proxy', { ...where, status: res.status, rule: d.rule }, d.decision === 'hold' ? { receipts: false } : seal);
   return new Response(res.body, { status: res.status, headers: out });

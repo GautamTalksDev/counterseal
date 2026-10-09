@@ -18,6 +18,7 @@ import { BRAND } from './brand.js';
 export { ReceiptLog } from './log.js';
 
 const ID = '([0-9a-f]{24})';
+const DO_READS = /^\/v1\/(log\/(entries|proof\/)|my\/)/;
 const REG_PER_DAY = (env) => Number(env.REG_PER_IP_DAY) || 5;
 // [method, regex, guard, handler]
 //   public / publicw (with Origin check): per-IP D1 limit;  pub: public log reads, in-memory limit, CORS open
@@ -199,6 +200,9 @@ export async function handle(request, rawEnv, opts = {}) {
         if (guard === 'session') await readLimit(env, 'acct:' + c.s.accountId, 300, t);
         else await limit(env.DB, 'acct:' + c.s.accountId, 300, 60_000, t);
       }
+      // reads that reach the log's Durable Object (Workers Free: 100k Durable Object requests a day) have a tighter limit:
+      // 120 a minute per network for the public ones, 60 a minute per account for your own receipts
+      if (request.method === 'GET' && DO_READS.test(url.pathname)) await readLimit(env, c.s ? 'do:' + c.s.accountId : await ipBucket(env, request, 'pubdo'), c.s ? 60 : Number(env.PUB_DO_RPM) || 120, t);
       if (request.method === 'POST') c.body = await readJson(request, guard === 'key' ? 262144 : 16384);
       const out = await fn(c);
       if (out instanceof Response) return out;

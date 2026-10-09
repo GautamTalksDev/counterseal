@@ -102,7 +102,7 @@ function mcp() {
         const url = new URL(`${server()}/p/${a.provider}${a.path}${qs}`).href;
         const body = a.body !== undefined && a.method !== 'GET' ? JSON.stringify(a.body) : undefined;
         const headers = { authorization: `Bearer ${tok}`, accept: 'application/json', ...(a.body !== undefined ? { 'content-type': 'application/json' } : {}) };
-        if (signer) Object.assign(headers, await signBrokerRequest({ method: a.method, url, body }, await signer));
+        if (signer) Object.assign(headers, await signBrokerRequest({ method: a.method, url, body, contentType: headers['content-type'] }, await signer));
         const r = await fetch(url, { method: a.method, redirect: 'error', headers, body });
         let text = await r.text();
         if (text.length > 20000) text = text.slice(0, 20000) + '\n[truncated]';

@@ -4,11 +4,12 @@
 // records which agent key made it.
 //
 // The broker signature profile (tag "leash-pop"):
-//   Signature-Input: sig1=("@method" "@target-uri" "content-digest");created=...;expires=...;keyid="<JWK thumbprint>";alg="ed25519";nonce="...";tag="leash-pop"
+//   Signature-Input: sig1=("@method" "@target-uri" "content-digest" "content-type");created=...;expires=...;keyid="<JWK thumbprint>";alg="ed25519";nonce="...";tag="leash-pop"
 //   Signature: sig1=:<base64 Ed25519 signature>:
 //   Content-Digest: sha-256=:<base64 SHA-256 of the body>:      (RFC 9530; required when the request has a body)
-// Rules: "@method" and "@target-uri" must be covered, and "content-digest" whenever there is a body; only those three
-// plus "@authority", "@path", "@query" and "content-type" may be covered; window of 5 minutes at most; a nonce is
+// Rules: "@method" and "@target-uri" must be covered, and "content-digest" and "content-type" whenever there is a body
+// (the approval hash binds both, and the upstream reads the body by its content type); only those four plus
+// "@authority", "@path" and "@query" may be covered; window of 5 minutes at most; a nonce is
 // required and accepted once per key; keyid is the RFC 7638 / RFC 8037 thumbprint of the registered key. A token bound
 // to a key never falls back to unsigned requests, and a Web Bot Auth signature (tag "web-bot-auth") is never accepted
 // here: the tag differs, and so does the signed text.
@@ -129,6 +130,7 @@ export async function verifyAgentSignature(request, body, key, seen, nowS = Math
   }
   for (const r of REQUIRED) if (!names.includes(r)) throw bad(`must cover ${r}`);
   if (body && body.length && !names.includes('content-digest')) throw bad('a request with a body must cover content-digest');
+  if (body && body.length && request.headers.get('content-type') && !names.includes('content-type')) throw bad('a request with a body must cover content-type');
   if (!Number.isInteger(p.created) || !Number.isInteger(p.expires)) throw bad('created and expires are required');
   if (p.expires <= p.created) throw bad('expires must be after created');
   if (p.expires - p.created > POP_WINDOW) throw bad(`window longer than ${POP_WINDOW} seconds`);

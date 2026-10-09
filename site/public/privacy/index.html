@@ -82,6 +82,7 @@
     <li>the time, and the SHA-256 hash of your own audit entry for that decision;</li>
     <li>a salted commitment to your account, different for every entry, so entries cannot be linked to you or to each other.</li>
   </ul>
+  <p>The time of each decision is public. Someone who already knows when you did something (for example, that a repository disappeared at 14:03) could guess which receipt is yours, but could not learn anything else from it.</p>
   <p>Never the path, query string, body, response, key, token, account id, name, email or IP address. Receipts that your agents send themselves with a receipts API key are public too, with exactly the fields they send: send hashes, not content.</p>
   <p>New accounts start with receipts on, and the sign-up screen says so. Accounts made before receipts existed have them off until their owner turns them on. You can turn them off at any time with your passkey; entries already published stay.</p>
 
