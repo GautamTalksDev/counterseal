@@ -26,10 +26,12 @@ export function signerKeyBytes(b64) {
 /** 64-byte signature with a reduced scalar (s < L): no second spelling of the same signature */
 const canonicalSig = (b64) => { const b = fromB64u(b64); return b.length === 64 && le(b.slice(32)) < L25519; };
 const DECISIONS = ['allowed', 'denied', 'held', 'approved', 'executed', 'failed'];
-// Batch caps keep a request's Worker CPU under the Workers Free limit (10 ms). Measured in Node with the test harness:
-// a median of about 4 ms for 50 unsigned and 6 ms for 25 signed receipts (100 signed: about 22 ms). Not load tested on Workers.
+// Batch caps keep a request's CPU well under the Workers Free limit (10 ms), in the Worker and in the log's Durable
+// Object, with a margin at the 95th percentile. Measured in Node with server/bench/cpu.mjs (9 Oct 2026, merged code):
+// 25 unsigned, Worker median 2.5 ms (p95 5.0), append 3.9 ms; 12 signed, Worker median 3.3 ms (p95 5.6), append 1.6 ms.
+// The WITNESS caps (50 and 25) measured up to 10 ms at the 95th percentile, so they were halved. Not load tested on Workers.
 // FREE: receipts per account per month; DAY: per account per UTC day (so one account cannot fill the log's 10,000 a day).
-const FREE = 10_000, DAY = 2_000, MAX_BATCH = 50, MAX_SIGNED_BATCH = 25;
+const FREE = 10_000, DAY = 2_000, MAX_BATCH = 25, MAX_SIGNED_BATCH = 12;
 export const FIELD = { label: 80, subject: 120, metaKeys: 8, metaValue: 120 };
 
 /** deterministic JSON: object keys sorted recursively (RFC 8785 subset: strings, finite numbers, booleans, null) */

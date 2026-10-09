@@ -188,7 +188,7 @@ test('account deletion needs a fresh passkey assertion; it removes keys, session
 test('owner bundles and pagination past 50 receipts', async () => {
   const { w, u, send } = await setup();
   const o = await w.user('Other');
-  await send(many(40, 'a')); await send(many(20, 'b'));
+  for (const p of ['a', 'b', 'c']) await send(many(20, p)); // three batches (the cap is 25)
   const p1 = (await w.req('GET', '/v1/my/receipts', { cookie: u.cookie })).body;
   assert.equal(p1.receipts.length, 50); assert.equal(p1.more, true);
   assert.equal(p1.receipts[0].index, 59);

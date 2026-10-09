@@ -361,24 +361,25 @@ test('L7: the signer proof names the log origin and the account, and the CLI pri
 // ---- L8
 test('L8: a signed batch imports the signer public key once per request, not once per receipt', async () => {
   const { batch, post } = await signedSetup();
-  const rs = await batch(20);
+  const rs = await batch(SIGNED_MAX);
   const real = crypto.subtle.importKey;
   let imports = 0;
   crypto.subtle.importKey = function (format, data, alg, ...rest) { if (format === 'raw' && alg?.name === 'Ed25519') imports++; return real.call(this, format, data, alg, ...rest); };
   try {
     assert.equal((await post(rs)).status, 200);
   } finally { crypto.subtle.importKey = real; }
-  assert.equal(imports, 1, `${imports} imports of the signer key for 20 receipts`);
+  assert.equal(imports, 1, `${imports} imports of the signer key for ${SIGNED_MAX} receipts`);
 });
 
-test('L8: batches are capped where the measured Worker CPU stays under the Free plan 10 ms: 50 unsigned, 25 signed', async () => {
+test('L8: batches are capped where the measured CPU keeps a margin under the Free plan 10 ms: 25 unsigned, 12 signed', async () => {
   const { w, u, batch, post } = await signedSetup();
   const plain = (await w.req('POST', '/v1/keys', { cookie: u.cookie, body: {} })).body.key;
   const unsigned = (n) => w.req('POST', '/v1/receipts', { bearer: plain, ...anon, body: { receipts: Array.from({ length: n }, (_, i) => ({ agent: 'a', action: 'u' + i })) } });
-  assert.equal((await unsigned(51)).body.error, 'bad_batch');
-  assert.equal((await unsigned(50)).status, 200);
-  assert.equal((await post(await batch(26))).body.error, 'bad_batch');
-  assert.equal((await post(await batch(25, Date.now() + 1000))).status, 200);
+  assert.deepEqual([LIMITS.MAX_BATCH, LIMITS.MAX_SIGNED_BATCH], [25, 12]);
+  assert.equal((await unsigned(26)).body.error, 'bad_batch');
+  assert.equal((await unsigned(25)).status, 200);
+  assert.equal((await post(await batch(13))).body.error, 'bad_batch');
+  assert.equal((await post(await batch(12, Date.now() + 1000))).status, 200);
 });
 
 // ---- L4
@@ -596,7 +597,7 @@ test('H2: a signed batch refused for quota is a 402 within the query limit, and 
 
 test('H2: if anything after the replay claim fails, usage, global usage and the claims are all released', async () => {
   const { w, batch, post, count } = await signedSetup();
-  const rs = await batch(20);
+  const rs = await batch(SIGNED_MAX);
   w.env.DB.failOn = /global_usage/;
   const r = await post(rs);
   assert.equal(r.status, 500);
