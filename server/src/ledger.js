@@ -14,6 +14,7 @@
 import { HttpError, json, API_HEADERS, b64u, rand, randomId, sha256hex, now, str } from './util.js';
 import { validate, canonical, checkSignature, checkSignerProof, signerProofText, signerKeyBytes, importSigner, LIMITS, SIGNED_KEEP_MS } from './receipts.js';
 import { logKey, b64std } from './note.js';
+import { publicHost } from './providers.js';
 import * as A from './auth.js';
 import { audit } from './audit.js';
 
@@ -213,7 +214,8 @@ const MAPV = /^\d{4}-\d{2}-\d{2}\.\d{1,3}$/;
  *  guard's shell map version for its decisions), a boolean, the time and the audit hash. */
 export function brokerReceipt({ action, detail, auditHash, at, mapVersion }) {
   const method = /^[A-Z]{3,7}$/.test(detail.method || '') ? detail.method : null;
-  const host = /^[a-z0-9.-]{1,100}$/.test(detail.host || '') ? detail.host : null;
+  // a per-store host (Shopify's <store>.myshopify.com) is a business name: only the shared suffix is ever public
+  const host = /^[a-z0-9.-]{1,100}$/.test(detail.host || '') ? publicHost(detail.host) : null;
   const meta = { map: typeof detail.map === 'string' && MAPV.test(detail.map) ? detail.map : mapVersion };
   if (detail.rule && RULE.test(detail.rule)) meta.rule = detail.rule;
   if (detail.agent_key) meta.agent_key = true;

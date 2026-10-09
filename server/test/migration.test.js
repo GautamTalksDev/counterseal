@@ -74,6 +74,9 @@ test('live-shaped data written by the deployed code keeps working after 0004 and
   assert.deepEqual(db.raw.prepare('SELECT seq, hash FROM audit ORDER BY seq').all(), auditBefore, 'audit rows untouched');
   assert.equal(db.raw.prepare('SELECT receipts FROM accounts').get().receipts, 0, 'an existing account has receipts off');
   assert.equal(db.raw.prepare('SELECT agent_key_id FROM tokens').get().agent_key_id, null, 'existing tokens stay unbound');
+  // 0010: a credential written by the live code has no store address (NULL: the provider's fixed host), and the column refuses a bad one
+  assert.equal(db.raw.prepare('SELECT host FROM credentials').get().host, null, 'an existing credential has no store address');
+  assert.throws(() => db.raw.prepare("UPDATE credentials SET host = 'x.example.com'").run(), /CHECK constraint/);
 
   // ---- after: the merged code on the migrated database
   const now = (m, p, o = {}) => w.req(m, p, o);
@@ -83,8 +86,17 @@ test('live-shaped data written by the deployed code keeps working after 0004 and
   assert.equal((await now('POST', '/v1/auth/login/finish', { body: { challengeId: lb.body.challengeId, credential: await auth.get(lb.body.options) } })).status, 200, 'the passkey still signs in (counter continues)');
   const get = await w.req('GET', '/p/github/repos/acme/app', { bearer: tok.token, origin: null, xleash: false });
   assert.equal(get.status, 200, 'the live token still works, unsigned');
-  assert.equal(w.upstream.at(-1).headers.authorization, 'Bearer ' + GH, 'the vaulted key still decrypts');
+  assert.equal(w.upstream.at(-1).headers.authorization, 'Bearer ' + GH, 'the vaulted key still decrypts (its sealing is unchanged: no store address, same AAD)');
+  assert.equal(w.upstream.at(-1).url, 'https://api.github.com/repos/acme/app', 'and still goes to the fixed host of its provider');
   assert.equal((await w.req('POST', '/p/github/repos/acme/app/releases', { bearer: tok.token, origin: null, xleash: false, body: {} })).status, 428, 'its policy still applies');
+  // map 2026-10-10: the same account can now vault a Shopify key with its store, next to the old credential
+  const shop = await now('POST', '/v1/credentials', { cookie, body: { provider: 'shopify', secret: 'shpat_' + 's'.repeat(32), host: 'live-shop.myshopify.com' } });
+  assert.equal(shop.status, 200, JSON.stringify(shop.body));
+  const shopTok = (await now('POST', '/v1/tokens', { cookie, body: { credentialId: shop.body.id } })).body.token;
+  const sq = await w.req('POST', '/p/shopify/admin/api/2026-07/graphql.json', { bearer: shopTok, origin: null, xleash: false, raw: '{"query":"{ shop { name } }"}', headers: { 'content-type': 'application/json' } });
+  assert.equal(sq.status, 200); assert.equal(w.upstream.at(-1).url, 'https://live-shop.myshopify.com/admin/api/2026-07/graphql.json');
+  const hosts = (await now('GET', '/v1/credentials', { cookie })).body.credentials.map((c) => c.host);
+  assert.ok(hosts.includes(null) && hosts.includes('live-shop.myshopify.com') && hosts.length === 2, 'the old credential has no host, the new one has its store');
   // the hold approved before the deploy is still good for its one retry; the pending one can be approved now
   assert.equal((await w.req('DELETE', '/p/github/repos/acme/approved', { bearer: tok.token, origin: null, xleash: false })).status, 200);
   const holds = (await now('GET', '/v1/holds', { cookie })).body.holds.map((h) => h.id);
@@ -107,6 +119,7 @@ test('live-shaped data written by the deployed code keeps working after 0004 and
   // and the old code's API answers the same shapes the published CLI (leashcli 0.1.1) reads
   const t2 = await now('POST', '/v1/tokens', { bearer: cli, origin: null, xleash: false, body: { credentialId: cred.id, label: 'cli' } });
   for (const k of ['id', 'token', 'provider', 'baseUrl', 'expiresAt', 'note']) assert.ok(k in t2.body, k);
+  for (const k of ['id', 'provider', 'label', 'hint', 'created_at', 'last_used']) assert.ok(k in (await now('GET', '/v1/credentials', { bearer: cli, origin: null, xleash: false })).body.credentials[0], k);
   for (const k of ['id', 'method', 'host', 'path', 'rule', 'why']) assert.ok(k in (await now('GET', '/v1/holds?status=used', { bearer: cli, origin: null, xleash: false })).body.holds[0], k);
 
   // 0006 (approvals): every hold the live code wrote reads as a proxied API call, with no agent and no deny reason

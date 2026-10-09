@@ -10,7 +10,7 @@ import * as K from './agentkeys.js';
 import * as G from './approvals.js';
 import { list as auditList, verifyChain, audit } from './audit.js';
 import { limit, readLimit, ipBucket } from './ratelimit.js';
-import { PROVIDERS, MAP_VERSION, COMMON } from './providers.js';
+import { metaOf } from './providers.js';
 import * as Push from './push.js';
 import { LEDGER_ROUTES, PUBLIC_PATH, CORS, logOf, apiKey, cachedHead, quotaFor, dayCapFor, usageOf, cleanupStatements, forgetAccount, deleteStatements, int } from './ledger.js';
 import { logKey } from './note.js';
@@ -52,7 +52,7 @@ const REG_PER_DAY = (env) => Number(env.REG_PER_IP_DAY) || 5;
 //   webw: web (passkey) session only, never a CLI session
 //   guard: a guard key (lsg_) from a coding-agent hook; per-network limit in memory, the routes add their own limits
 const ROUTES = [
-  ['GET', /^\/v1\/meta$/, 'public', (c) => ({ app: A.hosts(c.env)[0].origin, legacyApp: A.hosts(c.env)[1]?.origin || null, mapVersion: MAP_VERSION, common: COMMON.map((r) => ({ id: r.id, method: r.m, path: r.p, why: r.why })), providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, name: p.name, host: p.host, irreversible: p.irreversible.map((r) => ({ id: r.id, method: r.m, path: r.p, why: r.why })) })) })],
+  ['GET', /^\/v1\/meta$/, 'public', (c) => ({ app: A.hosts(c.env)[0].origin, legacyApp: A.hosts(c.env)[1]?.origin || null, ...metaOf() })],
   ['POST', /^\/v1\/auth\/register\/begin$/, 'publicw', (c) => A.registerBegin(c.env, c.body)],
   ['POST', /^\/v1\/auth\/register\/finish$/, 'publicw', async (c) => {
     await limit(c.env.DB, await ipBucket(c.env, c.request, 'regday'), REG_PER_DAY(c.env), 86_400_000, now());

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // leash: CLI and MCP server for Counterseal. Zero dependencies, Node 20+.
 //   leash login                      sign in this machine (approve with your passkey in the browser)
-//   leash add <provider> [label]     store a real key in the vault (read from stdin, never echoed, never saved here)
+//   leash add <provider> [label] [--host store.myshopify.com]  store a real key in the vault (read from stdin, never echoed,
+//                                    never saved here); --host is the store address, for Shopify only
 //   leash creds | tokens | holds     list
 //   leash token <credentialId> [--label x] [--policy file.json] [--ttl hours] [--agent-key <id>]
 //   leash agent-key [file] [--label x]  make an Ed25519 agent key (private key stays in the file) and register it
@@ -151,13 +152,15 @@ try {
       save({ server: cfg().server }); console.log('Signed out on this machine.'); break;
     }
     case 'add': {
-      const provider = args[0]; if (!provider) die('usage: leash add <github|cloudflare|railway|stripe|supabase> [label]');
+      const provider = args[0]; if (!provider) die('usage: leash add <github|cloudflare|railway|stripe|supabase|vercel|neon|fly|resend|shopify> [label] [--host your-store.myshopify.com] (--host is for Shopify only)');
+      const host = flag(args, '--host');
+      const label = args.slice(1).find((x, i, a) => !x.startsWith('--') && a[i - 1] !== '--host');
       const secret = await hidden(`Paste your ${provider} key (hidden): `);
-      const r = await api('POST', '/v1/credentials', { provider, label: args[1], secret });
-      console.log(`Stored ${r.provider} key ...${r.hint} as ${r.id}. It is encrypted in the vault; nothing was saved on this machine.`);
+      const r = await api('POST', '/v1/credentials', { provider, label, secret, ...(host ? { host } : {}) });
+      console.log(`Stored ${r.provider} key ...${r.hint}${r.host ? ` for ${r.host}` : ''} as ${r.id}. It is encrypted in the vault; nothing was saved on this machine.`);
       break;
     }
-    case 'creds': table((await api('GET', '/v1/credentials')).credentials, ['id', 'provider', 'label', 'hint']); break;
+    case 'creds': table((await api('GET', '/v1/credentials')).credentials, ['id', 'provider', 'label', 'hint', 'host']); break;
     case 'tokens': table((await api('GET', '/v1/tokens')).tokens.filter((t) => !t.revoked), ['id', 'provider', 'label', 'minted_by']); break;
     case 'token': {
       const p = flag(args, '--policy');
@@ -195,7 +198,7 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli
     case 'mcp': mcp(); break;
     case '--version': case '-v': console.log(VERSION); break;
     default:
-      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] | creds | tokens | token <credentialId> [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | holds | watch | agent-key [file] [--label] | agent-keys | mcp');
+      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token <credentialId> [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | holds | watch | agent-key [file] [--label] | agent-keys | mcp');
   }
 } catch (e) {
   die(`leash: ${e.message}`);

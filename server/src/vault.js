@@ -16,11 +16,15 @@ async function kek(env) {
 
 const te = new TextEncoder(), td = new TextDecoder();
 
-export async function seal(env, { id, accountId, provider }, secret) {
+// A key that is sent to a per-store address (Shopify) is sealed together with that address, so a row whose host was changed
+// outside the API no longer decrypts. Credentials without a host keep the AAD they always had.
+const aadOf = (accountId, id, provider, host) => te.encode(`leash/v1|${accountId}|${id}|${provider}${host ? '|' + host : ''}`);
+
+export async function seal(env, { id, accountId, provider, host }, secret) {
   const dekRaw = rand(32);
   const dek = await crypto.subtle.importKey('raw', dekRaw, 'AES-GCM', false, ['encrypt']);
   const iv = rand(12), dekIv = rand(12);
-  const aad = te.encode(`leash/v1|${accountId}|${id}|${provider}`);
+  const aad = aadOf(accountId, id, provider, host);
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad }, dek, te.encode(secret));
   const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: dekIv, additionalData: te.encode(`leash/dek|${id}`) }, await kek(env), dekRaw);
   dekRaw.fill(0);
@@ -32,7 +36,7 @@ export async function open(env, row) {
     const dekRaw = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64u(row.dek_iv), additionalData: te.encode(`leash/dek|${row.id}`) }, await kek(env), fromB64u(row.wrapped_dek)));
     const dek = await crypto.subtle.importKey('raw', dekRaw, 'AES-GCM', false, ['decrypt']);
     dekRaw.fill(0);
-    const aad = te.encode(`leash/v1|${row.account_id}|${row.id}|${row.provider}`);
+    const aad = aadOf(row.account_id, row.id, row.provider, row.host);
     return td.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64u(row.iv), additionalData: aad }, dek, fromB64u(row.ct)));
   } catch (e) {
     if (e instanceof HttpError) throw e;

@@ -2,7 +2,7 @@
 import { HttpError, json, b64u, rand, randomId, sha256hex, now, str, readBody, cleanText } from './util.js';
 import { mapOf } from './approvals.js';
 import { seal, open } from './vault.js';
-import { summarize, PROVIDERS, MAP_VERSION } from './providers.js';
+import { summarize, PROVIDERS, MAP_VERSION, storeHost } from './providers.js';
 import { normalisePolicy, decide } from './policy.js';
 import { audit } from './audit.js';
 import { newChallenge, takeChallenge, checkAssertion, rp, hosts, appOrigin, sessionId } from './auth.js';
@@ -21,21 +21,28 @@ export async function addCredential(env, sess, body) {
   const P = PROVIDERS[provider];
   if (!P) throw new HttpError(400, 'bad_provider');
   const label = str(body.label ?? P.name, 'label', { max: 60, re: /^[\p{L}\p{N} ._:/()-]+$/u });
-  const secret = str(body.secret, 'secret', { min: 8, max: 4096, re: /^[\x21-\x7e]+$/ });
+  const secret = str(body.secret, 'secret', { min: 8, max: 4096, re: P.secretRe || /^[\x21-\x7e]+$/ });
   if (P.keyHint && !P.keyHint.test(secret)) throw new HttpError(400, 'bad_secret', `That does not look like a ${P.name} key.`);
   // every row an account can create has a ceiling (OWASP API4): the D1 budget is shared by everyone
   const have = await env.DB.prepare('SELECT COUNT(*) AS n FROM credentials WHERE account_id = ?').bind(sess.accountId).first();
   if (have.n >= MAX_CREDENTIALS) throw new HttpError(409, 'too_many_credentials', `Up to ${MAX_CREDENTIALS} keys in a vault. Delete one first.`);
+  // Where the key is sent. One fixed address for most providers; for Shopify it is the merchant's own store, which is
+  // checked strictly here (exact suffix, one plain label; see storeHost) and bound into the key's encryption below.
+  let host = null;
+  if (P.perCredentialHost) {
+    host = storeHost(P, body.host);
+    if (!host) throw new HttpError(400, 'bad_host', `${P.perCredentialHost.label} must be exactly like ${P.perCredentialHost.example}: letters, digits and hyphens, then ${P.perCredentialHost.suffix}. No https://, port, path or other domain.`);
+  } else if (body.host !== undefined && body.host !== null) throw new HttpError(400, 'bad_host', `${P.name} has one fixed address; leave host out.`);
   const id = randomId();
-  const sealed = await seal(env, { id, accountId: sess.accountId, provider }, secret);
-  await env.DB.prepare('INSERT INTO credentials (id, account_id, provider, label, hint, ct, iv, wrapped_dek, dek_iv, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, sess.accountId, provider, label, secret.slice(-4), sealed.ct, sealed.iv, sealed.wrapped_dek, sealed.dek_iv, now()).run();
-  await audit(env, sess.accountId, sess.kind, 'add_credential', { id, provider, label });
-  return { id, provider, label, hint: secret.slice(-4) };
+  const sealed = await seal(env, { id, accountId: sess.accountId, provider, host }, secret);
+  await env.DB.prepare('INSERT INTO credentials (id, account_id, provider, label, hint, ct, iv, wrapped_dek, dek_iv, created_at, host) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, sess.accountId, provider, label, secret.slice(-4), sealed.ct, sealed.iv, sealed.wrapped_dek, sealed.dek_iv, now(), host).run();
+  await audit(env, sess.accountId, sess.kind, 'add_credential', { id, provider, label, ...(host ? { host } : {}) });
+  return { id, provider, label, hint: secret.slice(-4), ...(host ? { host } : {}) };
 }
 
 export async function listCredentials(env, sess) {
-  const r = await env.DB.prepare('SELECT id, provider, label, hint, created_at, last_used FROM credentials WHERE account_id = ? ORDER BY created_at DESC').bind(sess.accountId).all();
+  const r = await env.DB.prepare('SELECT id, provider, label, hint, host, created_at, last_used FROM credentials WHERE account_id = ? ORDER BY created_at DESC').bind(sess.accountId).all();
   return { credentials: r.results };
 }
 
@@ -232,6 +239,13 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new HttpError(405, 'method');
   // path: no traversal, no encoded slashes or dots that could escape the provider base
   const path = canonPath('/' + rest);
+  // a provider that only brokers one API (Shopify: the Admin GraphQL endpoint) refuses every other path before anything is
+  // read or sent, so a vaulted key is never sent to a page it was not meant for (storefront pages, app proxies)
+  if (P.paths && !P.paths.test(path)) throw new HttpError(404, 'unsupported_path', `${BRAND.name} brokers only this on ${P.name}: ${P.note}`);
+  // where the key goes: the provider's fixed host, or the credential's own store, checked again now. A host that fails the
+  // check (a row changed outside the API) stops the call; it never falls back to anything else.
+  const upHost = P.perCredentialHost ? storeHost(P, cred.host) : P.host;
+  if (!upHost) throw new HttpError(500, 'bad_host', 'This credential has no valid store address.');
   const url = new URL(request.url);
   const body = ['GET', 'HEAD'].includes(method) ? null : await readBody(request, MAX_BODY);
   // Prove who: a bound token needs the agent's own signature over this exact request. Checked before the token's rate
@@ -241,7 +255,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
     try {
       agentKey = (await verifyAgentSignature(request, body, { keyid: tok.agent_keyid, x: tok.agent_x }, d1Seen(env.DB))).keyid;
     } catch (e) {
-      if (e instanceof HttpError) noteSignatureFailure(env, tok, method, P.host, e);
+      if (e instanceof HttpError) noteSignatureFailure(env, tok, method, upHost, e);
       throw e;
     }
   }
@@ -256,8 +270,8 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   const d = decide(policy, provider, method, path, bodyText, url.search);
   // An approval binds the exact bytes sent upstream, and the content-type that tells the upstream how to read them.
   const bodyHash = body ? b64u(new Uint8Array(await crypto.subtle.digest('SHA-256', body))) : '';
-  const reqHash = await sha256hex(JSON.stringify([method, P.host, path, url.search, request.headers.get('content-type') || '', bodyHash]));
-  const where = { method, host: P.host, path: path.slice(0, 300), ...(agentKey ? { agent_key: agentKey } : {}) };
+  const reqHash = await sha256hex(JSON.stringify([method, upHost, path, url.search, request.headers.get('content-type') || '', bodyHash]));
+  const where = { method, host: upHost, path: path.slice(0, 300), ...(agentKey ? { agent_key: agentKey } : {}) };
   const seal = { receipts: !!tok.receipts_on };
   if (d.decision === 'deny') {
     await audit(env, tok.account_id, 'token:' + tok.id, 'deny', { ...where, rule: d.rule }, seal);
@@ -281,7 +295,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
         h = { id: randomId(), expires_at: now() + HOLD_TTL };
         const pv = preview(url.search, bodyText);
         await env.DB.prepare('INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .bind(h.id, tok.account_id, tok.id, reqHash, method, P.host, where.path, d.rule, d.why, now(), h.expires_at, pv).run();
+          .bind(h.id, tok.account_id, tok.id, reqHash, method, upHost, where.path, d.rule, d.why, now(), h.expires_at, pv).run();
         await audit(env, tok.account_id, 'token:' + tok.id, 'hold', { ...where, rule: d.rule, hold: h.id, preview_sha256: await sha256hex(pv || '') }, seal);
         // wake the owner's devices after responding; the push itself carries nothing. At most one alert a minute per
         // account for held requests: the alert says how many are waiting, so a flood of holds is one buzz, not hundreds
@@ -304,7 +318,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   for (const h of PASS_REQ) { const v = request.headers.get(h); if (v) headers.set(h, v); }
   for (const [k, v] of Object.entries(P.auth(secret))) headers.set(k, v);
   if (!headers.has('user-agent')) headers.set('user-agent', 'leash-proxy');
-  const upstream = `https://${P.host}${P.base}${path}${url.search}`;
+  const upstream = `https://${upHost}${P.base}${path}${url.search}`;
   let res;
   try {
     res = await fetcher(upstream, { method, headers, body: body && body.length ? body : undefined, redirect: 'manual' });
