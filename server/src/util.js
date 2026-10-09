@@ -22,9 +22,12 @@ export function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data), { status, headers: { ...API_HEADERS, ...extra } });
 }
 
-export function errorResponse(e) {
+/** ctx: {method, path} for the log line. Unexpected errors are logged (name, message, stack: no request data) and the
+ *  client gets a generic 500 that leaks nothing. Workers Logs are off for this Worker, so these lines are only seen
+ *  live (wrangler tail) by the operator; they are never stored by us. */
+export function errorResponse(e, ctx = {}) {
   if (e instanceof HttpError) return json({ error: e.code, message: e.message, ...(e.extra || {}) }, e.status);
-  // never leak internals
+  console.error(JSON.stringify({ event: 'internal_error', method: ctx.method, path: ctx.path, name: String(e?.name || 'Error'), message: String(e?.message || e).slice(0, 300), stack: String(e?.stack || '').slice(0, 1500) }));
   return json({ error: 'internal', message: 'Something went wrong.' }, 500);
 }
 
@@ -70,12 +73,36 @@ export function eqBytes(a, b) {
   return d === 0;
 }
 
-/** strict JSON body: content-type, size cap, object only */
+/** read a body stream, refusing (and cancelling it) as soon as it passes max bytes: never buffer more than the cap */
+export async function readCapped(body, max) {
+  if (!body) return new Uint8Array(0);
+  const reader = body.getReader(), chunks = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > max) { reader.cancel().catch(() => {}); throw new HttpError(413, 'too_large'); }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.byteLength; }
+  return out;
+}
+
+/** a request body up to max bytes: the declared length is checked first, then the stream is counted while it is read */
+export async function readBody(request, max) {
+  const declared = request.headers.get('content-length');
+  if (declared !== null && Number(declared) > max) throw new HttpError(413, 'too_large');
+  return readCapped(request.body, max);
+}
+
+/** strict JSON body: content-type, size cap (checked on content-length first, then while streaming), object only */
 export async function readJson(request, max = 16384) {
   const ct = request.headers.get('content-type') || '';
   if (!ct.toLowerCase().startsWith('application/json')) throw new HttpError(415, 'json_only');
-  const buf = new Uint8Array(await request.arrayBuffer());
-  if (buf.length > max) throw new HttpError(413, 'too_large');
+  const buf = await readBody(request, max);
   let v;
   try {
     v = JSON.parse(new TextDecoder().decode(buf));

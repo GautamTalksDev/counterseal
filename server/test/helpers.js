@@ -1,27 +1,64 @@
-// Test world: D1 on node:sqlite, a virtual passkey authenticator (real ECDSA P-256 + CBOR), a fake upstream.
+// Test world: D1 on node:sqlite (counting queries, with the Workers Free cap of 50 per invocation available), the log
+// Durable Object on its own node:sqlite, a virtual passkey authenticator (real ECDSA P-256 + CBOR), a fake upstream.
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { handle } from '../src/index.js';
+import { LogCore } from '../src/log.js';
+import { _resetLedgerMemory } from '../src/ledger.js';
 import { b64u, sha256 } from '../src/util.js';
 
+// D1 stand-in. Counts every executed statement (a batch counts each of its statements), can simulate the Workers Free
+// limit of 50 D1 queries per invocation (cap), and can fail statements whose SQL matches failOn.
 class Stmt {
-  constructor(db, sql, args = []) { this.db = db; this.sql = sql; this.args = args; }
-  bind(...a) { return new Stmt(this.db, this.sql, a); }
-  async first() { return this.db.prepare(this.sql).get(...this.args) ?? null; }
-  async all() { return { results: this.db.prepare(this.sql).all(...this.args) }; }
-  async run() { const r = this.db.prepare(this.sql).run(...this.args); return { meta: { changes: Number(r.changes) } }; }
+  constructor(w, sql, args = []) { this.w = w; this.sql = sql; this.args = args; }
+  bind(...a) { return new Stmt(this.w, this.sql, a); }
+  async first() { this.w.tick(this.sql); return this.w.raw.prepare(this.sql).get(...this.args) ?? null; }
+  async all() { this.w.tick(this.sql); return { results: this.w.raw.prepare(this.sql).all(...this.args) }; }
+  async run() { this.w.tick(this.sql); return this._run(); }
+  _run() { const r = this.w.raw.prepare(this.sql).run(...this.args); return { meta: { changes: Number(r.changes) } }; }
 }
-export function makeDb() {
+/** migrations: a filter over file names (default: all), so tests can build an older schema */
+export function makeDb({ migrations = () => true } = {}) {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
   const dir = new URL('../migrations/', import.meta.url);
-  for (const f of readdirSync(dir).sort()) db.exec(readFileSync(new URL(f, dir), 'utf8'));
-  return {
-    raw: db,
-    prepare: (sql) => new Stmt(db, sql),
-    async batch(list) { db.exec('BEGIN'); try { for (const s of list) await s.run(); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; } },
+  for (const f of readdirSync(dir).sort().filter(migrations)) db.exec(readFileSync(new URL(f, dir), 'utf8'));
+  const w = {
+    raw: db, queries: 0, writes: 0, cap: 0, failOn: null,
+    tick(sql) {
+      w.queries++;
+      if (/^\s*(INSERT|UPDATE|DELETE)/i.test(sql)) w.writes++;
+      if (w.cap && w.queries > w.cap) throw new Error('D1: too many queries in this invocation');
+      if (w.failOn && w.failOn.test(sql)) throw new Error('D1_ERROR: injected failure');
+    },
+    prepare: (sql) => new Stmt(w, sql),
+    async batch(l) {
+      for (const s of l) w.tick(s.sql);
+      db.exec('BEGIN');
+      try { const out = l.map((s) => s._run()); db.exec('COMMIT'); return out; } catch (e) { db.exec('ROLLBACK'); throw e; }
+    },
   };
+  return w;
 }
+/** Durable Object SQL storage stand-in, with transactionSync like ctx.storage */
+export function makeDoSql() {
+  const db = new DatabaseSync(':memory:');
+  const s = {
+    raw: db, failOn: null,
+    exec: (sql, ...p) => {
+      if (s.failOn && s.failOn.test(sql)) { s.failOn = null; throw new Error('SQLITE_ERROR: injected failure'); }
+      const st = db.prepare(sql); const rows = /^\s*(select|with)/i.test(sql) ? st.all(...p) : (st.run(...p), []); return { toArray: () => rows };
+    },
+    transactionSync: (fn) => { db.exec('BEGIN'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } },
+  };
+  return s;
+}
+export async function logKeyJwk() {
+  const kp = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  const j = await crypto.subtle.exportKey('jwk', kp.privateKey);
+  return JSON.stringify({ d: j.d, x: j.x });
+}
+const LOG_KEY = await logKeyJwk();
 
 // ---- minimal CBOR encoder (test side only)
 function head(mt, n) {
@@ -66,11 +103,20 @@ export class Authenticator {
   }
 }
 
-export const ORIGIN = 'https://leash.test', RP_ID = 'leash.test';
+export const ORIGIN = 'https://leash.test', RP_ID = 'leash.test', LOG_ORIGIN = 'leash.test/log';
 
 export class World {
-  constructor() {
-    this.env = { DB: makeDb(), LEASH_KEK: b64u(crypto.getRandomValues(new Uint8Array(32))), IP_SALT: 'salt', ORIGIN, RP_ID };
+  /** opts.db: a prepared D1 stand-in (migration tests) */
+  constructor({ db } = {}) {
+    _resetLedgerMemory(); // one log key for every world, so the isolate caches keyed by it must start empty
+    this.env = { DB: db || makeDb(), LEASH_KEK: b64u(crypto.getRandomValues(new Uint8Array(32))), IP_SALT: 'salt', ORIGIN, RP_ID, LOG_ORIGIN, LOG_KEY_JWK: LOG_KEY };
+    this.sql = makeDoSql();
+    this.core = new LogCore(this.sql, this.env);
+    const core = this.core;
+    this.log = {
+      append: (i, n) => core.append(i, n), head: () => core.head(), inclusion: (a, b) => core.inclusion(a, b), consistency: (a, b) => core.consistency(a, b),
+      entry: (i) => core.entry(i), entries: (s, c) => core.entries(s, c), tenantEntries: (t, b, c) => core.tenantEntries(t, b, c), forgetTenant: (t) => core.forgetTenant(t),
+    };
     this.upstream = [];
     this.reply = () => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json', 'set-cookie': 'x=1' } });
     this.fetcher = async (url, init) => {
@@ -78,26 +124,48 @@ export class World {
       return this.reply(url, init);
     };
   }
-  async req(method, path, { body, cookie, bearer, origin = ORIGIN, xleash = true, raw, headers = {} } = {}) {
-    const h = { 'cf-connecting-ip': '203.0.113.7', ...headers };
-    if (body !== undefined) h['content-type'] = 'application/json';
+  /** a world with its own log key (tests that compare two logs need them to differ) */
+  static async create(opts) { const w = new World(opts); w.env.LOG_KEY_JWK = await logKeyJwk(); return w; }
+  /** one request. Work passed to ctx.waitUntil (receipts, push) finishes before this returns, and its D1 queries are
+   *  counted with the request's (w.env.DB.queries), as Workers counts them per invocation. xw is the receipts tests'
+   *  name for the x-leash CSRF header. */
+  async req(method, path, { body, cookie, bearer, origin = ORIGIN, xleash, xw, ip = '203.0.113.7', raw, headers = {} } = {}) {
+    const h = { 'cf-connecting-ip': ip, ...headers };
+    if (body !== undefined && !h['content-type']) h['content-type'] = 'application/json';
     if (cookie) h.cookie = cookie;
     if (bearer) h.authorization = 'Bearer ' + bearer;
     if (origin) h.origin = origin;
-    if (xleash) h['x-leash'] = '1';
-    const r = await handle(new Request('https://leash.test' + path, { method, headers: h, body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined) }), this.env, { fetcher: this.fetcher });
+    if (xleash ?? xw ?? true) h['x-leash'] = '1';
+    const pending = [];
+    this.env.DB.queries = 0; this.env.DB.writes = 0;
+    const url = path.startsWith('http') ? path : 'https://leash.test' + path;
+    const r = await handle(new Request(url, { method, headers: h, body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined) }), this.env, { fetcher: this.fetcher, log: this.log, ctx: { waitUntil: (p) => pending.push(p) } });
     const text = await r.text();
     let j; try { j = JSON.parse(text); } catch { j = text; }
-    return { status: r.status, body: j, headers: r.headers };
+    for (let i = 0; i < pending.length; i++) await Promise.allSettled([pending[i]]); // waitUntil may queue more work
+    return { status: r.status, body: j, headers: r.headers, queries: this.env.DB.queries, writes: this.env.DB.writes };
   }
-  /** passkey sign-up; returns {cookie, auth} */
-  async user(name = 'Gautam') {
+  /** passkey sign-up; returns {cookie, auth}, or {status, body} when refused */
+  async user(name = 'Gautam', ip) {
     const auth = new Authenticator(ORIGIN, RP_ID);
-    const b = await this.req('POST', '/v1/auth/register/begin', { body: { name } });
-    const cred = await auth.create(b.body.options);
-    const f = await this.req('POST', '/v1/auth/register/finish', { body: { challengeId: b.body.challengeId, credential: cred } });
-    if (f.status !== 200) throw new Error('signup failed ' + JSON.stringify(f.body));
+    const b = await this.req('POST', '/v1/auth/register/begin', { body: { name }, ip });
+    const f = await this.req('POST', '/v1/auth/register/finish', { body: { challengeId: b.body.challengeId, credential: await auth.create(b.body.options) }, ip });
+    if (f.status !== 200) return { status: f.status, body: f.body };
     const cookie = f.headers.get('set-cookie').split(';')[0];
     return { cookie, auth };
   }
+  /** the account id behind a cookie */
+  async accountId(cookie) { return (await this.req('GET', '/v1/me', { cookie })).body.account.id; }
+}
+
+/** an Ed25519 signer bound to a new receipts API key of this user (proof of possession over the server's sign text) */
+export async function signedKey(w, cookie, label = 'signed') {
+  const kp = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  const pub = b64u(await crypto.subtle.exportKey('raw', kp.publicKey));
+  const ch = await w.req('POST', '/v1/keys/signer/begin', { cookie, body: { signerPublicKey: pub } });
+  const proof = b64u(await crypto.subtle.sign({ name: 'Ed25519' }, kp.privateKey, new TextEncoder().encode(ch.body.sign)));
+  const k = await w.req('POST', '/v1/keys', { cookie, body: { label, signerPublicKey: pub, signerChallengeId: ch.body.challengeId, signerProof: proof } });
+  const { canonical } = await import('../src/receipts.js');
+  const sign = async (rc) => ({ ...rc, sig: { alg: 'ed25519', value: b64u(await crypto.subtle.sign({ name: 'Ed25519' }, kp.privateKey, new TextEncoder().encode(canonical(rc)))) } });
+  return { key: k.body.key, id: k.body.id, kp, pub, sign };
 }

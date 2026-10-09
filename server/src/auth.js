@@ -6,11 +6,12 @@
 import { HttpError, b64u, rand, randomId, sha256hex, now, str } from './util.js';
 import { verifyRegistration, verifyAssertion } from './webauthn.js';
 import { audit } from './audit.js';
+import { BRAND } from './brand.js';
 
 const WEB_TTL = 12 * 3600_000, CLI_TTL = 30 * 86400_000, CH_TTL = 5 * 60_000;
 
 export function rp(env) {
-  return { rpId: env.RP_ID || 'localhost', origin: env.ORIGIN || 'http://localhost:8787', name: 'LEASH' };
+  return { rpId: env.RP_ID || 'localhost', origin: env.ORIGIN || 'http://localhost:8787', name: BRAND.name };
 }
 
 async function newChallenge(env, kind, accountId = null, name = null) {
@@ -47,12 +48,21 @@ export async function registerFinish(env, body, request) {
   const ch = await takeChallenge(env, body.challengeId, 'register');
   const r = rp(env);
   const c = await verifyRegistration(body.credential || {}, { challenge: ch.challenge, origin: r.origin, rpId: r.rpId });
+  const exists = () => new HttpError(409, 'passkey_exists', 'That passkey is already registered. Sign in instead.');
+  if (await env.DB.prepare('SELECT 1 AS x FROM passkeys WHERE cred_id = ?').bind(c.credId).first()) throw exists();
   const accountId = randomId();
-  await env.DB.batch([
-    env.DB.prepare('INSERT INTO accounts (id, name, created_at) VALUES (?, ?, ?)').bind(accountId, ch.name, now()),
-    env.DB.prepare('INSERT INTO passkeys (cred_id, account_id, alg, jwk, sign_count, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(c.credId, accountId, c.alg, JSON.stringify(c.jwk), c.signCount, now()),
-  ]);
+  // new accounts start with public receipts on (the sign-up page says so); accounts made before receipts existed keep
+  // them off until their owner turns them on
+  try {
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO accounts (id, name, created_at, receipts) VALUES (?, ?, ?, 1)').bind(accountId, ch.name, now()),
+      env.DB.prepare('INSERT INTO passkeys (cred_id, account_id, alg, jwk, sign_count, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(c.credId, accountId, c.alg, JSON.stringify(c.jwk), c.signCount, now()),
+    ]);
+  } catch (e) {
+    if (/UNIQUE|constraint/i.test(String(e && e.message))) throw exists();
+    throw e;
+  }
   await audit(env, accountId, 'web', 'signup', {});
   return startWebSession(env, accountId);
 }
@@ -66,7 +76,7 @@ export async function loginBegin(env) {
 export async function checkAssertion(env, cred, challenge, accountId = null) {
   if (!cred || typeof cred.id !== 'string') throw new HttpError(400, 'bad_credential');
   const pk = await env.DB.prepare('SELECT * FROM passkeys WHERE cred_id = ?').bind(str(cred.id, 'credential', { max: 1400 })).first();
-  if (!pk || (accountId && pk.account_id !== accountId)) throw new HttpError(401, 'unknown_passkey', 'That passkey is not linked to this LEASH account. If you made more than one account, pick the passkey you created for the one you are signed in to.');
+  if (!pk || (accountId && pk.account_id !== accountId)) throw new HttpError(401, 'unknown_passkey', `That passkey is not linked to this ${BRAND.name} account. If you made more than one account, pick the passkey you created for the one you are signed in to.`);
   const r = rp(env);
   const count = await verifyAssertion(cred, { challenge, origin: r.origin, rpId: r.rpId, alg: pk.alg, jwk: JSON.parse(pk.jwk), signCount: pk.sign_count });
   await env.DB.prepare('UPDATE passkeys SET sign_count = ?, last_used = ? WHERE cred_id = ?').bind(count, now(), pk.cred_id).run();

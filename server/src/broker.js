@@ -1,5 +1,5 @@
 // Credentials, proxy tokens, the proxy, and holds.
-import { HttpError, json, b64u, rand, randomId, sha256hex, now, str } from './util.js';
+import { HttpError, json, b64u, rand, randomId, sha256hex, now, str, readBody } from './util.js';
 import { seal, open } from './vault.js';
 import { summarize, PROVIDERS, MAP_VERSION } from './providers.js';
 import { normalisePolicy, decide } from './policy.js';
@@ -7,6 +7,8 @@ import { audit } from './audit.js';
 import { newChallenge, takeChallenge, checkAssertion, rp } from './auth.js';
 import { limit } from './ratelimit.js';
 import { notify } from './push.js';
+import { verifyAgentSignature, d1Seen, ownActive } from './agentkeys.js';
+import { BRAND } from './brand.js';
 
 const HOLD_TTL = 30 * 60_000, GRANT_TTL = 10 * 60_000, MAX_BODY = 1_048_576, MAX_RESP = 10 * 1_048_576;
 
@@ -46,12 +48,14 @@ export async function mintToken(env, sess, body, byPasskey = false) {
   const label = str(body.label ?? 'agent', 'label', { max: 60, re: /^[\p{L}\p{N} ._:/()-]+$/u });
   const policy = normalisePolicy(body.policy, byPasskey);
   const hours = Number.isInteger(body.ttlHours) && body.ttlHours > 0 && body.ttlHours <= 24 * 90 ? body.ttlHours : 24 * 7;
+  // binding to an agent key only ever narrows a token (it then needs the agent's signature too), so a CLI session may do it
+  const ak = body.agentKeyId !== undefined && body.agentKeyId !== null ? await ownActive(env, sess.accountId, body.agentKeyId) : null;
   const token = 'lsh_' + b64u(rand(32));
   const id = randomId();
-  await env.DB.prepare('INSERT INTO tokens (id, account_id, credential_id, hash, label, policy, minted_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, sess.accountId, cred.id, await sha256hex(token), label, JSON.stringify(policy), byPasskey ? 'passkey' : sess.kind, now() + hours * 3600_000, now()).run();
-  await audit(env, sess.accountId, sess.kind, 'mint', { id, credential: cred.id, provider: cred.provider, label, hours, preapproved: policy.unattendedIrreversible.length });
-  return { id, token, provider: cred.provider, baseUrl: `${rp(env).origin}/p/${cred.provider}`, expiresAt: now() + hours * 3600_000, note: 'Shown once. LEASH keeps only a hash.' };
+  await env.DB.prepare('INSERT INTO tokens (id, account_id, credential_id, hash, label, policy, minted_by, expires_at, created_at, agent_key_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, sess.accountId, cred.id, await sha256hex(token), label, JSON.stringify(policy), byPasskey ? 'passkey' : sess.kind, now() + hours * 3600_000, now(), ak ? ak.id : null).run();
+  await audit(env, sess.accountId, sess.kind, 'mint', { id, credential: cred.id, provider: cred.provider, label, hours, preapproved: policy.unattendedIrreversible.length, ...(ak ? { agent_key: ak.keyid } : {}) });
+  return { id, token, provider: cred.provider, baseUrl: `${rp(env).origin}/p/${cred.provider}`, expiresAt: now() + hours * 3600_000, ...(ak ? { agentKey: ak.keyid } : {}), note: `Shown once. ${BRAND.name} keeps only a hash.` };
 }
 
 /** the dangerous variant: pre-approving irreversible operations requires a fresh passkey assertion */
@@ -68,7 +72,7 @@ export async function mintFinish(env, sess, body) {
 }
 
 export async function listTokens(env, sess) {
-  const r = await env.DB.prepare('SELECT t.id, t.label, t.policy, t.minted_by, t.expires_at, t.revoked, t.created_at, t.last_used, c.provider, c.label AS credential FROM tokens t JOIN credentials c ON c.id = t.credential_id WHERE t.account_id = ? ORDER BY t.created_at DESC').bind(sess.accountId).all();
+  const r = await env.DB.prepare('SELECT t.id, t.label, t.policy, t.minted_by, t.expires_at, t.revoked, t.created_at, t.last_used, c.provider, c.label AS credential, k.keyid AS agent_key, k.label AS agent_key_label, k.revoked_at AS agent_key_revoked FROM tokens t JOIN credentials c ON c.id = t.credential_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id WHERE t.account_id = ? ORDER BY t.created_at DESC').bind(sess.accountId).all();
   return { tokens: r.results.map((t) => ({ ...t, policy: JSON.parse(t.policy) })) };
 }
 
@@ -88,7 +92,7 @@ export async function listHolds(env, sess, status) {
 }
 
 export async function approveBegin(env, sess, holdId) {
-  if (sess.kind !== 'web') throw new HttpError(403, 'passkey_required', 'Approve in the LEASH app with your passkey.');
+  if (sess.kind !== 'web') throw new HttpError(403, 'passkey_required', `Approve in the ${BRAND.name} app with your passkey.`);
   const h = await env.DB.prepare("SELECT id FROM holds WHERE id = ? AND account_id = ? AND status = 'pending' AND expires_at > ?").bind(holdId, sess.accountId, now()).first();
   if (!h) throw new HttpError(404, 'not_found');
   const { id, challenge } = await newChallenge(env, 'approve:' + holdId, sess.accountId);
@@ -100,17 +104,19 @@ export async function approveFinish(env, sess, holdId, body) {
   const ch = await takeChallenge(env, body.challengeId, 'approve:' + holdId);
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
   await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
-  const r = await env.DB.prepare("UPDATE holds SET status = 'approved', decided_at = ?, expires_at = ? WHERE id = ? AND account_id = ? AND status = 'pending' AND expires_at > ?")
-    .bind(now(), now() + GRANT_TTL, holdId, sess.accountId, now()).run();
-  if (!r.meta.changes) throw new HttpError(404, 'not_found');
-  await audit(env, sess.accountId, 'web', 'approve', { hold: holdId });
+  const h = await env.DB.prepare("UPDATE holds SET status = 'approved', decided_at = ?, expires_at = ? WHERE id = ? AND account_id = ? AND status = 'pending' AND expires_at > ? RETURNING method, host, rule")
+    .bind(now(), now() + GRANT_TTL, holdId, sess.accountId, now()).first();
+  if (!h) throw new HttpError(404, 'not_found');
+  // which passkey approved: a short fingerprint of its credential id (the owner can match it to their passkey)
+  const passkey = (await sha256hex(String(body.credential.id))).slice(0, 16);
+  await audit(env, sess.accountId, 'web', 'approve', { hold: holdId, method: h.method, host: h.host, rule: h.rule, passkey });
   return { ok: true, note: 'The agent can now retry the exact same request once, within 10 minutes.' };
 }
 
 export async function denyHold(env, sess, holdId) {
-  const r = await env.DB.prepare("UPDATE holds SET status = 'denied', decided_at = ? WHERE id = ? AND account_id = ? AND status = 'pending'").bind(now(), holdId, sess.accountId).run();
-  if (!r.meta.changes) throw new HttpError(404, 'not_found');
-  await audit(env, sess.accountId, sess.kind, 'deny', { hold: holdId });
+  const h = await env.DB.prepare("UPDATE holds SET status = 'denied', decided_at = ? WHERE id = ? AND account_id = ? AND status = 'pending' RETURNING method, host, rule").bind(now(), holdId, sess.accountId).first();
+  if (!h) throw new HttpError(404, 'not_found');
+  await audit(env, sess.accountId, sess.kind, 'deny', { hold: holdId, method: h.method, host: h.host, rule: h.rule, by: sess.kind });
   return { ok: true };
 }
 
@@ -150,28 +156,53 @@ export function preview(search, text) {
   return (top ? top + '\n\n' : '') + body;
 }
 
+// A bound token used without a valid agent signature is the stolen-token case: note it in the owner's audit log, at
+// most once per token every 10 minutes per isolate, so a flood of bad attempts cannot flood the log or the database.
+const sigFailures = new Map();
+function noteSignatureFailure(env, tok, method, host, e) {
+  const t = now(), last = sigFailures.get(tok.id) || 0;
+  if (t - last < 10 * 60_000) return;
+  if (sigFailures.size > 10_000) sigFailures.clear();
+  sigFailures.set(tok.id, t);
+  const p = audit(env, tok.account_id, 'token:' + tok.id, 'agent_signature_failed', { method, host, error: e.code, reason: String(e.extra?.reason || '').slice(0, 80) }).catch(() => {});
+  if (env.__ctx && env.__ctx.waitUntil) env.__ctx.waitUntil(p);
+}
+
 export async function proxy(env, request, provider, rest, fetcher = fetch) {
   const P = PROVIDERS[provider];
   if (!P) throw new HttpError(404, 'unknown_provider');
   const authz = request.headers.get('authorization') || '';
   const m = authz.match(/^Bearer (lsh_[A-Za-z0-9_-]{43})$/);
-  if (!m) throw new HttpError(401, 'leash_token_required', 'Send your LEASH token as: Authorization: Bearer lsh_...');
-  const tok = await env.DB.prepare('SELECT * FROM tokens WHERE hash = ?').bind(await sha256hex(m[1])).first();
+  if (!m) throw new HttpError(401, 'leash_token_required', `Send your ${BRAND.name} token as: Authorization: Bearer lsh_...`);
+  // one query: the token, whether its account has public receipts on, and the agent key it is bound to (if any)
+  const tok = await env.DB.prepare('SELECT t.*, a.receipts AS receipts_on, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?').bind(await sha256hex(m[1])).first();
   if (!tok || tok.revoked || tok.expires_at < now()) throw new HttpError(401, 'token_invalid');
+  // a token bound to an agent key whose key is gone or revoked never works again (fails closed)
+  if (tok.agent_key_id && (!tok.agent_keyid || tok.agent_revoked)) throw new HttpError(401, 'agent_key_revoked', 'The agent key this token is bound to was revoked.');
   const cred = await env.DB.prepare('SELECT * FROM credentials WHERE id = ? AND account_id = ?').bind(tok.credential_id, tok.account_id).first();
   if (!cred || cred.provider !== provider) throw new HttpError(403, 'wrong_provider', `This token is for ${cred ? cred.provider : 'another provider'}.`);
   const policy = JSON.parse(tok.policy);
-  await limit(env.DB, 'tok:' + tok.id, policy.perMinute, 60_000, now());
 
   const method = request.method.toUpperCase();
   if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new HttpError(405, 'method');
   // path: no traversal, no encoded slashes or dots that could escape the provider base
   const path = canonPath('/' + rest);
   const url = new URL(request.url);
-  const body = ['GET', 'HEAD'].includes(method) ? null : new Uint8Array(await request.arrayBuffer());
-  if (body && body.length > MAX_BODY) throw new HttpError(413, 'too_large');
-  // fatal: a body that is not valid UTF-8 could read one way to LEASH and another way upstream; so could a body the
-  // content-type declares to be in another charset (LEASH always reads UTF-8)
+  const body = ['GET', 'HEAD'].includes(method) ? null : await readBody(request, MAX_BODY);
+  // Prove who: a bound token needs the agent's own signature over this exact request. Checked before the token's rate
+  // limit, so someone holding only the token can neither use it nor spend the real agent's request budget.
+  let agentKey = null;
+  if (tok.agent_key_id) {
+    try {
+      agentKey = (await verifyAgentSignature(request, body, { keyid: tok.agent_keyid, x: tok.agent_x }, d1Seen(env.DB))).keyid;
+    } catch (e) {
+      if (e instanceof HttpError) noteSignatureFailure(env, tok, method, P.host, e);
+      throw e;
+    }
+  }
+  await limit(env.DB, 'tok:' + tok.id, policy.perMinute, 60_000, now());
+  // fatal: a body that is not valid UTF-8 could read one way to the broker and another way upstream; so could a body
+  // the content-type declares to be in another charset (the broker always reads UTF-8)
   const cs = /;\s*charset\s*=\s*"?([^";\s]*)/i.exec(request.headers.get('content-type') || '');
   if (body && body.length && cs && !/^(utf-?8|us-ascii)$/i.test(cs[1])) throw new HttpError(400, 'bad_body', 'Request bodies must be UTF-8.');
   let bodyText = '';
@@ -181,9 +212,10 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   // An approval binds the exact bytes sent upstream, and the content-type that tells the upstream how to read them.
   const bodyHash = body ? b64u(new Uint8Array(await crypto.subtle.digest('SHA-256', body))) : '';
   const reqHash = await sha256hex(JSON.stringify([method, P.host, path, url.search, request.headers.get('content-type') || '', bodyHash]));
-  const where = { method, host: P.host, path: path.slice(0, 300) };
+  const where = { method, host: P.host, path: path.slice(0, 300), ...(agentKey ? { agent_key: agentKey } : {}) };
+  const seal = { receipts: !!tok.receipts_on };
   if (d.decision === 'deny') {
-    await audit(env, tok.account_id, 'token:' + tok.id, 'deny', { ...where, rule: d.rule });
+    await audit(env, tok.account_id, 'token:' + tok.id, 'deny', { ...where, rule: d.rule }, seal);
     throw new HttpError(403, 'leash_denied', d.why, { rule: d.rule });
   }
   if (d.decision === 'hold') {
@@ -197,7 +229,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
         const pv = preview(url.search, bodyText);
         await env.DB.prepare('INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
           .bind(h.id, tok.account_id, tok.id, reqHash, method, P.host, where.path, d.rule, d.why, now(), h.expires_at, pv).run();
-        await audit(env, tok.account_id, 'token:' + tok.id, 'hold', { ...where, rule: d.rule, hold: h.id, preview_sha256: await sha256hex(pv || '') });
+        await audit(env, tok.account_id, 'token:' + tok.id, 'hold', { ...where, rule: d.rule, hold: h.id, preview_sha256: await sha256hex(pv || '') }, seal);
         // wake the owner's devices after responding; the push itself carries nothing
         const p = notify(env, tok.account_id, env.__pushFetch || fetch).catch(() => {});
         if (env.__ctx) env.__ctx.waitUntil(p); else await p;
@@ -205,10 +237,10 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
       const approveUrl = `${rp(env).origin}/app#hold=${h.id}`;
       return json({
         error: 'held_for_approval', hold_id: h.id, approve_url: approveUrl, expires_at: h.expires_at, rule: d.rule, map_version: MAP_VERSION,
-        message: `LEASH held this request because it cannot be undone: ${d.why} Stop and ask your human to approve it at ${approveUrl} . After they approve, retry the exact same request once.`,
+        message: `${BRAND.name} held this request because it cannot be undone: ${d.why} Stop and ask your human to approve it at ${approveUrl} . After they approve, retry the exact same request once.`,
       }, 428);
     }
-    await audit(env, tok.account_id, 'token:' + tok.id, 'proxy_approved', { ...where, rule: d.rule, hold: g.id });
+    await audit(env, tok.account_id, 'token:' + tok.id, 'proxy_approved', { ...where, rule: d.rule, hold: g.id }, seal);
   }
 
   // forward
@@ -235,6 +267,8 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
     env.DB.prepare('UPDATE tokens SET last_used = ? WHERE id = ?').bind(now(), tok.id),
     env.DB.prepare('UPDATE credentials SET last_used = ? WHERE id = ?').bind(now(), cred.id),
   ]);
-  if (method !== 'GET' && method !== 'HEAD') await audit(env, tok.account_id, 'token:' + tok.id, 'proxy', { ...where, status: res.status, rule: d.rule });
+  if (agentKey) await env.DB.prepare('UPDATE agent_keys SET last_used = ? WHERE id = ?').bind(now(), tok.agent_key_id).run();
+  // writes are on the record; an approved call was already sealed as "executed", so its result is not sealed twice
+  if (method !== 'GET' && method !== 'HEAD') await audit(env, tok.account_id, 'token:' + tok.id, 'proxy', { ...where, status: res.status, rule: d.rule }, d.decision === 'hold' ? { receipts: false } : seal);
   return new Response(res.body, { status: res.status, headers: out });
 }
