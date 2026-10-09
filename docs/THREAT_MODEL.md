@@ -20,7 +20,8 @@ can read on the machine it runs on, an attacker who prompt-injects that agent ca
 | The agent (honest but wrong, or prompt-injected) | Use its `lsh_` token; sign with its agent key; read the CLI config on its machine | See a real key; approve a hold; mint a token with pre-approved irreversible calls; turn receipts off |
 | Someone holding a leaked `lsh_` token, unbound | Make the calls that token's policy allows, until it expires or is revoked | Exceed the policy; get past a hold; read the key |
 | Someone holding a leaked `lsh_` token bound to an agent key | Nothing: every request is refused before the policy, the rate limit or the upstream | Use it without the agent's private key |
-| Someone holding a stolen CLI session | List holds; mint ordinary tokens; register agent keys and bind tokens to them | Approve holds; mint pre-approved tokens; read keys; delete vaulted keys; revoke agent keys; turn receipts on or off; delete the account |
+| Someone holding a stolen CLI session | List holds; mint ordinary tokens; register agent keys and bind tokens to them, for at most 7 days | Approve holds; mint pre-approved tokens; read keys; delete vaulted keys; revoke agent keys; turn receipts on or off; approve or revoke CLI sign-ins; delete the account; keep anything it made after the owner revokes it |
+| A device-code phisher (starts `leashcli login` and sends someone the code) | Get a CLI session in that person's account if they sign in, type the code, ignore the country and network shown, confirm they ran it and approve with their passkey | Put the code in a link the app accepts; reuse a code; keep the session past 7 days or past a revoke; act unseen (audit entry and device alert at sign-in) |
 | Someone holding a receipts API key (`lsr_`) | Record receipts within the account's quotas (public, reported, never `source: "broker"`) | Make a broker receipt; record signed receipts without the signer; replay a signed receipt |
 | A phishing site | Ask for a passkey | Get an assertion the service accepts (origin and RP ID are bound into it) |
 | A malicious web page in the user's browser | Send requests | Write to the API (SameSite=Strict, Origin check, custom header, no CORS on private routes) |
@@ -60,6 +61,33 @@ signing key at the first append and refuses to sign under others. Tests: `test/r
 `test/merge-hardening.test.js` (R4).
 
 **S10. Phishing for passkeys.** WebAuthn binds origin and RP ID; user verification is required.
+
+**S11. Device-code phishing (CLI sign-in).** Passkeys cannot be phished, but a consent can: an attacker runs
+`leashcli login` on their own machine and sends someone the code ("verify your account"); used at scale against other
+platforms in 2025 (Microsoft on Storm-2372, Volexity, Proofpoint). RFC 8628 section 5.4 and the IETF cross-device flows
+BCP call for context on the approving device, short-lived single-use codes, limited scope and lifetime, rate limits, and
+detect and remediate. Mitigations:
+- *No one-tap link.* `verification_uri` is the plain page (`/app#device`), there is no `verification_uri_complete`, and
+  the app never takes a code from its address: a link that carries one shows a warning instead. The person types the
+  code from their own terminal. Typing was chosen over "the browser shows a code to type back into the CLI" because the
+  published leashcli 0.1.1 can only print a code, and an attacker would always pick the older flow.
+- *Context before the passkey.* The page shows what is granted (and what is not), when the sign-in started, the country
+  and network it started from next to the approver's own (Cloudflare's `request.cf`, never an IP), a warning when they
+  differ, and asks "Did you just run leashcli login yourself?"; the approve button needs that confirmation and "No, deny
+  it" comes first (the CLI gets `access_denied`).
+- *Small and short.* Codes: single use, 5 minutes, 8 characters from 28 without modulo bias. CLI sessions: 7 days, and
+  a token a CLI session mints never outlives it. Starts: 10 an hour per network; lookups and denials: 10 per 10 minutes
+  per account; approvals: 10 an hour per account.
+- *Detect and remediate.* Each sign-in is audited (`cli_signin_approved`, `cli_signed_in`, `cli_signin_denied`) and
+  wakes the owner's devices: "A command line was signed in" opens a one-tap revoke, which deletes the session and
+  revokes every token, agent key and receipts key it made (`cli_session_revoked`). Revoking needs a web session.
+- The CLI prints whose account it signed in to, so a person whose own code was approved by someone else (signing them
+  into a stranger's vault) notices at once.
+Residual: a person who types a code they were sent, ignores the warnings and approves has signed that command line in
+for up to 7 days or until they revoke it; it still cannot approve a hold. A VPN can make the country and network match.
+CLI sessions made before migration 0005 keep their 30-day lifetime, and the tokens they minted are not revoked with
+them (revoke those tokens one by one).
+Tests: `test/cli-signin.test.js`.
 
 ### The joints between the three parts
 
@@ -135,6 +163,8 @@ redirected there.
 
 - Irreversible operations the map does not cover. Mitigation: conservative defaults, versioned map, user `hold` rules.
 - The human approves the wrong thing. Mitigation: the approve screen shows method, host, path, rule, reason and a preview.
+- A person approves a CLI sign-in someone sent them (S11). Mitigation: typed codes, context and warnings, 7-day
+  sessions, alerts and one-tap revoke of the session and all it made.
 - A compromised agent machine signs for the attacker, and a CLI session on it can mint tokens and register keys. Prove
   who protects a token that leaks elsewhere (logs, screenshots, CI output), not the machine. Approvals still need a
   passkey.

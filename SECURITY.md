@@ -26,12 +26,13 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | Area | Control | OWASP |
 |---|---|---|
 | Sign-in | Passkeys only (WebAuthn, user verification required, origin and RP ID checked, single-use 5-minute challenges, signature counters); a passkey already registered gets 409 | A07 |
-| Sessions | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes | A07 |
+| Sessions | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app together with every token, agent key and receipts key they made; a token a CLI session mints never outlives it | A07 |
+| CLI sign-in (device code) | Against device-code phishing (RFC 8628 section 5.4, the IETF cross-device flows BCP): the code is never in a link (no `verification_uri_complete`; the app ignores a code in its address and warns); the person types it, sees what is granted and the country and network the sign-in started from next to their own (Cloudflare request data, never an IP), and must confirm they ran it before the passkey; "No, deny it" sends `access_denied`. Codes: 8 characters from a 28-character alphabet without modulo bias, single use, 5 minutes. Limits: 10 starts an hour per network, 10 lookups or denials per 10 minutes and 10 approvals an hour per account. Each sign-in is audited and wakes the owner's devices with a one-tap revoke | A07, API2, API4 |
 | CSRF | Web writes require an `Origin` equal to the host they were sent to, from an allow list of two (counterseal and the old leash host), and an `x-leash: 1` header; CORS only on the public log's read endpoints | A01 |
 | Two hosts | Each host has its own RP ID, chosen by the request's Origin from that allow list, never by the client; passkeys and challenges are refused on the other host; host-only cookies; the old host serves `/v1`, `/p` and `/app` and redirects other pages | A01, A07 |
 | Moving an account | One-time link made after a fresh passkey assertion on the old host: 32 random bytes, stored hashed, single use, bound to the account, 10 minutes, 3 an hour, in the URL fragment and POST bodies only, audited | A07 |
 | Authorization | Every query is scoped by `account_id`; another account's holds, tokens, credentials, agent keys, receipts keys and receipts return 404 (tested) | A01, API1 |
-| Privilege separation | CLI sessions can mint tokens and register agent keys, but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, turn receipts on or off, or delete the account | A01, A06 |
+| Privilege separation | CLI sessions can mint tokens and register agent keys, but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, turn receipts on or off, approve, deny or revoke CLI sign-ins, or delete the account | A01, A06 |
 | Secrets | AES-256-GCM per secret, data key wrapped by a master key (Workers secret), AAD binds account, row and provider; tokens, sessions and receipts keys stored as hashes; agent keys public only (a JWK with `d` is refused) | A04 |
 | Input | Parameterized SQL; bodies capped while streaming (16 KB for the API, 256 KB for receipts, 1 MB for the proxy); strict JSON; strict receipt schema; plain-decimal query parameters | A05, API8 |
 | SSRF | Upstream hosts fixed per provider, no redirects; push endpoints limited to known push services; the Web Bot Auth checker's directory fetch reaches only https public host names on port 443, at the fixed well-known path, no redirects, 5 s, 64 KB | A01, API7 |
@@ -47,6 +48,9 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 
 - A human approving something they should not. The approve screen shows the exact method, host and path, the reason, and
   a preview of the request (query string, SQL or GraphQL, body; at most 2 KB).
+- A person who approves a CLI sign-in someone sent them. The screen shows where it started and asks whether they ran it,
+  and the alert and one-tap revoke limit the damage (a CLI session cannot approve holds), but a person who approves
+  anyway has signed that command line in for up to 7 days. Country and network checks can be fooled by a VPN.
 - An upstream API key that is itself over-scoped being used outside the broker. Keep keys you vault only in the vault.
 - Calls the map does not know are irreversible. The map is versioned and conservative (every `DELETE` on GitHub,
   Cloudflare, Stripe and Supabase, every Railway mutation except redeploy and restart, SQL unless plainly read-only); add

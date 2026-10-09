@@ -30,6 +30,7 @@
   <a href="#receipts">How the public log is protected</a>
   <a href="#agentkeys">How agent keys work</a>
   <a href="#hosts">Two hosts</a>
+  <a href="#cli">Command line sign-in</a>
   <a href="#controls">Controls, mapped to OWASP</a>
   <a href="#limits">What it does not protect against</a>
   <a href="#report">Report a vulnerability</a>
@@ -91,14 +92,22 @@
     <li><strong>Moving an account</strong> needs a fresh passkey check on the old host. The one-time link is 32 random bytes, stored only as a hash, single use, valid 10 minutes, at most 3 an hour, and sits in the URL fragment, so it never reaches a server log or a Referer. Every step is in your audit log.</li>
   </ul>
 
+  <h2 id="cli">Signing in the command line</h2>
+  <ul>
+    <li><strong>The code is typed, never linked.</strong> <code>leashcli login</code> shows a code and a plain address. You type the code in the app yourself; the app never takes a code from a link and warns when a link tries. To phish a sign-in, someone has to get you to type a stranger's code by hand, on a page that tells you not to.</li>
+    <li><strong>You see what you grant, and from where.</strong> Before your passkey, the app shows what the command line will be able to do, when the sign-in started, and the country and network it started from next to yours, with a warning when they differ. "No, deny it" comes first.</li>
+    <li><strong>Small and short.</strong> A code works once, for 5 minutes. A command line session lasts 7 days, and a token it mints ends with it. Sign-in starts (10 an hour per network), code lookups (10 per 10 minutes per account) and approvals (10 an hour per account) are limited.</li>
+    <li><strong>Seen and undone.</strong> Every sign-in is in your audit log and wakes your devices with "A command line was signed in"; one tap revokes it and every token, agent key and receipts key it made.</li>
+  </ul>
+
   <h2 id="controls">Controls, mapped to OWASP</h2>
   <table>
     <tr><th>Area</th><th>Control</th><th>OWASP</th></tr>
     <tr><td>Sign-in</td><td>Passkeys only (WebAuthn, user verification required, origin and RP ID checked, single-use 5-minute challenges, signature counters)</td><td>A07</td></tr>
-    <tr><td>Sessions</td><td><code>__Host-</code> cookie, HttpOnly, Secure, SameSite=Strict, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes</td><td>A07</td></tr>
+    <tr><td>Sessions</td><td><code>__Host-</code> cookie, HttpOnly, Secure, SameSite=Strict, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app with everything they made</td><td>A07</td></tr>
     <tr><td>CSRF</td><td>Web writes require the same Origin and an <code>x-leash: 1</code> header; CORS only on the public log's read endpoints</td><td>A01</td></tr>
     <tr><td>Authorization</td><td>Every query is scoped by account; another account's holds, tokens, keys, agent keys and receipts return 404 (tested)</td><td>A01, API1</td></tr>
-    <tr><td>Privilege separation</td><td>CLI sessions can mint tokens and register agent keys but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys or change receipts</td><td>A01, A06</td></tr>
+    <tr><td>Privilege separation</td><td>CLI sessions can mint tokens and register agent keys but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, change receipts, or approve or revoke command line sign-ins</td><td>A01, A06</td></tr>
     <tr><td>Secrets</td><td>Envelope encryption with AAD per row; no API returns a secret; tokens, sessions and receipts keys stored as hashes</td><td>A04</td></tr>
     <tr><td>Injection</td><td>All SQL is parameterized; request bodies are size-capped while streaming and parsed as JSON only</td><td>A05</td></tr>
     <tr><td>SSRF</td><td>Upstream hosts fixed per provider; no redirects; push endpoints limited to known push services; the checker's directory fetch only reaches https public host names on port 443, the fixed well-known path, no redirects, 5 s, 64 KB</td><td>A01, API7</td></tr>
@@ -115,6 +124,7 @@
   <h2 id="limits">What Counterseal does not protect against</h2>
   <ul>
     <li><strong>A human approving something they shouldn't.</strong> The approval screen shows exactly what will happen and why. Read it.</li>
+    <li><strong>Approving a command line sign-in someone sent you.</strong> The screen shows where it started and asks whether you ran it; the alert and one-tap revoke limit the damage, and the session cannot approve holds, but a person who approves anyway has signed that command line in. Country and network checks can be fooled by a VPN.</li>
     <li><strong>An over-scoped key used outside the broker.</strong> Rotate the keys you give the vault and keep them only there.</li>
     <li><strong>Calls the map doesn't know are irreversible.</strong> The map is conservative: every DELETE is held on GitHub, Cloudflare, Stripe and Supabase, every Railway mutation except redeploy and restart, and SQL unless it is plainly read-only. Add <code>hold</code> rules to your policy for anything else you care about.</li>
     <li><strong>A compromised agent machine.</strong> An agent key on a machine an attacker controls signs for the attacker. Revoke the key; the bound tokens stop at once.</li>

@@ -5,9 +5,10 @@ Object (`ReceiptLog`, the public log) and static assets. It fits the Workers Fre
 
 ## Upgrading the live service (from the broker-only version)
 
-The live database keeps every row. Migration `0004_record_and_prove.sql` only adds tables and defaulted or nullable
-columns, so the code that runs today keeps working on the migrated database, and the new code keeps working with
-everything the old code wrote (`server/test/migration.test.js` runs the deployed code, migrates, then runs the new code).
+The live database keeps every row. Migrations `0004_record_and_prove.sql` and `0005_cli_signin.sql` only add tables,
+indexes and defaulted or nullable columns, so the code that runs today keeps working on the migrated database, and the
+new code keeps working with everything the old code wrote (`server/test/migration.test.js` runs the deployed code,
+migrates, then runs the new code). CLI sessions made before 0005 keep their 30-day lifetime; new ones last 7 days.
 
 ```bash
 cd server
@@ -17,7 +18,7 @@ npx -y wrangler@4 d1 time-travel info leash
 # 2. new secrets (names only; values never leave your machine)
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK        # the log's Ed25519 signing key; prints the public part to stderr: keep it
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx -y wrangler@4 secret put STATS_TOKEN   # optional: /v1/admin/stats
-# 3. the additive migration (applies 0004 only; 0001 to 0003 are already applied)
+# 3. the additive migrations (applies 0004 and 0005; 0001 to 0003 are already applied)
 npx -y wrangler@4 d1 migrations apply leash --remote
 # 4. the code (creates the ReceiptLog Durable Object through the "v1" migration in wrangler.jsonc)
 npx -y wrangler@4 deploy
@@ -41,6 +42,9 @@ curl -s -H "authorization: Bearer $STATS_TOKEN" https://counterseal.gautamkhosla
 and in the app: on https://leash.gautamkhosla.com/app sign in with the existing passkey, see the existing tokens and
 holds, approve a test hold, then use Account, "Move with passkey" and finish on https://counterseal.gautamkhosla.com/app.
 Check that https://leash.gautamkhosla.com/ answers 301 to counterseal and that `npx leashcli holds` (0.1.1) still works.
+Run `npx leashcli login` (0.1.1): it prints `.../app#device` and a code; type the code in the app, check that the
+approval screen shows your country and network, approve, and see the "A command line was signed in" alert and the
+sign-in under Account, Command line sign-ins.
 
 **`LOG_ORIGIN` is fixed for life.** It is signed into every checkpoint; the log pins its name and key at its first entry
 and refuses to sign under others (`503 log_key_changed`). It is set to `counterseal.gautamkhosla.com/log`, the final
@@ -66,7 +70,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" |
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))" | npx -y wrangler@4 secret put IP_SALT
 node dev/vapid-keygen.mjs | npx -y wrangler@4 secret put VAPID_PRIVATE_JWK   # phone alerts (Web Push); optional
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK          # the public log
-npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0004
+npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0005
 npx -y wrangler@4 deploy
 ```
 
@@ -177,5 +181,5 @@ identical on both.
 ## Publishing the CLI
 
 ```bash
-cd cli && npm publish --access public      # leashcli 0.2.0 (agent keys; its default server is counterseal); the planned new name is "counterseal"
+cd cli && npm publish --access public      # leashcli 0.2.1 (agent keys, the typed sign-in code; its default server is counterseal); the planned new name is "counterseal"
 ```

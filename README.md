@@ -109,13 +109,16 @@ goes for approving holds, revoking agent keys and turning public receipts off.
 ## Quickstart
 
 ```bash
-npx leashcli login                      # approve the code with your passkey in the browser
+npx leashcli login                      # type its code at /app#device, check where it started, approve with your passkey
 npx leashcli add github                 # paste the key once; it goes into the vault, never onto disk
 npx leashcli creds                      # note the credential id
 npx leashcli token <credentialId> --label "coding agent, laptop"
 ```
 
-The CLI package keeps its first name, `leashcli`; it is the same service.
+The CLI package keeps its first name, `leashcli`; it is the same service. A CLI sign-in lasts 7 days, and tokens it mints
+end with it. The code is typed in the app, never sent as a link: never type a code someone sent you, because whoever
+approves a code gives that command line their account. Each sign-in alerts your devices and can be revoked in the app
+(Account), with every token and key it made.
 
 **Two hosts.** The product lives at counterseal.gautamkhosla.com. The old host, leash.gautamkhosla.com, keeps serving
 the API and the proxy exactly as before (so leashcli 0.1.1 and configured agents keep working) and its `/app` sign-in for
@@ -141,11 +144,11 @@ stop, give you the approve link, and retry the identical call after you approve.
 
 ### Give the agent its own key (Prove who)
 
-Make an agent key in the app (generated in your browser; only the public half is sent), or with CLI 0.2.0 from the
+Make an agent key in the app (generated in your browser; only the public half is sent), or with CLI 0.2.1 from the
 agent's machine, then bind a token to it and give the MCP server the key file:
 
 ```bash
-npx leashcli agent-key agent-key.json --label laptop-agent     # CLI 0.2.0 (in this repo, not yet published)
+npx leashcli agent-key agent-key.json --label laptop-agent     # CLI 0.2.1 (in this repo, not yet published)
 npx leashcli token <credentialId> --agent-key <agentKeyId>
 # MCP env: { "LEASH_TOKENS": "github=lsh_...", "LEASH_AGENT_KEY": "/path/to/agent-key.json" }
 ```

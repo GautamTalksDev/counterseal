@@ -52,7 +52,7 @@
   <h2 id="quickstart">Quickstart</h2>
   <ol>
     <li><strong>Create an account</strong> at <a href="/app">/app</a> with a passkey. No password or email.</li>
-    <li><strong>Sign in the CLI</strong> and approve the code it shows in the app:
+    <li><strong>Sign in the CLI.</strong> It shows a code; open <a href="/app#device">/app#device</a>, type the code, check where the sign-in started, and approve with your passkey. Never type a code someone sent you:
       <pre>npx leashcli login</pre></li>
     <li><strong>Vault a key.</strong> Paste it once; it is encrypted and never written to disk:
       <pre>npx leashcli add github prod</pre></li>
@@ -171,7 +171,7 @@ Authorization: Bearer lsh_...</pre>
   <p>Give each agent its own Ed25519 key. You register the public half with a proof of possession; the private half never leaves the agent's machine. A token bound to the key then only works on requests that key signed, so a token copied from a log, a config file or a screen is useless on its own, and every decision on a signed request records which agent key made it.</p>
   <pre>npx leashcli agent-key agent-key.json --label laptop-agent     # makes the key (file mode 600) and registers it
 npx leashcli token &lt;key-id&gt; --agent-key &lt;agent-key-id&gt;          # a token bound to it</pre>
-  <p>Then run the MCP server with <code>LEASH_AGENT_KEY=agent-key.json</code> next to <code>LEASH_TOKENS</code>; it signs every call. You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys arrive in leashcli 0.2.0; until it is published, use the app or the signer in <code>cli/sign.mjs</code>.</p>
+  <p>Then run the MCP server with <code>LEASH_AGENT_KEY=agent-key.json</code> next to <code>LEASH_TOKENS</code>; it signs every call. You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys arrive in leashcli 0.2.1; until it is published, use the app or the signer in <code>cli/sign.mjs</code>.</p>
   <p>The signature is an RFC 9421 HTTP Message Signature with this profile:</p>
   <pre>Signature-Input: sig1=("@method" "@target-uri" "content-digest");created=1791300000;expires=1791300060;keyid="&lt;JWK thumbprint&gt;";alg="ed25519";nonce="&lt;random&gt;";tag="leash-pop"
 Signature: sig1=:&lt;base64 Ed25519 signature&gt;:
@@ -190,17 +190,17 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
   <h2 id="cli">CLI</h2>
   <table>
     <tr><th>Command</th><th>What it does</th></tr>
-    <tr><td><code>leash login</code></td><td>Sign in this machine. You approve the code in the app.</td></tr>
-    <tr><td><code>leash logout</code></td><td>Forget the session on this machine.</td></tr>
+    <tr><td><code>leash login</code></td><td>Sign in this machine for 7 days. You type the code it shows in the app and approve with your passkey. Tokens it mints end with the sign-in; revoke it in the app under Account.</td></tr>
+    <tr><td><code>leash logout</code></td><td>End the session on the server (0.2.1) and forget it on this machine.</td></tr>
     <tr><td><code>leash add &lt;provider&gt; [label]</code></td><td>Vault a key. Prompts for it; never written to disk.</td></tr>
     <tr><td><code>leash creds</code></td><td>List vaulted keys (id, provider, label, last four).</td></tr>
-    <tr><td><code>leash token &lt;key-id&gt; [--label x] [--ttl hours] [--policy file.json]</code></td><td>Mint an agent token. 0.2.0 adds <code>--agent-key &lt;id&gt;</code>.</td></tr>
+    <tr><td><code>leash token &lt;key-id&gt; [--label x] [--ttl hours] [--policy file.json]</code></td><td>Mint an agent token. 0.2.1 adds <code>--agent-key &lt;id&gt;</code>.</td></tr>
     <tr><td><code>leash tokens</code></td><td>List active tokens.</td></tr>
     <tr><td><code>leash revoke &lt;token-id&gt;</code></td><td>Revoke a token immediately.</td></tr>
     <tr><td><code>leash holds</code></td><td>List calls waiting for you.</td></tr>
     <tr><td><code>leash watch</code></td><td>Print and ring for each new hold.</td></tr>
     <tr><td><code>leash mcp</code></td><td>Run the MCP server for your agent.</td></tr>
-    <tr><td><code>leash agent-key [file]</code>, <code>leash agent-keys</code></td><td>Make and register an agent key; list them. From 0.2.0.</td></tr>
+    <tr><td><code>leash agent-key [file]</code>, <code>leash agent-keys</code></td><td>Make and register an agent key; list them. From 0.2.1.</td></tr>
   </table>
   <p>Run any command with <code>npx leashcli</code>, or install it globally with <code>npm i -g leashcli</code>.</p>
 

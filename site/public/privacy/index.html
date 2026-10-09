@@ -73,8 +73,9 @@
     <tr><td>Receipt openings (if receipts are on)</td><td>For each of your public entries, a random salt and the id of the key that sent it, kept with the log so only you can prove the entry is yours.</td></tr>
     <tr><td>Receipts counters (if you use receipts)</td><td>How many receipts your account recorded this month and today, and how many decisions could not be sealed, to enforce the limits. Kept for about 13 months. Replay records of signed receipts: 30 minutes.</td></tr>
     <tr><td>When your account was last used (a time, updated at most once a day)</td><td>Only to count how many accounts were active in the last week, as a total. Nothing about what you did.</td></tr>
-    <tr><td>Session records, as a hash</td><td>To keep you signed in. Web sessions and CLI sessions expire automatically.</td></tr>
-    <tr><td>Push addresses of devices where you turned on alerts (optional)</td><td>To wake those devices when a call is held. The push carries no content, so Google, Apple, Mozilla or Microsoft (whoever runs your browser's push service) learn only that a wake-up was sent, never what was held. Your device then fetches the alert text (the method, host and path of the held call) from us over your own session; it is shown on your device and may appear on its lock screen.</td></tr>
+    <tr><td>Session records, as a hash</td><td>To keep you signed in. Web sessions expire after 12 hours and command line (CLI) sessions after 7 days; you can revoke a CLI session in the app.</td></tr>
+    <tr><td>Where each command line sign-in started, coarse: the country and the network's name (for example "Deutsche Telekom") and number, as Cloudflare reports them. Never the IP address.</td><td>So the approval screen can show where a <code>leashcli login</code> started next to where you are (a sign-in from another country is a warning sign), and so you can review and revoke command line sign-ins. While you approve, your own browser's country and network are compared with it and not stored. Kept with the pending code (5 minutes; the network number only there) and with the CLI session it becomes (7 days at most). The country and network name of each sign-in, approval or denial also stay in your audit log.</td></tr>
+    <tr><td>Push addresses of devices where you turned on alerts (optional)</td><td>To wake those devices when a call is held or a command line is signed in to your account. The push carries no content, so Google, Apple, Mozilla or Microsoft (whoever runs your browser's push service) learn only that a wake-up was sent, never why. Your device then fetches the alert text (the method, host and path of the held call, or the country and network a sign-in came from) from us over your own session; it is shown on your device and may appear on its lock screen.</td></tr>
     <tr><td>A salted hash of your IP address (IPv6 grouped by /64)</td><td>Only for rate limiting, deleted after the limit window ends (a minute; a day for the sign-up limit). Some limits are kept only in memory and never stored.</td></tr>
   </table>
 
@@ -95,7 +96,7 @@
     <li>Your biometric data, device PIN or any private key.</li>
     <li>Your API keys in readable form, anywhere: not in the database, not in logs, not in error messages.</li>
     <li>The bodies of requests your agents send or the responses they get back. They pass through and are gone. The only exception is the short preview of a held call, kept until a day after you decide on it.</li>
-    <li>Your IP address in clear, your location, or any device fingerprint, in our database.</li>
+    <li>Your IP address in clear, your precise location, or any device fingerprint, in our database. The only location we keep is the country (and network name) a command line sign-in started from, described above.</li>
     <li>What you paste into the receipt verifier or the signature checker: both run in your browser. The checker sends one request to us only if you ask it to fetch an agent's key directory, and that request carries only the agent's origin.</li>
   </ul>
 
@@ -106,7 +107,7 @@
   <h2 id="keep">How long we keep it</h2>
   <ul>
     <li>Sign-in challenges and device login codes: minutes. Rate limit records: until the window ends. Signature nonces: until the signature expires. Signed-receipt replay records: 30 minutes.</li>
-    <li>Sessions: until they expire or you sign out.</li>
+    <li>Sessions: until they expire (12 hours on the web, 7 days for the command line), you sign out or you revoke them.</li>
     <li>Vault keys, tokens, receipts keys and agent keys: until you delete or revoke them.</li>
     <li>Holds, audit log and receipt openings: until you delete your account.</li>
     <li>Public log entries: permanently.</li>
