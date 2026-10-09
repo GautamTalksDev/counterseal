@@ -1,4 +1,4 @@
-// LEASH landing: live console feed, the nine-second comparison, the playable demo, the irreversible map.
+// Counterseal landing: live console feed, the nine-second comparison, the playable demo, the irreversible map.
 // DOM building only (Trusted Types: no innerHTML). Respects prefers-reduced-motion.
 import { liveGlow } from './glow.js';
 liveGlow();

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Verify a receipt: Counterseal</title>
+<meta name="description" content="Check a Counterseal receipt bundle in your browser against the public log key.">
+<meta name="theme-color" content="#08090b">
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<div class="glow" aria-hidden="true"></div>
+<header class="nav">
+  <div class="nav-in">
+    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="links"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/#pricing">Pricing</a></nav>
+    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Get started</a></div>
+  </div>
+</header>
+<main class="doc">
+<nav class="toc" aria-label="On this page">
+  <b>Verify</b>
+  <a href="#log">This log</a>
+  <a href="#check">Check a bundle</a>
+  <a href="#how">What is checked</a>
+</nav>
+<article class="prose">
+<p class="kicker">Record</p>
+  <h1>Verify a receipt</h1>
+  <p class="lead">If it was recorded, you can prove it. Paste or open a receipt bundle: it is checked here, in your browser, against this log's own key. Nothing you paste is sent anywhere.</p>
+
+  <h2 id="log">This log</h2>
+  <p id="head">Loading the log head...</p>
+  <p>Name: <code id="origin"></code></p>
+  <p>Verifier key (pin this one; a bundle's own <code>log</code> field is only a hint):</p>
+  <pre id="vk"></pre>
+  <details><summary>Latest signed checkpoint</summary><pre id="cp"></pre></details>
+
+  <h2 id="check">Check a bundle</h2>
+  <div class="tool">
+    <label for="bundle">Receipt bundle (JSON)</label>
+    <textarea id="bundle" spellcheck="false" placeholder='{"index": 0, "leaf_hash": "...", "tree_size": 1, "inclusion_proof": [], "checkpoint": "...", "entry": {...}}'></textarea>
+    <div class="tool-row"><button id="check" class="btn btn-pri sm" type="button">Verify</button><label class="btn btn-ghost sm file">Open a file<input id="file" type="file" accept=".json,application/json"></label></div>
+    <pre id="out" class="verdict" hidden></pre>
+  </div>
+
+  <h2 id="how">What is checked</h2>
+  <ol>
+    <li>The checkpoint's Ed25519 signature verifies under this log's verifier key, and its size equals the bundle's tree size.</li>
+    <li>The SHA-256 leaf hash of the canonical entry matches the bundle.</li>
+    <li>The inclusion proof walks from that leaf to the checkpoint's root (RFC 9162).</li>
+    <li>If the bundle carries an opening, it matches the entry's submitter commitment.</li>
+  </ol>
+  <p>A <strong>broker</strong> receipt (entry <code>source: "broker"</code>) was written by the broker itself for a decision it made; nobody else can write one. Any other receipt is what an agent reported, with a receipts API key. To check offline, use <code>sdk/receipts.mjs verify bundle.json --key &lt;verifier key&gt;</code> from the repository. See the <a href="/docs/#receipts">docs</a>.</p>
+</article>
+</main>
+<footer class="foot">
+  <div class="foot-in">
+    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
+    <div class="foot-links"><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="mailto:hello@gautamkhosla.com">Contact</a></div>
+    <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</span>
+  </div>
+</footer>
+<script src="/doc.js" type="module"></script>
+<script src="/verify/verify.js" type="module"></script>
+</body>
+</html>

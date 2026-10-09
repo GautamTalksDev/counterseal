@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Privacy: LEASH</title>
-<meta name="description" content="What LEASH stores, what it never sees, and how to delete everything.">
+<title>Privacy: Counterseal</title>
+<meta name="description" content="What Counterseal stores, what is public in the receipts log, what it never sees, and how to delete everything.">
 <meta name="theme-color" content="#08090b">
 <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/site.css">
@@ -14,8 +14,8 @@
 <div class="glow" aria-hidden="true"></div>
 <header class="nav">
   <div class="nav-in">
-    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>LEASH</a>
-    <nav class="links"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/#pricing">Pricing</a></nav>
+    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="links"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/#pricing">Pricing</a></nav>
     <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Get started</a></div>
   </div>
 </header>
@@ -26,6 +26,7 @@
   <a href="#faceid">Face ID and passkeys</a>
   <a href="#demo">The demo on our homepage</a>
   <a href="#store">What we store</a>
+  <a href="#public">What is public</a>
   <a href="#never">What we never store</a>
   <a href="#where">Where it lives</a>
   <a href="#keep">How long we keep it</a>
@@ -33,9 +34,9 @@
   <a href="#contact">Contact</a>
 </nav>
 <article class="prose">
-  <p class="kicker">Privacy</p>
+<p class="kicker">Privacy</p>
   <h1>Privacy policy</h1>
-  <p class="lead">LEASH holds your most sensitive keys, so we collect as little as we can and say exactly what that is.</p>
+  <p class="lead">Counterseal holds your most sensitive keys and runs a public log, so we collect as little as we can, say exactly what that is, and say exactly what is public.</p>
   <p class="meta">Last updated 9 October 2026</p>
 
   <h2 id="short">The short version</h2>
@@ -43,14 +44,14 @@
     <li>No passwords, no email address required, no tracking, no analytics, no ads, no third-party scripts.</li>
     <li>Your face or fingerprint never reaches us. We only ever see a public key and a signature.</li>
     <li>API keys you vault are encrypted, and no API or person on our side can read them back to you or anyone else.</li>
-    <li>One cookie: your sign-in session. Nothing else is stored in your browser.</li>
-    <li>You can delete your account and everything in it yourself, at any time, in the app.</li>
+    <li>One cookie: your sign-in session. Nothing else is stored in your browser, unless you turn on phone alerts (a service worker and a push subscription).</li>
+    <li>If receipts are on, a short record of each decision is published in a public log, permanently. It never contains a path, body, key, token, name, email or IP address. See <a href="#public">What is public</a>.</li>
+    <li>You can delete your account and everything we hold about you yourself, at any time, in the app. Public log entries stay, but nothing on our side links them to you any more.</li>
   </ul>
 
   <h2 id="faceid">Face ID and passkeys</h2>
-  <p>When you sign in or approve a held call, LEASH uses a <strong>passkey</strong> (the WebAuthn standard, the same one Apple, Google and GitHub use). Your phone or laptop asks you for Face ID, Touch ID, Windows Hello, a fingerprint or your device PIN. That check happens <strong>entirely on your device</strong>, inside its secure hardware.</p>
+  <p>When you sign in or approve a held call, Counterseal uses a <strong>passkey</strong> (the WebAuthn standard). Your phone or laptop asks you for Face ID, Touch ID, Windows Hello, a fingerprint or your device PIN. That check happens <strong>entirely on your device</strong>, inside its secure hardware.</p>
   <p>If it passes, your device signs a one-time challenge from us with a private key that never leaves it. We receive the signature and check it against the <strong>public key</strong> you registered. We never receive, store or have any way to see your face, fingerprint, PIN or private key.</p>
-  <div class="callout">On a phone, approving a held call looks just like unlocking an app: you tap Approve, Face ID or your fingerprint confirms, done. On a laptop it is Touch ID, Windows Hello, or a QR code you scan with your phone.</div>
 
   <h2 id="demo">The demo on our homepage</h2>
   <p>The "Try it" section and the "nine seconds" replay on our homepage are <strong>simulations that run only in your browser</strong>. Pressing "Approve with Face ID" there does not use Face ID, does not use your camera, sends nothing to us, and stores nothing. The only request the homepage makes is to load the public list of irreversible calls.</p>
@@ -58,49 +59,67 @@
   <h2 id="store">What we store</h2>
   <table>
     <tr><th>Data</th><th>Why</th></tr>
-    <tr><td>The name you type at sign-up</td><td>So the app can greet you. It can be anything.</td></tr>
+    <tr><td>The name you type at sign-up</td><td>So the app can greet you. It can be anything. It is never in a public receipt.</td></tr>
     <tr><td>Your passkey's public key and a usage counter</td><td>To verify sign-ins and approvals, and to detect cloned authenticators.</td></tr>
     <tr><td>API keys you add to the vault, <strong>encrypted</strong></td><td>To call the provider on your agent's behalf. Each key has its own AES-256-GCM key, wrapped by a master key held outside the database. We keep the last four characters in clear so you can tell keys apart.</td></tr>
-    <tr><td>Agent tokens, as a hash</td><td>To recognise your agents. The token itself is shown to you once and never stored.</td></tr>
+    <tr><td>Agent tokens and receipts API keys, as hashes</td><td>To recognise your agents. The token or key itself is shown to you once and never stored.</td></tr>
+    <tr><td>Agent public keys (optional)</td><td>The public half of each agent key you register, its label and when it was last used, to check your agents' signatures. Never a private key: we refuse any key that contains one.</td></tr>
+    <tr><td>Signature nonces</td><td>A random value from each signed agent request, with the key's fingerprint, so a signed request cannot be replayed. Deleted once the signature has expired (minutes).</td></tr>
     <tr><td>Held calls: method, host, path, rule, time, decision, and a preview of the request (query string and up to 2 KB of the body or SQL)</td><td>So you can see exactly what you are approving. The preview is deleted a day after you decide; the audit log keeps only a fingerprint (hash) of it.</td></tr>
-    <tr><td>Your audit log</td><td>Calls, holds, approvals, token and key changes, hash-chained so tampering is detectable.</td></tr>
+    <tr><td>Your audit log</td><td>Writes, holds, approvals (with a short fingerprint of the passkey that approved), token and key changes, hash-chained so tampering is detectable, and the index of each entry's public receipt.</td></tr>
+    <tr><td>Receipt openings (if receipts are on)</td><td>For each of your public entries, a random salt and the id of the key that sent it, kept with the log so only you can prove the entry is yours.</td></tr>
+    <tr><td>Receipts counters (if you use receipts)</td><td>How many receipts your account recorded this month and today, and how many decisions could not be sealed, to enforce the limits. Kept for about 13 months. Replay records of signed receipts: 30 minutes.</td></tr>
     <tr><td>Session records, as a hash</td><td>To keep you signed in. Web sessions and CLI sessions expire automatically.</td></tr>
-    <tr><td>Push addresses of devices where you turned on alerts (optional)</td><td>To wake those devices when a call is held. The push carries no content, so Google, Apple, Mozilla or Microsoft (whoever runs your browser's push service) learn only that a wake-up was sent, never what was held. Your device then fetches the alert text (the method, host and path of the held call) from LEASH over your own session; it is shown on your device and may appear on its lock screen. Turn alerts off or delete your account and the address is removed.</td></tr>
-    <tr><td>A salted hash of your IP address</td><td>Only for rate limiting, deleted when the limit window ends. IPv6 addresses are grouped by /64 before hashing.</td></tr>
+    <tr><td>Push addresses of devices where you turned on alerts (optional)</td><td>To wake those devices when a call is held. The push carries no content, so Google, Apple, Mozilla or Microsoft (whoever runs your browser's push service) learn only that a wake-up was sent, never what was held. Your device then fetches the alert text (the method, host and path of the held call) from us over your own session; it is shown on your device and may appear on its lock screen.</td></tr>
+    <tr><td>A salted hash of your IP address (IPv6 grouped by /64)</td><td>Only for rate limiting, deleted after the limit window ends (a minute; a day for the sign-up limit). Some limits are kept only in memory and never stored.</td></tr>
   </table>
+
+  <h2 id="public">What is public</h2>
+  <p>If receipts are on for your account, each decision the broker makes on a write (an allowed write, a hold, an approval, a denial, an approved call going through) is published in the public log, <strong>permanently</strong>: anyone can read it, and it cannot be removed, because that is what makes the log trustworthy. A broker entry contains only:</p>
+  <ul>
+    <li>the method and the provider's API host (for example <code>DELETE api.github.com</code>), the decision, the rule id and the map version;</li>
+    <li>whether a registered agent key signed the request, and whether a passkey approved it (yes or no, never which one);</li>
+    <li>the time, and the SHA-256 hash of your own audit entry for that decision;</li>
+    <li>a salted commitment to your account, different for every entry, so entries cannot be linked to you or to each other.</li>
+  </ul>
+  <p>Never the path, query string, body, response, key, token, account id, name, email or IP address. Receipts that your agents send themselves with a receipts API key are public too, with exactly the fields they send: send hashes, not content.</p>
+  <p>New accounts start with receipts on, and the sign-up screen says so. Accounts made before receipts existed have them off until their owner turns them on. You can turn them off at any time with your passkey; entries already published stay.</p>
 
   <h2 id="never">What we never store</h2>
   <ul>
-    <li>Your biometric data, device PIN or private keys.</li>
+    <li>Your biometric data, device PIN or any private key.</li>
     <li>Your API keys in readable form, anywhere: not in the database, not in logs, not in error messages.</li>
     <li>The bodies of requests your agents send or the responses they get back. They pass through and are gone. The only exception is the short preview of a held call, kept until a day after you decide on it.</li>
-    <li>Your IP address in clear, your location, or any device fingerprint, in our database. Our host, Cloudflare, processes every request and may keep short-lived operational logs, including IP addresses, under its own privacy policy (see <a href="#where">Where it lives</a>).</li>
+    <li>Your IP address in clear, your location, or any device fingerprint, in our database.</li>
+    <li>What you paste into the receipt verifier or the signature checker: both run in your browser. The checker sends one request to us only if you ask it to fetch an agent's key directory, and that request carries only the agent's origin.</li>
   </ul>
 
   <h2 id="where">Where it lives</h2>
-  <p>LEASH runs on Cloudflare Workers and Cloudflare D1. Cloudflare is our only processor. If you turn on alerts, your browser's push service delivers an empty wake-up message. Requests are handled at the Cloudflare location nearest to you; the database lives in one Cloudflare region. Cloudflare keeps logs of each request (such as the URL, status and timing, and possibly your IP address) for up to 3 days so we can debug the service. LEASH itself never writes your keys or tokens to any log.</p>
-  <p>When public receipts are enabled for the service, LEASH sends a minimal record of each decision to the WITNESS transparency log: the method, the host and a hash of the path. Never the path itself, your name or your keys.</p>
+  <p>Counterseal runs on Cloudflare Workers, Cloudflare D1 (accounts, vault, holds, audit) and a Cloudflare Durable Object (the public log). Cloudflare is our only processor. If you turn on alerts, your browser's push service delivers an empty wake-up message. Requests are handled at the Cloudflare location nearest to you; the database lives in one Cloudflare region.</p>
+  <p>Workers Logs are turned off for this service, so we do not keep request logs or our own log lines. Cloudflare itself may still process and briefly keep request metadata, such as IP addresses, to run and protect its network, under its own privacy policy. We never write your keys, tokens or request bodies to any log.</p>
 
   <h2 id="keep">How long we keep it</h2>
   <ul>
-    <li>Sign-in challenges: minutes. Device login codes: minutes. Rate limit records: until the window ends.</li>
+    <li>Sign-in challenges and device login codes: minutes. Rate limit records: until the window ends. Signature nonces: until the signature expires. Signed-receipt replay records: 30 minutes.</li>
     <li>Sessions: until they expire or you sign out.</li>
-    <li>Vault keys and tokens: until you delete or revoke them.</li>
-    <li>Holds and audit log: until you delete your account.</li>
+    <li>Vault keys, tokens, receipts keys and agent keys: until you delete or revoke them.</li>
+    <li>Holds, audit log and receipt openings: until you delete your account.</li>
+    <li>Public log entries: permanently.</li>
   </ul>
+  <p>Expired rows are refused as soon as they expire, and are deleted by a cleanup that runs during normal traffic, so a deletion can lag behind when the service is quiet.</p>
 
   <h2 id="rights">Your rights</h2>
-  <p>You can see everything we hold about you in the app: your vault, your tokens, your holds and your audit log. You can delete any key or token at any time. <strong>Delete account</strong> in the app erases your account, passkeys, vault, tokens, holds, sessions and audit log immediately; there is no soft delete. Database backups kept by Cloudflare roll off within 30 days.</p>
+  <p>You can see everything we hold about you in the app: your vault, tokens, agent keys, receipts keys, holds, audit log and receipts. You can delete any key or token at any time. <strong>Delete account</strong> in the app erases your account, passkeys, vault, tokens, agent keys, receipts keys and counters, holds, sessions, push devices and audit log immediately, and erases the openings of your public entries, so nothing on our side can say whose they were. The public entries themselves stay, and the log keeps a one-way hash of your deleted account id so that a receipt already in flight is unlinked too. Database backups kept by Cloudflare roll off within 30 days.</p>
   <p>Wherever you live, including under GDPR, PIPEDA or CCPA, you can also ask us to access, correct, export or delete your data by writing to us. We do not sell or share personal data.</p>
 
   <h2 id="contact">Contact</h2>
-  <p>LEASH is run by Gautam Khosla in Ottawa, Canada. Privacy questions: <a href="mailto:privacy@gautamkhosla.com">privacy@gautamkhosla.com</a>. Security reports: see our <a href="/security/">security page</a>.</p>
+  <p>Counterseal is run by Gautam Khosla in Ottawa, Canada. Privacy questions: <a href="mailto:privacy@gautamkhosla.com">privacy@gautamkhosla.com</a>. Security reports: see our <a href="/security/">security page</a>.</p>
 </article>
 </main>
 <footer class="foot">
   <div class="foot-in">
-    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>LEASH</a>
-    <div class="foot-links"><a href="/docs/">Docs</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="mailto:hello@gautamkhosla.com">Contact</a></div>
+    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
+    <div class="foot-links"><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="mailto:hello@gautamkhosla.com">Contact</a></div>
     <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</span>
   </div>
 </footer>

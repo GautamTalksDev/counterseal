@@ -1,4 +1,5 @@
-// LEASH dashboard. No innerHTML (Trusted Types enforced), no third-party code, no secrets kept in the page.
+// Counterseal dashboard. No innerHTML (Trusted Types enforced), no third-party code, no secrets kept in the page.
+// The one exception is an agent key made here: it is generated in this browser, downloaded at once, and dropped.
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const n = document.createElement(tag); Object.assign(n, props); for (const k of kids) if (k != null) n.append(k); return n; };
 const b64u = { enc: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''), dec: (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)) };
@@ -40,7 +41,7 @@ $('logout').onclick = async () => { await api('POST', '/v1/auth/logout', {}); lo
 // ---- data
 let meta;
 async function load() {
-  const [c, t, h, a] = await Promise.all([api('GET', '/v1/credentials'), api('GET', '/v1/tokens'), api('GET', '/v1/holds'), api('GET', '/v1/audit')]);
+  const [c, t, h, a, ak, me] = await Promise.all([api('GET', '/v1/credentials'), api('GET', '/v1/tokens'), api('GET', '/v1/holds'), api('GET', '/v1/audit'), api('GET', '/v1/agent-keys'), api('GET', '/v1/me')]);
   // holds
   const H = $('holds'); H.replaceChildren();
   $('holdCount').textContent = String(h.holds.length); $('holdCount').classList.toggle('hot', h.holds.length > 0);
@@ -64,16 +65,35 @@ async function load() {
     C.append(el('div', {}, el('span', {}, el('b', { textContent: x.label }), el('span', { className: 'dim', textContent: `  ${x.provider}  ...${x.hint}` })), del));
     tc.append(el('option', { value: x.id, textContent: `${x.label} (${x.provider})` }));
   }
+  $('noCreds').hidden = c.credentials.length > 0;
   // tokens
   const T = $('tokens'); T.replaceChildren();
   for (const x of t.tokens.filter((y) => !y.revoked)) {
     const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke' });
     rv.onclick = async () => { await api('DELETE', `/v1/tokens/${x.id}`); load(); };
-    T.append(el('div', {}, el('span', {}, el('b', { textContent: x.label }), el('span', { className: 'dim', textContent: `  ${x.provider}, expires ${new Date(x.expires_at).toLocaleDateString()}${x.policy.unattendedIrreversible.length ? ', has pre-approvals' : ''}` })), rv));
+    const bound = x.agent_key ? `, signed by ${x.agent_key_label}${x.agent_key_revoked ? ' (key revoked: token stopped)' : ''}` : '';
+    T.append(el('div', {}, el('span', {}, el('b', { textContent: x.label }), el('span', { className: 'dim', textContent: `  ${x.provider}, expires ${new Date(x.expires_at).toLocaleDateString()}${x.policy.unattendedIrreversible.length ? ', has pre-approvals' : ''}${bound}` })), rv));
   }
+  $('noTokens').hidden = t.tokens.some((y) => !y.revoked);
+  // agent keys
+  const K = $('agentKeys'); K.replaceChildren();
+  const active = ak.agentKeys.filter((k) => !k.revoked_at);
+  for (const x of active) {
+    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke' });
+    rv.onclick = async () => { if (!confirm(`Revoke ${x.label}? ${x.tokens} token(s) bound to it stop working at once.`)) return; try { await api('DELETE', `/v1/agent-keys/${x.id}`); load(); } catch (e) { toast(e.message); } };
+    K.append(el('div', {}, el('span', {}, el('b', { textContent: x.label }), el('span', { className: 'dim mono', textContent: `  ${x.keyid.slice(0, 16)}...  ${x.tokens} token(s)${x.last_used ? ', last used ' + new Date(x.last_used).toLocaleString() : ''}` })), rv));
+  }
+  $('noAgentKeys').hidden = active.length > 0;
+  for (const sel of [$('tokAgentKey'), $('rkSigner')]) {
+    const keep = sel.value; const first = sel.options[0];
+    sel.replaceChildren(first, ...active.map((k) => el('option', { value: k.id, textContent: k.label })));
+    sel.value = active.some((k) => k.id === keep) ? keep : '';
+  }
+  // the receipts list reads the log's Durable Object, so it is fetched only while that view is open
+  if (current === 'receipts') receiptsView(me.receipts).catch(() => {});
   // audit
   const A = $('audit'); A.replaceChildren();
-  for (const x of a.entries.slice(0, 40)) A.append(el('div', {}, el('span', { className: 'mono', textContent: `${new Date(x.at).toLocaleString()}  ${x.action}` }), el('span', { className: 'dim mono', textContent: x.detail.path ? `${x.detail.method} ${x.detail.path}` : x.actor })));
+  for (const x of a.entries.slice(0, 40)) A.append(el('div', {}, el('span', { className: 'mono', textContent: `${new Date(x.at).toLocaleString()}  ${x.action}${x.receipt !== null && x.receipt !== undefined ? '  receipt #' + x.receipt : ''}` }), el('span', { className: 'dim mono', textContent: x.detail.path ? `${x.detail.method} ${x.detail.path}` : x.actor })));
 }
 
 async function mint(pre) {
@@ -81,11 +101,11 @@ async function mint(pre) {
     let policy;
     const raw = $('policy').value.trim();
     if (raw) policy = JSON.parse(raw);
-    const body = { credentialId: $('tokCred').value, label: $('tokLabel').value.trim() || 'agent', policy };
+    const body = { credentialId: $('tokCred').value, label: $('tokLabel').value.trim() || 'agent', policy, ...($('tokAgentKey').value ? { agentKeyId: $('tokAgentKey').value } : {}) };
     const r = pre ? await ceremony('/v1/tokens/passkey/begin', '/v1/tokens/passkey/finish', body) : await api('POST', '/v1/tokens', body);
     $('newToken').hidden = false;
     $('newTokenVal').textContent = r.token;
-    $('newTokenMcp').textContent = JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli', 'mcp'], env: { LEASH_URL: location.origin, LEASH_TOKENS: `${r.provider}=${r.token}` } } } }, null, 2);
+    $('newTokenMcp').textContent = JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli', 'mcp'], env: { LEASH_URL: location.origin, LEASH_TOKENS: `${r.provider}=${r.token}`, ...(r.agentKey ? { LEASH_AGENT_KEY: '<path to the agent key file>' } : {}) } } } }, null, 2);
     load();
   } catch (e) { toast(e instanceof SyntaxError ? 'The policy is not valid JSON.' : e.message); }
 }
@@ -104,7 +124,11 @@ $('delAccount').onclick = async () => {
 $('verify').onclick = async () => { const v = await api('GET', '/v1/audit/verify'); toast(v.ok ? `Chain intact: ${v.entries} entries.` : `Chain BROKEN at entry ${v.brokenAt}.`); };
 
 // ---- views
+let current = 'holds';
 function show(view) {
+  const changed = current !== view;
+  current = view;
+  if (changed && view === 'receipts') load().catch(() => {});
   for (const s of document.querySelectorAll('.view')) s.hidden = s.dataset.view !== view;
   for (const a of document.querySelectorAll('#snav a')) a.classList.toggle('on', a.dataset.view === view);
 }
@@ -134,7 +158,7 @@ async function pushState() {
   if (!k.enabled) { panel.hidden = true; return; }
   panel.hidden = false;
   if (!pushOk()) {
-    $('pushHint').textContent = 'This browser cannot show alerts here. On iPhone: open LEASH in Safari, tap Share, then Add to Home Screen, and open LEASH from your home screen.';
+    $('pushHint').textContent = 'This browser cannot show alerts here. On iPhone: open Counterseal in Safari, tap Share, then Add to Home Screen, and open it from your home screen.';
     for (const b of ['pushOn', 'pushTest', 'pushOff']) $(b).hidden = true;
     return;
   }
@@ -161,6 +185,69 @@ $('pushOff').onclick = async () => {
     if (sub) { await api('POST', '/v1/push/unsubscribe', { endpoint: sub.endpoint }); await sub.unsubscribe(); }
     toast('Alerts are off for this device.'); pushState();
   } catch (e) { toast(e.message); }
+};
+
+// ---- receipts (Record)
+const download = (name, text) => {
+  const a = el('a', { href: URL.createObjectURL(new Blob([text], { type: 'application/json' })), download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+async function receiptsView(r) {
+  $('rcptOn').hidden = r.on; $('rcptOff').hidden = !r.on;
+  $('rcptState').textContent = r.on ? 'Public receipts are on' : 'Public receipts are off';
+  $('rcptHint').textContent = r.on
+    ? `Every decision on a write is sealed in the public log. This month: ${r.usage} of ${r.quota ?? 'unlimited'} (${r.today} today, ${r.dayCap ?? 'unlimited'} a day)${r.skipped ? `; ${r.skipped} decision(s) could not be sealed because a limit was reached, and stay in your audit log only` : ''}.`
+    : 'Decisions stay in your private audit log only. Turn receipts on to seal each one in the public log (method, provider host, decision, rule and hashes; never a path, body, key, name or IP).';
+  const [mine, keys] = await Promise.all([api('GET', '/v1/my/receipts'), api('GET', '/v1/keys')]);
+  const R = $('receipts'); R.replaceChildren();
+  for (const x of mine.receipts) {
+    const rc = x.entry.receipt || {};
+    const dl = el('button', { className: 'btn sm', textContent: 'Bundle' });
+    dl.onclick = async () => {
+      try {
+        const b = await api('GET', `/v1/my/receipts/${x.index}/bundle`);
+        if (!$('keepOpening').checked) delete b.opening;
+        download(`receipt-${x.index}.json`, JSON.stringify(b, null, 2));
+      } catch (e) { toast(e.message); }
+    };
+    R.append(el('div', {}, el('span', { className: 'mono', textContent: `#${x.index}  ${new Date(x.entry.received_at).toLocaleString()}  ${rc.decision || ''}` }), el('span', { className: 'dim mono', textContent: `${rc.action || ''}  ${x.entry.source === 'broker' ? 'broker' : 'reported by ' + (rc.agent || 'agent')}` }), dl));
+  }
+  $('noReceipts').hidden = mine.receipts.length > 0;
+  const K = $('apiKeys'); K.replaceChildren();
+  const live = keys.keys.filter((k) => !k.revoked);
+  for (const k of live) {
+    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke' });
+    rv.onclick = async () => { try { await api('DELETE', `/v1/keys/${k.id}`); load(); } catch (e) { toast(e.message); } };
+    K.append(el('div', {}, el('span', {}, el('b', { textContent: k.label }), el('span', { className: 'dim', textContent: `  ${k.signer_pub ? 'signed receipts only' : 'unsigned'}${k.last_used ? ', last used ' + new Date(k.last_used).toLocaleString() : ''}` })), rv));
+  }
+  $('noApiKeys').hidden = live.length > 0;
+}
+$('rcptOn').onclick = async () => { try { await api('POST', '/v1/me/receipts/on', {}); toast('Receipts are on.'); load(); } catch (e) { toast(e.message); } };
+$('rcptOff').onclick = async () => {
+  if (!confirm('Turn public receipts off? Future decisions will stay in your private audit log only. Receipts already published stay in the log.')) return;
+  try { await ceremony('/v1/me/receipts/off/begin', '/v1/me/receipts/off/finish'); toast('Receipts are off.'); load(); } catch (e) { toast(e.message); }
+};
+$('rkNew').onclick = async () => {
+  try {
+    const r = await api('POST', '/v1/keys', { label: $('rkLabel').value.trim() || 'agent', ...($('rkSigner').value ? { agentKeyId: $('rkSigner').value } : {}) });
+    $('newRk').hidden = false; $('newRkVal').textContent = r.key; load();
+  } catch (e) { toast(e.message); }
+};
+
+// ---- agent keys (Prove who): generated here, private half downloaded at once, never sent
+$('akNew').onclick = async () => {
+  try {
+    const kp = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    const priv = await crypto.subtle.exportKey('jwk', kp.privateKey);
+    const jwk = { kty: 'OKP', crv: 'Ed25519', x: priv.x, d: priv.d };
+    const label = $('akLabel').value.trim() || 'agent';
+    const b = await api('POST', '/v1/agent-keys/begin', { publicKey: jwk.x });
+    const proof = b64u.enc(await crypto.subtle.sign({ name: 'Ed25519' }, kp.privateKey, new TextEncoder().encode(b.sign)));
+    const r = await api('POST', '/v1/agent-keys', { label, publicKey: jwk.x, challengeId: b.challengeId, proof });
+    download(`agent-key-${label.replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 40)}.json`, JSON.stringify(jwk, null, 2));
+    toast(`Agent key registered. Keep the downloaded file on the agent's machine only.`);
+    $('akLabel').value = ''; load(); void r;
+  } catch (e) { toast(e.name === 'NotSupportedError' ? 'This browser cannot make Ed25519 keys. Use npx leashcli agent-key instead.' : e.message); }
 };
 
 async function boot() {

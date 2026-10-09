@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>LEASH: agents get tokens, you keep the keys</title>
-<meta name="description" content="LEASH is the credential broker for AI agents. Your agent gets scoped proxy tokens instead of real API keys, and anything irreversible waits for your passkey.">
-<meta property="og:title" content="LEASH: agents get tokens, you keep the keys">
-<meta property="og:description" content="A coding agent deleted a production database and every backup in 9 seconds. LEASH turns that into a notification you can deny.">
+<title>Counterseal: every irreversible action gets a second seal</title>
+<meta name="description" content="Counterseal is the credential broker for AI agents. Your agent gets scoped proxy tokens instead of real API keys, anything irreversible waits for your passkey, and every decision becomes a receipt anyone can verify.">
+<meta property="og:title" content="Counterseal: every irreversible action gets a second seal">
+<meta property="og:description" content="A coding agent deleted a production database and every backup in 9 seconds. Counterseal turns that into a notification you can deny.">
 <meta name="theme-color" content="#08090b">
 <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/site.css">
@@ -17,8 +17,8 @@
 
 <header class="nav">
   <div class="nav-in">
-    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>LEASH</a>
-    <nav class="links"><a href="#how">How it works</a><a href="#demo">Demo</a><a href="#map">Irreversible map</a><a href="/docs/">Docs</a><a href="#security">Security</a><a href="#pricing">Pricing</a></nav>
+    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="links"><a href="#how">How it works</a><a href="#demo">Demo</a><a href="#map">Irreversible map</a><a href="/docs/">Docs</a><a href="#security">Security</a><a href="/verify/">Verify</a><a href="#pricing">Pricing</a></nav>
     <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Get started</a></div>
   </div>
 </header>
@@ -27,13 +27,13 @@
   <section class="hero">
     <a class="chip" href="#nine"><span class="chip-dot"></span>A coding agent wiped a production database in 9 seconds <span class="arr">&rarr;</span></a>
     <h1>Your agents get tokens.<br><span class="soft">You keep the <em>keys.</em></span></h1>
-    <p class="lede">LEASH sits between your AI agents and your APIs. Agents never see a real key, and anything they can't take back waits for one tap of your passkey.</p>
+    <p class="lede">Counterseal sits between your AI agents and your APIs. Agents never see a real key, and anything they can't take back waits for one tap of your passkey.</p>
     <div class="ctas">
       <a class="btn btn-pri" href="/app">Start free</a>
       <button class="cmd" id="copyCmd" type="button" aria-label="Copy install command"><span class="p">$</span><span id="cmdText">npx leashcli login</span><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="8" rx="2"/><path d="M3 10V4a1 1 0 0 1 1-1h6"/></svg></button>
     </div>
 
-    <div class="shot" aria-label="The LEASH console showing calls from agents, with one irreversible call held for approval">
+    <div class="shot" aria-label="The Counterseal console showing calls from agents, with one irreversible call held for approval">
       <div class="win">
         <div class="win-bar"><i></i><i></i><i></i><span>leash.gautamkhosla.com/app</span></div>
         <div class="win-body">
@@ -60,7 +60,7 @@
       </div>
       <div class="notif">
         <div class="n-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg></div>
-        <div><div class="n-top"><b>LEASH</b><span>now</span></div><div class="n-t">Your agent wants to delete vol_prod</div><div class="n-s">Held. Tap to review.</div></div>
+        <div><div class="n-top"><b>Counterseal</b><span>now</span></div><div class="n-t">Your agent wants to delete vol_prod</div><div class="n-s">Held. Tap to review.</div></div>
       </div>
     </div>
   </section>
@@ -73,7 +73,7 @@
   <section class="sec" id="how">
     <p class="kicker">How it works</p>
     <h2>Three rules, enforced <em>outside</em> the model.</h2>
-    <p class="sub">Prompts can be ignored. A proxy can't. LEASH is the only thing holding your real keys, so the rules hold even when the agent goes off script.</p>
+    <p class="sub">Prompts can be ignored. A proxy can't. Counterseal is the only thing holding your real keys, so the rules hold even when the agent goes off script.</p>
     <div class="bento">
       <article class="card">
         <div class="viz" aria-hidden="true">
@@ -91,7 +91,7 @@
           <div class="hrow hl"><span class="dotc warn"></span><span class="mono">DELETE /repos/acme</span><span class="st">held</span></div>
         </div>
         <h3>Irreversible means held</h3>
-        <p>LEASH knows which calls can't be undone on each API. Those wait for your passkey. One approval covers that exact request, once, for ten minutes.</p>
+        <p>Counterseal knows which calls can't be undone on each API. Those wait for your passkey. One approval covers that exact request, once, for ten minutes.</p>
       </article>
       <article class="card">
         <div class="viz viz-chain" aria-hidden="true">
@@ -109,11 +109,11 @@
     <p class="sub">A coding agent fixing staging found an unrelated token in the repo. That token could also delete volumes. It did, and took every volume backup with it.</p>
     <div class="vs" id="vs">
       <div class="vs-card">
-        <div class="vs-h"><span class="badge danger">Without LEASH</span><span class="timer mono" id="tBad">0.0s</span></div>
+        <div class="vs-h"><span class="badge danger">Without Counterseal</span><span class="timer mono" id="tBad">0.0s</span></div>
         <pre class="term mono" id="termBad"></pre>
       </div>
       <div class="vs-card good">
-        <div class="vs-h"><span class="badge acc">With LEASH</span><span class="timer mono" id="tGood">0.0s</span></div>
+        <div class="vs-h"><span class="badge acc">With Counterseal</span><span class="timer mono" id="tGood">0.0s</span></div>
         <pre class="term mono" id="termGood"></pre>
       </div>
     </div>
@@ -148,18 +148,18 @@
   <section class="sec" id="map">
     <p class="kicker">The irreversible map <span class="mono muted" id="mapVer"></span></p>
     <h2>Every call you can't take back.</h2>
-    <p class="sub">Versioned, per provider, each rule tied to the incident or doc that earned it a place. This is what LEASH holds by default.</p>
+    <p class="sub">Versioned, per provider, each rule tied to the incident or doc that earned it a place. This is what Counterseal holds by default.</p>
     <div class="tabs" id="mapTabs" role="tablist"></div>
     <div class="maptable" id="mapRows"></div>
   </section>
 
   <section class="sec">
     <p class="kicker">Setup</p>
-    <h2>Sixty seconds to leash your agent.</h2>
+    <h2>Sixty seconds to put your agent on the record.</h2>
     <div class="steps">
       <div class="step"><span class="num">1</span><h4>Sign in</h4><p>Approve the code on your phone with a passkey.</p><pre class="code mono">npx leashcli login</pre></div>
       <div class="step"><span class="num">2</span><h4>Vault a key</h4><p>Paste it once. It is encrypted and never written to disk.</p><pre class="code mono">npx leashcli add github</pre></div>
-      <div class="step"><span class="num">3</span><h4>Connect your agent</h4><p>Add LEASH to any MCP client's config. Your agent now calls GitHub through LEASH.</p><pre class="code mono">{
+      <div class="step"><span class="num">3</span><h4>Connect your agent</h4><p>Add the MCP server to any MCP client's config. Your agent now calls GitHub through the broker.</p><pre class="code mono">{
   &quot;mcpServers&quot;: {
     &quot;leash&quot;: {
       &quot;command&quot;: &quot;npx&quot;,
@@ -180,7 +180,7 @@
       <div class="fact"><h4>Envelope encryption</h4><p>A key per secret, wrapped by a master key, bound to its row. Never logged, never returned by any API.</p></div>
       <div class="fact"><h4>Locked-down web</h4><p>Strict CSP with Trusted Types, HSTS preload, SameSite=Strict cookies, CSRF headers, no CORS.</p></div>
       <div class="fact"><h4>Abuse limits</h4><p>Rate limits per token and per IP (IPv6 by /64). Upstream redirects are never followed.</p></div>
-      <div class="fact"><h4>Open spec</h4><p>Shaped after the IETF draft for agent credential brokers, with optional public receipts.</p></div>
+      <div class="fact"><h4>Receipts anyone can verify</h4><p>Shaped after the IETF draft for agent credential brokers. Every decision can be sealed in a public log, checked <a class="ul" href="/verify/">in your browser</a>.</p></div>
     </div>
   </section>
 
@@ -200,8 +200,8 @@
 
 <footer class="foot">
   <div class="foot-in">
-    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>LEASH</a>
-    <div class="foot-links"><a href="/docs/">Docs</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="mailto:hello@gautamkhosla.com">Contact</a></div>
+    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
+    <div class="foot-links"><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="mailto:hello@gautamkhosla.com">Contact</a></div>
     <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</span>
   </div>
 </footer>

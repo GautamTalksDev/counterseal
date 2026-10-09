@@ -9,6 +9,14 @@ import { handle } from '../src/index.js';
 const port = Number(process.argv[2] || 8790);
 const env = { DB: makeDb(), LEASH_KEK: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url'), IP_SALT: 'dev', ORIGIN: `http://localhost:${port}`, RP_ID: 'localhost', LOG_ORIGIN: 'localhost/log', LOG_KEY_JWK: await logKeyJwk() };
 const core = new LogCore(makeDoSql(), env);
+// DEV_SEED=1: a signed-in test account without a passkey (dev only: set the printed cookie in your browser)
+if (process.env.DEV_SEED) {
+  const { sha256hex, randomId, b64u } = await import('../src/util.js');
+  const id = randomId(), token = b64u(crypto.getRandomValues(new Uint8Array(32)));
+  env.DB.raw.prepare('INSERT INTO accounts (id, name, created_at, receipts) VALUES (?, ?, ?, 1)').run(id, 'Dev', Date.now());
+  env.DB.raw.prepare("INSERT INTO sessions (hash, account_id, kind, created_at, expires_at) VALUES (?, ?, 'web', ?, ?)").run(await sha256hex(token), id, Date.now(), Date.now() + 12 * 3600_000);
+  console.log(`DEV_SEED account ${id}: document.cookie = "__Host-leash=${token}; Path=/; Secure"`);
+}
 const log = { append: (i, n) => core.append(i, n), head: () => core.head(), inclusion: (a, b) => core.inclusion(a, b), consistency: (a, b) => core.consistency(a, b), entry: (i) => core.entry(i), entries: (s, c) => core.entries(s, c), tenantEntries: (t, b, c) => core.tenantEntries(t, b, c), forgetTenant: (t) => core.forgetTenant(t) };
 const SITE = new URL('../../site/public/', import.meta.url);
 const TYPES = { html: 'text/html; charset=utf-8', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', woff2: 'font/woff2', png: 'image/png', webp: 'image/webp', json: 'application/json', webmanifest: 'application/manifest+json' };

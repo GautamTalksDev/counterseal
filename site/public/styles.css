@@ -149,3 +149,5 @@ input::placeholder,textarea::placeholder{color:var(--mute)}
 a.ul{text-decoration:underline;text-underline-offset:3px}
 .panel.danger{border-color:rgba(240,98,114,.3)}
 .btn.dan:disabled{opacity:.4;cursor:not-allowed}
+
+.lbl input[type=checkbox]{width:auto;height:auto;margin:0 8px 0 0;vertical-align:middle}

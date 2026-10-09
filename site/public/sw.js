@@ -1,18 +1,18 @@
-// LEASH service worker: turns an empty Web Push "wake up" into a notification about the held request.
-// The push carries no data; the request details come from LEASH over your own signed-in session.
+// Counterseal service worker: turns an empty Web Push "wake up" into a notification about the held request.
+// The push carries no data; the request details come from the service over your own signed-in session.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
 self.addEventListener('push', (e) => {
   e.waitUntil((async () => {
-    let title = 'LEASH: a request may be waiting';
-    let body = 'Open LEASH to check. (Could not load the details on this device.)';
+    let title = 'Counterseal: a request may be waiting';
+    let body = 'Open Counterseal to check. (Could not load the details on this device.)';
     let tag = 'leash-hold', url = '/app';
     try {
       const r = await fetch('/v1/holds', { credentials: 'same-origin', cache: 'no-store' });
       if (r.ok) {
         const { holds } = await r.json();
-        if (holds && !holds.length) { title = 'LEASH alerts are working'; body = 'Nothing is waiting for you right now.'; }
+        if (holds && !holds.length) { title = 'Counterseal alerts are working'; body = 'Nothing is waiting for you right now.'; }
         if (holds && holds.length) {
           const h = holds[0];
           title = `${h.token_label || 'Your agent'} wants to ${h.method} ${h.host}`;

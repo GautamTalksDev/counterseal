@@ -1,7 +1,7 @@
 {
-  "name": "LEASH",
-  "short_name": "LEASH",
-  "description": "Agents get tokens. You keep the keys.",
+  "name": "Counterseal",
+  "short_name": "Counterseal",
+  "description": "Every irreversible action gets a second seal.",
   "start_url": "/app",
   "scope": "/",
   "display": "standalone",

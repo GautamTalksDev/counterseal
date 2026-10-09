@@ -341,3 +341,22 @@ h2 em{color:var(--dim)}
 .demo-note{display:inline-flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;color:var(--mute)}
 .demo-note::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--mute)}
 @media (max-width:860px){.doc{grid-template-columns:1fr;gap:24px;padding-top:40px}.toc{position:static;flex-direction:row;flex-wrap:wrap}.toc b{display:none}}
+
+/* tools: receipt verifier and signature checker */
+.tool{margin-top:16px;display:flex;flex-direction:column;gap:8px}
+.tool label{font-size:12.5px;color:var(--mute);margin-top:6px}
+.tool input,.tool textarea,.tool select{width:100%;background:#0a0b0d;border:1px solid var(--line2);border-radius:10px;padding:10px 12px;color:var(--ink);font:13px/1.55 var(--mono)}
+.tool textarea{min-height:150px;resize:vertical}
+.tool textarea.short{min-height:64px}
+.tool select{width:auto;flex:0 0 auto}
+.tool input:focus,.tool textarea:focus,.tool select:focus{outline:none;border-color:rgba(200,245,96,.5)}
+.tool-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px}
+.tool-row input{flex:1 1 260px;width:auto}
+.tool .file{position:relative;overflow:hidden;cursor:pointer;margin:0;color:var(--ink);font-size:14px}
+.tool .file input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.verdict{white-space:pre-wrap;word-break:break-word}
+.verdict.ok{border-color:rgba(200,245,96,.5)}
+.verdict.bad{border-color:rgba(245,110,90,.55)}
+.prose details{margin-top:14px;color:#c9ccd2;font-size:14px}
+.prose details summary{cursor:pointer;color:var(--dim)}
+.prose pre#vk{white-space:pre-wrap;word-break:break-all}

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Web Bot Auth checker: Counterseal</title>
+<meta name="description" content="Free tool: check a Web Bot Auth (RFC 9421) signature from an AI agent, in your browser.">
+<meta name="theme-color" content="#08090b">
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<div class="glow" aria-hidden="true"></div>
+<header class="nav">
+  <div class="nav-in">
+    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="links"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/#pricing">Pricing</a></nav>
+    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Get started</a></div>
+  </div>
+</header>
+<main class="doc">
+<nav class="toc" aria-label="On this page">
+  <b>Checker</b>
+  <a href="#request">The request</a>
+  <a href="#checked">What is checked</a>
+  <a href="#fetch">Fetching the directory</a>
+  <a href="#server">On your own server</a>
+</nav>
+<article class="prose">
+<p class="kicker">Free tool</p>
+  <h1>Web Bot Auth signature checker</h1>
+  <p class="lead">For site owners: check whether a request from an AI agent carries a valid Web Bot Auth signature (RFC 9421 HTTP Message Signatures, draft-ietf-webbotauth-httpsig-protocol). The check runs in your browser; what you paste is never sent anywhere.</p>
+
+  <h2 id="request">The request</h2>
+  <div class="tool">
+    <div class="tool-row"><select id="method" aria-label="Method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option></select><input id="url" placeholder="https://your-site.example/path?query" aria-label="Request URL" spellcheck="false"></div>
+    <label for="si">Signature-Input</label><textarea id="si" class="short" spellcheck="false" placeholder='sig1=("@authority" "signature-agent";key="sig1");created=...;expires=...;keyid="...";tag="web-bot-auth"'></textarea>
+    <label for="sig">Signature</label><textarea id="sig" class="short" spellcheck="false" placeholder="sig1=:...:"></textarea>
+    <label for="sa">Signature-Agent</label><input id="sa" spellcheck="false" placeholder='sig1="https://bots.example.com"'>
+    <label for="dir">Agent key directory (JSON)</label>
+    <textarea id="dir" spellcheck="false" placeholder='{"keys":[{"kty":"OKP","crv":"Ed25519","x":"..."}]}'></textarea>
+    <p class="meta" id="dirFrom">Fetch it from the agent's origin, or paste it.</p>
+    <div class="tool-row"><button id="fetchDir" class="btn btn-ghost sm" type="button">Fetch the directory</button><button id="check" class="btn btn-pri sm" type="button">Check signature</button><button id="example" class="btn btn-ghost sm" type="button">Load an example</button></div>
+    <pre id="out" class="verdict" hidden></pre>
+  </div>
+
+  <h2 id="checked">What is checked</h2>
+  <ul>
+    <li><code>tag="web-bot-auth"</code>, <code>created</code> and <code>expires</code> (a window of 1 hour or less, not expired, not from the future), and <code>keyid</code>, the RFC 7638 thumbprint of a key in the directory.</li>
+    <li>The covered components include <code>@authority</code> (or <code>@target-uri</code>) and the request's own <code>Signature-Agent</code> member; members with an unsupported type or a path are ignored.</li>
+    <li>The RFC 9421 signature base is rebuilt from the exact <code>Signature-Input</code> text and verified with Ed25519.</li>
+    <li><strong>Not checked:</strong> replay. This tool stores nothing, so it cannot tell a request it has seen before. Your server must keep nonces.</li>
+  </ul>
+
+  <h2 id="fetch">Fetching the directory</h2>
+  <p>Your browser cannot read another site's directory, so the button asks our server to fetch it: <code>https://&lt;agent origin&gt;/.well-known/http-message-signatures-directory</code>, https on port 443 only, public host names only (no IP addresses, localhost or internal names), no redirects, 5 seconds, 64 KB at most, cached for 10 minutes, 10 lookups a minute per network. Only the agent's origin is sent to us, and nothing is stored.</p>
+
+  <h2 id="server">On your own server</h2>
+  <p>The same verification code is in the repository as a zero-dependency SDK: <code>sdk/websig.mjs</code> to sign and verify, and <code>sdk/verifier.mjs</code> with a drop-in wrapper for Fetch handlers and Express, SSRF-safe directory fetching (on Node the connection goes only to the address it checked) and nonce stores for D1, KV or memory. It verifies locally; it never calls us.</p>
+</article>
+</main>
+<footer class="foot">
+  <div class="foot-in">
+    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
+    <div class="foot-links"><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="mailto:hello@gautamkhosla.com">Contact</a></div>
+    <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</span>
+  </div>
+</footer>
+<script src="/doc.js" type="module"></script>
+<script src="/tools/web-bot-auth/page.js" type="module"></script>
+</body>
+</html>
