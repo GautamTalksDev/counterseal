@@ -43,12 +43,14 @@ export async function subscribe(env, sess, body) {
   const endpoint = checkEndpoint(body.endpoint);
   const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM push_subs WHERE account_id = ?').bind(sess.accountId).first();
   const dup = await env.DB.prepare('SELECT id, account_id FROM push_subs WHERE endpoint = ?').bind(endpoint).first();
-  if (dup && dup.account_id === sess.accountId) await env.DB.prepare('UPDATE push_subs SET created_at = ? WHERE id = ?').bind(now(), dup.id).run();
+  // each device belongs to the person who turned alerts on (removing them from a team removes their devices)
+  const member = sess.memberId || null;
+  if (dup && dup.account_id === sess.accountId) await env.DB.prepare('UPDATE push_subs SET created_at = ?, member_id = ? WHERE id = ?').bind(now(), member, dup.id).run();
   else {
     // a browser that moves to another account takes its device slot with it, within the new account's cap
     if (n.n >= MAX_SUBS) throw new HttpError(409, 'too_many_devices', `Up to ${MAX_SUBS} devices. Turn alerts off on one first.`);
-    if (dup) await env.DB.prepare('UPDATE push_subs SET account_id = ?, created_at = ?, last_ok_at = NULL WHERE id = ?').bind(sess.accountId, now(), dup.id).run();
-    else await env.DB.prepare('INSERT INTO push_subs (id, account_id, endpoint, created_at) VALUES (?, ?, ?, ?)').bind(randomId(), sess.accountId, endpoint, now()).run();
+    if (dup) await env.DB.prepare('UPDATE push_subs SET account_id = ?, created_at = ?, last_ok_at = NULL, member_id = ? WHERE id = ?').bind(sess.accountId, now(), member, dup.id).run();
+    else await env.DB.prepare('INSERT INTO push_subs (id, account_id, endpoint, created_at, member_id) VALUES (?, ?, ?, ?, ?)').bind(randomId(), sess.accountId, endpoint, now(), member).run();
   }
   return { ok: true };
 }
@@ -59,11 +61,14 @@ export async function unsubscribe(env, sess, body) {
   return { ok: true };
 }
 
-/** wake every device of the account; dead subscriptions (404/410) are removed */
-export async function notify(env, accountId, fetcher = fetch) {
+/** wake every device of the account (every member's), or every device but one member's (`exceptMember`: the person who
+ *  just acted, on a team); dead subscriptions (404/410) are removed */
+export async function notify(env, accountId, fetcher = fetch, { exceptMember = null } = {}) {
   const k = await keys(env);
   if (!k) return { sent: 0 };
-  const subs = (await env.DB.prepare('SELECT id, endpoint FROM push_subs WHERE account_id = ?').bind(accountId).all()).results;
+  const subs = (exceptMember
+    ? await env.DB.prepare('SELECT id, endpoint FROM push_subs WHERE account_id = ? AND COALESCE(member_id, account_id) != ?').bind(accountId, exceptMember).all()
+    : await env.DB.prepare('SELECT id, endpoint FROM push_subs WHERE account_id = ?').bind(accountId).all()).results;
   let sent = 0;
   const results = [];
   for (const s of subs) {

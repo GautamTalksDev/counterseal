@@ -156,4 +156,35 @@ test('live-shaped data written by the deployed code keeps working after 0004 and
   const ub = await now('POST', '/v1/me/unfreeze/begin', { cookie, body: {} });
   assert.equal((await now('POST', '/v1/me/unfreeze/finish', { cookie, body: { challengeId: ub.body.challengeId, credential: await auth.get(ub.body.options) } })).status, 200, 'the passkey made by the live code unfreezes');
   assert.equal((await write()).status, 200);
+
+  // ---- the two-person seal (0009): the live account's one person is its owner (the founder, without a members row yet),
+  // one seal is enough, and every live session, passkey, token and device is theirs (member_id NULL)
+  assert.equal(db.raw.prepare('SELECT COUNT(*) n FROM members').get().n, 0);
+  for (const t of ['passkeys', 'sessions', 'tokens', 'push_subs']) assert.equal(db.raw.prepare(`SELECT COUNT(*) n FROM ${t} WHERE member_id IS NOT NULL AND member_id != account_id`).get().n, 0, t);
+  assert.deepEqual((await now('GET', '/v1/me', { cookie })).body.member, { id: me.account.id, role: 'owner', name: 'Live User', founder: true });
+  assert.equal((await now('GET', '/v1/me', { bearer: cli, origin: null, xleash: false })).body.member.role, 'owner', 'the live CLI session is the owner\'s');
+  const team = (await now('GET', '/v1/team', { cookie })).body;
+  assert.deepEqual([team.quorum, team.selfApprove, team.pending, team.members.length, team.members[0].passkeys, team.members[0].founder], [1, true, null, 1, 1, true]);
+  assert.deepEqual(db.raw.prepare('SELECT DISTINCT needs FROM holds').all().map((r) => r.needs), [1], 'holds need one seal');
+  // the team grows from the live account: an invite (the live passkey), a new approver, two seals on a live token's call
+  const ib = await now('POST', '/v1/team/invites/begin', { cookie, body: { role: 'approver', label: 'second' } });
+  const inv = await now('POST', '/v1/team/invites/finish', { cookie, body: { challengeId: ib.body.challengeId, credential: await auth.get(ib.body.options) } });
+  assert.equal(inv.status, 200, JSON.stringify(inv.body));
+  const itoken = inv.body.url.split('#invite=')[1], a2 = new Authenticator(ORIGIN, RP_ID);
+  const jb = await now('POST', '/v1/invites/begin', { body: { token: itoken, name: 'Second' } });
+  const jf = await now('POST', '/v1/invites/finish', { body: { token: itoken, challengeId: jb.body.challengeId, credential: await a2.create(jb.body.options) } });
+  assert.equal(jf.status, 200, JSON.stringify(jf.body));
+  const second = jf.headers.get('set-cookie').split(';')[0];
+  assert.equal(db.raw.prepare('SELECT COUNT(*) n FROM members').get().n, 2, 'the founder\'s row and the new member\'s');
+  const qb = await now('POST', '/v1/team/quorum/begin', { cookie, body: { quorum: 2, selfApprove: true } });
+  assert.equal((await now('POST', '/v1/team/quorum/finish', { cookie, body: { challengeId: qb.body.challengeId, credential: await auth.get(qb.body.options) } })).status, 200);
+  const held2 = await w.req('DELETE', '/p/github/repos/acme/two-seals', { bearer: tok.token, origin: null, xleash: false });
+  assert.equal(held2.status, 428); assert.equal(held2.body.seals_needed, 2);
+  for (const [c, a, approved] of [[cookie, auth, false], [second, a2, true]]) {
+    const sb = await now('POST', `/v1/holds/${held2.body.hold_id}/approve/begin`, { cookie: c, body: {} });
+    const sf = await now('POST', `/v1/holds/${held2.body.hold_id}/approve/finish`, { cookie: c, body: { challengeId: sb.body.challengeId, credential: await a.get(sb.body.options) } });
+    assert.equal(sf.status, 200, JSON.stringify(sf.body)); assert.equal(sf.body.approved, approved);
+  }
+  assert.equal((await w.req('DELETE', '/p/github/repos/acme/two-seals', { bearer: tok.token, origin: null, xleash: false })).status, 200);
+  assert.equal((await now('GET', '/v1/audit/verify', { cookie })).body.ok, true);
 });

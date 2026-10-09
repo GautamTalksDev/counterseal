@@ -124,30 +124,39 @@ export async function loginBegin(env) {
   return { challengeId: id, options: { challenge, rpId: rp(env).rpId, userVerification: 'required', timeout: 300000 } };
 }
 
-/** verifies an assertion against a stored passkey; returns the account id */
-export async function checkAssertion(env, cred, challenge, accountId = null) {
+/** verifies an assertion against a stored passkey; returns the passkey's row. `who` is the account id the passkey must
+ *  belong to, or a session ({accountId, memberId}): then it must also be that member's own passkey (on a team, each
+ *  person approves with their own passkey, whoever's browser it is). */
+export async function verifyPasskey(env, cred, challenge, who = null) {
+  const accountId = typeof who === 'string' ? who : who?.accountId || null;
+  const memberId = who && typeof who === 'object' ? who.memberId || null : null;
   if (!cred || typeof cred.id !== 'string') throw new HttpError(400, 'bad_credential');
   const pk = await env.DB.prepare('SELECT * FROM passkeys WHERE cred_id = ?').bind(str(cred.id, 'credential', { max: 1400 })).first();
   if (!pk || (accountId && pk.account_id !== accountId)) throw new HttpError(401, 'unknown_passkey', `That passkey is not linked to this ${BRAND.name} account. If you made more than one account, pick the passkey you created for the one you are signed in to.`);
+  if (memberId && (pk.member_id || pk.account_id) !== memberId) throw new HttpError(401, 'unknown_passkey', 'That passkey belongs to another person on this team. Use your own passkey.');
   const r = rp(env);
   // a passkey only ever works on the host (RP ID) it was made for; the authenticator data proves it too
   if (passkeyRpId(env, pk) !== r.rpId) throw new HttpError(401, 'unknown_passkey', `That passkey belongs to ${hosts(env).find((h) => h.rpId === passkeyRpId(env, pk))?.origin || 'another host'}. Sign in there.`);
   const count = await verifyAssertion(cred, { challenge, origin: r.origin, rpId: r.rpId, alg: pk.alg, jwk: JSON.parse(pk.jwk), signCount: pk.sign_count });
   await env.DB.prepare('UPDATE passkeys SET sign_count = ?, last_used = ? WHERE cred_id = ?').bind(count, now(), pk.cred_id).run();
-  return pk.account_id;
+  return pk;
 }
+/** verifies an assertion (see verifyPasskey); returns the account id */
+export const checkAssertion = async (env, cred, challenge, who = null) => (await verifyPasskey(env, cred, challenge, who)).account_id;
 
 export async function loginFinish(env, body) {
   const ch = await takeChallenge(env, body.challengeId, 'login');
-  const accountId = await checkAssertion(env, body.credential, ch.challenge);
-  await audit(env, accountId, 'web', 'login', {});
-  return startWebSession(env, accountId);
+  const pk = await verifyPasskey(env, body.credential, ch.challenge);
+  // the session is the person's whose passkey this is (a team member, or the account's founder)
+  const member = pk.member_id || pk.account_id;
+  await audit(env, pk.account_id, 'web', 'login', member !== pk.account_id ? { member } : {});
+  return startWebSession(env, pk.account_id, member);
 }
 
-export async function startWebSession(env, accountId) {
+export async function startWebSession(env, accountId, memberId = null) {
   const token = b64u(rand(32));
-  await env.DB.prepare('INSERT INTO sessions (hash, account_id, kind, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(await sha256hex(token), accountId, 'web', now(), now() + WEB_TTL).run();
+  await env.DB.prepare('INSERT INTO sessions (hash, account_id, kind, created_at, expires_at, member_id) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(await sha256hex(token), accountId, 'web', now(), now() + WEB_TTL, memberId).run();
   return { body: { ok: true }, cookie: `__Host-leash=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${WEB_TTL / 1000}` };
 }
 
@@ -156,7 +165,9 @@ export async function logout(env, sess) {
   return { body: { ok: true }, cookie: '__Host-leash=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0' };
 }
 
-/** {accountId, kind, hash} from cookie (web) or bearer (cli); writes from the web need Origin + x-leash header */
+/** {accountId, kind, hash, expiresAt, memberId, role, memberName} from cookie (web) or bearer (cli); writes from the web
+ *  need Origin + x-leash header. The member and their role are read in the same query (src/team.js): a removed member's
+ *  sessions are deleted, and any session whose member is gone or removed is refused here too. */
 export async function session(env, request, write) {
   const authz = request.headers.get('authorization') || '';
   let token, kind;
@@ -170,9 +181,14 @@ export async function session(env, request, write) {
     if (!originAllowed(env, request) || request.headers.get('x-leash') !== '1') throw new HttpError(403, 'csrf');
   }
   const hash = await sha256hex(token);
-  const s = await env.DB.prepare('SELECT * FROM sessions WHERE hash = ? AND kind = ?').bind(hash, kind).first();
+  const s = await env.DB.prepare('SELECT s.*, m.id AS m_id, m.role AS m_role, m.removed_at AS m_removed, m.name AS m_name FROM sessions s LEFT JOIN members m ON m.id = COALESCE(s.member_id, s.account_id) AND m.account_id = s.account_id WHERE s.hash = ? AND s.kind = ?').bind(hash, kind).first();
   if (!s || s.expires_at < now()) throw new HttpError(401, 'signed_out');
-  return { accountId: s.account_id, kind, hash, expiresAt: s.expires_at };
+  // NULL member_id: written before teams existed, so the account's founder; the founder has no members row until the
+  // team is first changed, and until then is the owner
+  const memberId = s.member_id || s.account_id;
+  const role = s.m_id ? (s.m_removed ? null : s.m_role) : memberId === s.account_id ? 'owner' : null;
+  if (!role) throw new HttpError(401, 'signed_out');
+  return { accountId: s.account_id, kind, hash, expiresAt: s.expires_at, memberId, role, memberName: s.m_name || null };
 }
 
 /** a session's public id: derived from its stored hash, so it can be listed and revoked without exposing the hash, and
@@ -276,13 +292,16 @@ export async function deviceApproveFinish(env, sess, body) {
   const code = userCode(body.user_code);
   const ch = await takeChallenge(env, body.challengeId, 'device:' + code);
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
-  await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
-  const r = await env.DB.prepare("UPDATE device_codes SET account_id = ?, status = 'approved' WHERE user_code = ? AND status = 'pending' AND expires_at > ? RETURNING country, network")
-    .bind(sess.accountId, code, now()).first();
+  await checkAssertion(env, body.credential, ch.challenge, sess);
+  // the command line signs in as the person who approved it, with their role (a viewer's command line can only read and deny)
+  const r = await env.DB.prepare("UPDATE device_codes SET account_id = ?, member_id = ?, status = 'approved' WHERE user_code = ? AND status = 'pending' AND expires_at > ? RETURNING country, network")
+    .bind(sess.accountId, sess.memberId, code, now()).first();
   if (!r) throw new HttpError(404, 'code_not_found', 'That code is wrong or expired.');
-  await audit(env, sess.accountId, 'web', 'cli_signin_approved', { user_code: code, country: r.country || null, network: r.network || null });
+  await audit(env, sess.accountId, 'web', 'cli_signin_approved', { user_code: code, country: r.country || null, network: r.network || null, ...memberDetail(sess.accountId, sess.memberId) });
   return { ok: true };
 }
+/** an audit detail's `member`, only on a team (the founder's entries keep their shape) */
+const memberDetail = (accountId, memberId) => (memberId && memberId !== accountId ? { member: memberId } : {});
 
 export async function devicePoll(env, body) {
   const device = str(body.device_code, 'device_code', { max: 80, re: /^lsd_[A-Za-z0-9_-]+$/ });
@@ -294,11 +313,11 @@ export async function devicePoll(env, body) {
   const used = await env.DB.prepare("UPDATE device_codes SET status = 'used' WHERE device_hash = ? AND status = 'approved'").bind(h).run();
   if (!used.meta.changes) throw new HttpError(400, 'expired_token');
   const token = 'lsc_' + b64u(rand(32)), hash = await sha256hex(token);
-  await env.DB.prepare('INSERT INTO sessions (hash, account_id, kind, created_at, expires_at, country, network) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(hash, row.account_id, 'cli', now(), now() + CLI_TTL, row.country || null, row.network || null).run();
+  await env.DB.prepare('INSERT INTO sessions (hash, account_id, kind, created_at, expires_at, country, network, member_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(hash, row.account_id, 'cli', now(), now() + CLI_TTL, row.country || null, row.network || null, row.member_id || null).run();
   // on the record, and every device with alerts on is told at once: "A command line was signed in", one tap to revoke
   const sid = await sessionId(hash);
-  await audit(env, row.account_id, 'cli', 'cli_signed_in', { session: sid, country: row.country || null, network: row.network || null });
+  await audit(env, row.account_id, 'cli', 'cli_signed_in', { session: sid, country: row.country || null, network: row.network || null, ...memberDetail(row.account_id, row.member_id) });
   const p = notify(env, row.account_id, env.__pushFetch || fetch).catch(() => {});
   if (env.__ctx && env.__ctx.waitUntil) env.__ctx.waitUntil(p); else await p;
   return { access_token: token, token_type: 'Bearer', expires_in: CLI_TTL / 1000 };
@@ -309,12 +328,12 @@ export async function devicePoll(env, body) {
 // command line that signs itself out at once (or a session that has expired) leaves its tokens, agent keys and receipts
 // keys behind, and its owner must still be able to find it and revoke what it made.
 const signinsSince = async (env, accountId, since, limit) => (await env.DB.prepare("SELECT at, detail FROM audit WHERE account_id = ? AND action = 'cli_signed_in' AND at > ? ORDER BY seq DESC LIMIT ?").bind(accountId, since, limit).all()).results
-  .map((r) => { const d = JSON.parse(r.detail); return { id: String(d.session || ''), created_at: r.at, country: d.country || null, network: d.network || null }; })
+  .map((r) => { const d = JSON.parse(r.detail); return { id: String(d.session || ''), created_at: r.at, country: d.country || null, network: d.network || null, member: /^[0-9a-f]{24}$/.test(d.member || '') ? d.member : accountId }; })
   .filter((s) => /^[0-9a-f]{24}$/.test(s.id));
 
 export async function listCliSessions(env, sess) {
   const t = now(), a = sess.accountId;
-  const rows = (await env.DB.prepare("SELECT hash, created_at, expires_at, country, network FROM sessions WHERE account_id = ? AND kind = 'cli' AND expires_at > ? ORDER BY created_at DESC LIMIT 100").bind(a, t).all()).results;
+  const rows = (await env.DB.prepare("SELECT hash, created_at, expires_at, country, network, COALESCE(member_id, account_id) AS member FROM sessions WHERE account_id = ? AND kind = 'cli' AND expires_at > ? ORDER BY created_at DESC LIMIT 100").bind(a, t).all()).results;
   const live = new Map();
   for (const r of rows) live.set(await sessionId(r.hash), r);
   const revoked = new Set((await env.DB.prepare("SELECT detail FROM audit WHERE account_id = ? AND action = 'cli_session_revoked' AND at > ?").bind(a, t - CLI_TTL).all()).results.map((r) => JSON.parse(r.detail).session));
@@ -325,7 +344,7 @@ export async function listCliSessions(env, sess) {
     out.push({ ...s, expires_at: r ? r.expires_at : null, status: r ? 'live' : revoked.has(s.id) ? 'revoked' : 'ended', current: !!r && r.hash === sess.hash });
   }
   // live sessions with no sign-in entry (made before migration 0005)
-  for (const [id, r] of live) out.push({ id, created_at: r.created_at, expires_at: r.expires_at, country: r.country || null, network: r.network || null, status: 'live', current: r.hash === sess.hash });
+  for (const [id, r] of live) out.push({ id, created_at: r.created_at, expires_at: r.expires_at, country: r.country || null, network: r.network || null, member: r.member, status: 'live', current: r.hash === sess.hash });
   return { sessions: out };
 }
 
@@ -337,10 +356,16 @@ export const recentCliSignins = (env, accountId) => signinsSince(env, accountId,
  *  still live and revokes every token, agent key, receipts key and guard key it made (closing the guard keys' open
  *  approvals), in one batch; this works after the session signed out or expired too. */
 export async function revokeCliSession(env, sess, sid) {
-  const rows = (await env.DB.prepare("SELECT hash FROM sessions WHERE account_id = ? AND kind = 'cli'").bind(sess.accountId).all()).results;
-  let target = null;
-  for (const r of rows) if ((await sessionId(r.hash)) === sid) { target = r.hash; break; }
-  if (!target && !(await env.DB.prepare("SELECT 1 AS x FROM audit WHERE account_id = ? AND action = 'cli_signed_in' AND detail LIKE ? LIMIT 1").bind(sess.accountId, `%"session":"${sid}"%`).first())) throw new HttpError(404, 'not_found');
+  const rows = (await env.DB.prepare("SELECT hash, COALESCE(member_id, account_id) AS member FROM sessions WHERE account_id = ? AND kind = 'cli'").bind(sess.accountId).all()).results;
+  let target = null, owner = null;
+  for (const r of rows) if ((await sessionId(r.hash)) === sid) { target = r.hash; owner = r.member; break; }
+  if (!target) {
+    const e = await env.DB.prepare("SELECT detail FROM audit WHERE account_id = ? AND action = 'cli_signed_in' AND detail LIKE ? LIMIT 1").bind(sess.accountId, `%"session":"${sid}"%`).first();
+    if (!e) throw new HttpError(404, 'not_found');
+    owner = JSON.parse(e.detail).member || sess.accountId;
+  }
+  // on a team: your own command lines, or anyone's if you are an owner
+  if (owner !== sess.memberId && sess.role !== 'owner') throw new HttpError(403, 'role_required', 'Only an owner can revoke another person\'s command line sign-in.');
   const t = now(), a = sess.accountId;
   const [, tk, ak, rk, , gk] = await env.DB.batch([
     env.DB.prepare('DELETE FROM sessions WHERE hash = ? AND account_id = ?').bind(target || '', a),

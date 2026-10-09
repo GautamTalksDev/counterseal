@@ -1,6 +1,6 @@
 // Private launch numbers for the operator: GET /v1/admin/stats with Authorization: Bearer <STATS_TOKEN>.
 // Counts only: never an id, name, email, IP, path or key. 404 (as for any unknown route) when STATS_TOKEN is not set or
-// the token is wrong, so the endpoint does not even show that it exists. Ten aggregate queries and one cached
+// the token is wrong, so the endpoint does not even show that it exists. Eleven aggregate queries and one cached
 // Durable Object read; no writes.
 import { HttpError, sha256, eqBytes, now } from './util.js';
 
@@ -17,7 +17,7 @@ export async function checkStatsToken(env, request) {
 export async function stats(env, head) {
   const t = now(), d1 = t - DAY, d7 = t - 7 * DAY, d30 = t - 30 * DAY;
   const one = (sql, ...a) => env.DB.prepare(sql).bind(...a).first();
-  const [accounts, byDay, tokens, keys, audit, holds, push, receipts, guardKeys, kinds] = await Promise.all([
+  const [accounts, byDay, tokens, keys, audit, holds, push, receipts, guardKeys, kinds, teams] = await Promise.all([
     one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last24h, SUM(created_at > ?) AS last7d, SUM(last_seen > ?) AS active7d, SUM(receipts = 1) AS receiptsOn, SUM(plan != \'free\') AS paid FROM accounts', d1, d7, d7),
     env.DB.prepare("SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n FROM accounts WHERE created_at > ? GROUP BY day ORDER BY day").bind(d30).all(),
     one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last7d, SUM(agent_key_id IS NOT NULL) AS bound FROM tokens', d7),
@@ -28,6 +28,8 @@ export async function stats(env, head) {
     env.DB.prepare('SELECT day, receipts FROM global_usage WHERE day >= ? ORDER BY day').bind(new Date(d30).toISOString().slice(0, 10)).all(),
     one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last7d, SUM(revoked = 0) AS active FROM guard_keys', d7),
     env.DB.prepare('SELECT kind, COUNT(*) AS n FROM holds WHERE created_at > ? GROUP BY kind').bind(d7).all(),
+    // two-person seal: accounts with more than one person, the people on them, and accounts that require two seals
+    one('SELECT (SELECT COUNT(DISTINCT account_id) FROM members WHERE removed_at IS NULL AND id != account_id) AS teams, (SELECT COUNT(*) FROM members WHERE removed_at IS NULL) AS members, (SELECT COUNT(*) FROM accounts WHERE quorum >= 2) AS quorum2'),
   ]);
   const a = Object.fromEntries(audit.results.map((r) => [r.action, { total: r.total, last7d: r.last7d || 0 }]));
   const pick = (k) => a[k] || { total: 0, last7d: 0 };
@@ -41,6 +43,7 @@ export async function stats(env, head) {
     decisions: { holds: pick('hold'), approvals: pick('approve'), denials: pick('deny'), allowedWrites: pick('proxy'), executedAfterApproval: pick('proxy_approved'), commandsRunAfterApproval: pick('run_approved'), pendingNow: n(holds.pending), unsignedUseOfBoundTokens: pick('agent_signature_failed') },
     // coding-agent approvals (guard keys): keys made, and the last 7 days' holds by kind (proxy, shell, tool, deploy)
     guard: { keys: n(guardKeys.total), activeKeys: n(guardKeys.active), keysLast7d: n(guardKeys.last7d), holdsLast7dByKind: Object.fromEntries(kinds.results.map((r) => [r.kind, r.n])) },
+    team: { accountsWithTeams: n(teams.teams), people: n(teams.members), accountsRequiringTwoSeals: n(teams.quorum2) },
     pushSubscriptions: n(push.total),
     receipts: { logEntries: head?.size || 0, byDay30d: receipts.results },
   };

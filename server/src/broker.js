@@ -12,8 +12,9 @@ import { verifyAgentSignature, d1Seen, ownActive } from './agentkeys.js';
 import { BRAND } from './brand.js';
 import { markSeen } from './admin.js';
 import * as Brakes from './brakes.js';
+import * as Team from './team.js';
 
-const HOLD_TTL = 30 * 60_000, GRANT_TTL = 10 * 60_000, MAX_BODY = 1_048_576, MAX_RESP = 10 * 1_048_576;
+const HOLD_TTL = 30 * 60_000, MAX_BODY = 1_048_576, MAX_RESP = 10 * 1_048_576;
 export const PENDING_PER_TOKEN = 20, PENDING_PER_ACCOUNT = 100, MAX_CREDENTIALS = 50, MAX_LIVE_TOKENS = 200, LIST_TOKENS = 500;
 
 // ---------------------------------------------------------------- credentials
@@ -61,6 +62,13 @@ export async function mintToken(env, sess, body, byPasskey = false) {
   if (!cred) throw new HttpError(404, 'not_found');
   const label = str(body.label ?? 'agent', 'label', { max: 60, re: /^[\p{L}\p{N} ._:/()-]+$/u });
   const policy = normalisePolicy(body.policy, byPasskey);
+  // Pre-approving irreversible calls, or money caps under which Stripe refunds and payouts pass unattended, is one person
+  // approving in advance. While two seals are required, or self-approval is off, nobody can do that alone: lower the
+  // quorum first (which takes 24 hours and tells everyone).
+  if (policy.unattendedIrreversible.length || policy.money) {
+    const t = Team.effective(await env.DB.prepare('SELECT quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at FROM accounts WHERE id = ?').bind(sess.accountId).first());
+    if (!Team.oneSealEnough(t)) throw new HttpError(409, 'quorum_blocks_preapproval', `Your team requires ${t.quorum > 1 ? `${t.quorum} different approvers` : 'someone other than the maker'} for irreversible calls, so no one can pre-approve them or set money caps alone.`);
+  }
   const hours = Number.isInteger(body.ttlHours) && body.ttlHours > 0 && body.ttlHours <= 24 * 90 ? body.ttlHours : 24 * 7;
   // binding to an agent key only ever narrows a token (it then needs the agent's signature too), so a CLI session may do it
   const ak = body.agentKeyId !== undefined && body.agentKeyId !== null ? await ownActive(env, sess.accountId, body.agentKeyId) : null;
@@ -73,8 +81,9 @@ export async function mintToken(env, sess, body, byPasskey = false) {
   const cli = sess.kind === 'cli' ? await sessionId(sess.hash) : null;
   let expiresAt = now() + hours * 3600_000;
   if (cli && sess.expiresAt && expiresAt > sess.expiresAt) expiresAt = sess.expiresAt;
-  await env.DB.prepare('INSERT INTO tokens (id, account_id, credential_id, hash, label, policy, minted_by, expires_at, created_at, agent_key_id, session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, sess.accountId, cred.id, await sha256hex(token), label, JSON.stringify(policy), byPasskey ? 'passkey' : sess.kind, expiresAt, now(), ak ? ak.id : null, cli).run();
+  // member_id: who made it (with self-approval off, they cannot seal what it asks for; removing them revokes it)
+  await env.DB.prepare('INSERT INTO tokens (id, account_id, credential_id, hash, label, policy, minted_by, expires_at, created_at, agent_key_id, session_id, member_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, sess.accountId, cred.id, await sha256hex(token), label, JSON.stringify(policy), byPasskey ? 'passkey' : sess.kind, expiresAt, now(), ak ? ak.id : null, cli, sess.memberId || null).run();
   await audit(env, sess.accountId, sess.kind, 'mint', { id, credential: cred.id, provider: cred.provider, label, hours, preapproved: policy.unattendedIrreversible.length, ...(ak ? { agent_key: ak.keyid } : {}), ...(cli ? { session: cli, expires_at: expiresAt } : {}) });
   return { id, token, provider: cred.provider, baseUrl: `${rp(env).origin}/p/${cred.provider}`, expiresAt, ...(ak ? { agentKey: ak.keyid } : {}), note: `Shown once. ${BRAND.name} keeps only a hash.${cli && expiresAt === sess.expiresAt ? ' It ends with this command line sign-in; make longer-lived tokens in the app.' : ''}` };
 }
@@ -88,12 +97,13 @@ export async function mintFinish(env, sess, body) {
   if (sess.kind !== 'web') throw new HttpError(403, 'passkey_required');
   const ch = await takeChallenge(env, body.challengeId, 'mint');
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
-  await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
+  await checkAssertion(env, body.credential, ch.challenge, sess);
   return mintToken(env, sess, body, true);
 }
 
 export async function listTokens(env, sess) {
-  const r = await env.DB.prepare('SELECT t.id, t.label, t.policy, t.minted_by, t.expires_at, t.revoked, t.created_at, t.last_used, t.tripped_at, t.tripped_why, c.provider, c.label AS credential, k.keyid AS agent_key, k.label AS agent_key_label, k.revoked_at AS agent_key_revoked FROM tokens t JOIN credentials c ON c.id = t.credential_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id WHERE t.account_id = ? ORDER BY t.created_at DESC LIMIT ?').bind(sess.accountId, LIST_TOKENS).all();
+  // member_id: who made each token (on a team, the app shows "made by")
+  const r = await env.DB.prepare('SELECT t.id, t.label, t.policy, t.minted_by, t.expires_at, t.revoked, t.created_at, t.last_used, t.tripped_at, t.tripped_why, COALESCE(t.member_id, t.account_id) AS member_id, c.provider, c.label AS credential, k.keyid AS agent_key, k.label AS agent_key_label, k.revoked_at AS agent_key_revoked FROM tokens t JOIN credentials c ON c.id = t.credential_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id WHERE t.account_id = ? ORDER BY t.created_at DESC LIMIT ?').bind(sess.accountId, LIST_TOKENS).all();
   const tokens = r.results.map((t) => ({ ...t, policy: JSON.parse(t.policy) }));
   // what each token's money caps have let through today (UTC), per currency, in the currency's smallest unit
   const spent = tokens.some((t) => t.policy.money) ? await Brakes.spentToday(env, sess.accountId) : {};
@@ -111,11 +121,22 @@ export async function revokeToken(env, sess, id) {
 export async function listHolds(env, sess, status) {
   await env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND status IN ('pending','approved') AND expires_at < ?").bind(sess.accountId, now()).run();
   const st = ['pending', 'approved', 'denied', 'used', 'expired'].includes(status) ? status : 'pending';
-  // the label of what asked: an agent token, or for a coding-agent approval the guard key (token_id "g:<key id>")
-  const r = await env.DB.prepare("SELECT h.*, COALESCE(t.label, g.label) AS token_label FROM holds h LEFT JOIN tokens t ON t.id = h.token_id LEFT JOIN guard_keys g ON h.kind != 'proxy' AND g.id = substr(h.token_id, 3) AND g.account_id = h.account_id WHERE h.account_id = ? AND h.status = ? ORDER BY h.created_at DESC LIMIT 100").bind(sess.accountId, st).all();
+  // the label of what asked: an agent token, or for a coding-agent approval the guard key (token_id "g:<key id>"); the
+  // seals so far (only those that still count), and the quorum in force, for "1 of 2 seals" on the card
+  const t = now();
+  const r = await env.DB.prepare(`SELECT h.*, COALESCE(t.label, g.label) AS token_label, ${Team.VOTES_JSON('h', '?3')} AS votes_json,
+      a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at
+    FROM holds h JOIN accounts a ON a.id = h.account_id LEFT JOIN tokens t ON t.id = h.token_id LEFT JOIN guard_keys g ON h.kind != 'proxy' AND g.id = substr(h.token_id, 3) AND g.account_id = h.account_id
+    WHERE h.account_id = ?1 AND h.status = ?2 ORDER BY h.created_at DESC LIMIT 100`).bind(sess.accountId, st, t).all();
   const base = await appOrigin(env, sess.accountId);
-  // `headline`: the amount of a held Stripe refund or payout, for large type (the first line of its preview)
-  return { holds: r.results.map(({ req_hash, context, ...h }) => ({ ...h, context: holdContext(context), approve_url: `${base}/app#hold=${h.id}`, headline: Brakes.headlineOf(h.preview, h.rule) })) };
+  // `headline`: the amount of a held Stripe refund or payout, for large type (the first line of its preview);
+  // `needs`, `self_approve` and `votes`: the seals it needs now, whether its requester may be one, and who sealed it so far
+  return {
+    holds: r.results.map(({ req_hash, context, votes_json, quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at, ...h }) => {
+      const e = Team.effective({ quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at }, t);
+      return { ...h, context: holdContext(context), approve_url: `${base}/app#hold=${h.id}`, headline: Brakes.headlineOf(h.preview, h.rule), needs: Math.max(h.needs || 1, e.quorum), self_approve: e.selfApprove, votes: Team.sealsOf(votes_json) };
+    }),
+  };
 }
 /** a guard hold's context as the app shows it: the folder name and the agent's session, nothing else */
 function holdContext(raw) {
@@ -123,32 +144,34 @@ function holdContext(raw) {
   try { const c = JSON.parse(raw); return { cwd: typeof c.cwd === 'string' ? c.cwd : null, session: typeof c.session === 'string' ? c.session : null }; } catch { return null; }
 }
 
+/** Approve = seal. Each owner or approver seals with a fresh passkey ceremony; the hold is approved when it has as many
+ *  seals from different people as the account's quorum (one, unless the team asked for two). src/team.js has the rules. */
 export async function approveBegin(env, sess, holdId) {
   if (sess.kind !== 'web') throw new HttpError(403, 'passkey_required', `Approve in the ${BRAND.name} app with your passkey.`);
-  const h = await env.DB.prepare("SELECT h.id, a.frozen_at FROM holds h JOIN accounts a ON a.id = h.account_id WHERE h.id = ? AND h.account_id = ? AND h.status = 'pending' AND h.expires_at > ?").bind(holdId, sess.accountId, now()).first();
-  if (!h) throw new HttpError(404, 'not_found');
-  // nothing is released while frozen (an approval would only wait for the freeze to end): unfreeze first
-  if (h.frozen_at) throw new HttpError(423, 'account_frozen', 'This account is frozen. Unfreeze it with your passkey first; approvals wait until then.');
-  const { id, challenge } = await newChallenge(env, 'approve:' + holdId, sess.accountId);
-  return { challengeId: id, options: { challenge, rpId: rp(env).rpId, userVerification: 'required', timeout: 300000 } };
+  // nothing is sealed while the account is frozen (team.js answers 423): unfreeze first
+  return Team.sealBegin(env, sess, holdId);
 }
 
 export async function approveFinish(env, sess, holdId, body) {
   if (sess.kind !== 'web') throw new HttpError(403, 'passkey_required');
-  const ch = await takeChallenge(env, body.challengeId, 'approve:' + holdId);
-  if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
-  await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
-  // a freeze between begin and finish also stops the approval (the account is checked in the same statement)
-  const h = await env.DB.prepare("UPDATE holds SET status = 'approved', decided_at = ?, expires_at = ? WHERE id = ? AND account_id = ? AND status = 'pending' AND expires_at > ? AND NOT EXISTS (SELECT 1 FROM accounts WHERE id = ? AND frozen_at IS NOT NULL) RETURNING method, host, rule, kind, context")
-    .bind(now(), now() + GRANT_TTL, holdId, sess.accountId, now(), sess.accountId).first();
-  if (!h) {
-    if (await Brakes.isFrozen(env, sess.accountId)) throw new HttpError(423, 'account_frozen', 'This account is frozen. Unfreeze it with your passkey first; approvals wait until then.');
-    throw new HttpError(404, 'not_found');
+  // a freeze between begin and finish also stops the seal and the approval (checked in the same statements, team.js)
+  const s = await Team.sealFinish(env, sess, holdId, body);
+  const h = s.row;
+  // which passkey approved: a short fingerprint of its credential id (the owner can match it to their passkey); on a
+  // team, also whose seal it was, and with two seals required, every seal (the public receipt gets only the counts)
+  const who = sess.memberId && sess.memberId !== sess.accountId ? { member: sess.memberId } : {};
+  const base = { hold: holdId, method: h.method, host: h.host, rule: h.rule, passkey: s.passkey, ...who, ...guardDetail(h) };
+  const guard = h.kind && h.kind !== 'proxy';
+  if (!s.final) {
+    // a seal that does not complete the quorum is private: no receipt until the hold is approved
+    await audit(env, sess.accountId, 'web', 'approve_vote', { ...base, seals: s.votes.length, needs: s.need });
+    // another approver's seal may have completed it in between (two people confirming at the same moment)
+    if (s.status === 'approved') return { ok: true, approved: true, seals: s.votes.length, needs: s.need, note: 'Your seal is on, and the seals are complete: the agent can go ahead once, within 10 minutes.' };
+    Team.nudge(env, sess.accountId, sess.memberId);
+    return { ok: true, approved: false, seals: s.votes.length, needs: s.need, note: `Your seal is on (${s.votes.length} of ${s.need}). It needs ${s.need - s.votes.length} more from a different approver before the agent can go ahead.` };
   }
-  // which passkey approved: a short fingerprint of its credential id (the owner can match it to their passkey)
-  const passkey = (await sha256hex(String(body.credential.id))).slice(0, 16);
-  await audit(env, sess.accountId, 'web', 'approve', { hold: holdId, method: h.method, host: h.host, rule: h.rule, passkey, ...guardDetail(h) });
-  return { ok: true, note: h.kind === 'proxy' || !h.kind ? 'The agent can now retry the exact same request once, within 10 minutes.' : 'The agent can now run that exact command once, within 10 minutes.' };
+  await audit(env, sess.accountId, 'web', 'approve', { ...base, ...(s.need > 1 ? { quorum: s.need, votes: s.votes } : {}) }, { receipts: s.receipts });
+  return { ok: true, approved: true, seals: s.votes.length, needs: s.need, note: !guard ? 'The agent can now retry the exact same request once, within 10 minutes.' : 'The agent can now run that exact command once, within 10 minutes.' };
 }
 
 /** for a coding-agent approval: its kind, and the shell map version its receipts name */
@@ -167,9 +190,11 @@ export async function denyHold(env, sess, holdId, body = {}) {
     if (typeof body.reason !== 'string' || body.reason.length > DENY_REASON) throw new HttpError(400, 'bad_reason', `A reason is text of ${DENY_REASON} characters at most.`);
     reason = cleanText(body.reason) || null;
   }
+  // on a team, any member may deny (a viewer too): one "no" ends the hold, whatever seals it already has
   const h = await env.DB.prepare("UPDATE holds SET status = 'denied', decided_at = ?, deny_reason = ? WHERE id = ? AND account_id = ? AND status = 'pending' RETURNING method, host, rule, kind, context").bind(now(), reason, holdId, sess.accountId).first();
   if (!h) throw new HttpError(404, 'not_found');
-  await audit(env, sess.accountId, sess.kind, 'deny', { hold: holdId, method: h.method, host: h.host, rule: h.rule, by: sess.kind, ...(reason ? { reason } : {}), ...guardDetail(h) });
+  const who = sess.memberId && sess.memberId !== sess.accountId ? { member: sess.memberId } : {};
+  await audit(env, sess.accountId, sess.kind, 'deny', { hold: holdId, method: h.method, host: h.host, rule: h.rule, by: sess.kind, ...who, ...(reason ? { reason } : {}), ...guardDetail(h) });
   return { ok: true };
 }
 
@@ -236,8 +261,9 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   const authz = request.headers.get('authorization') || '';
   const m = authz.match(/^Bearer (lsh_[A-Za-z0-9_-]{43})$/);
   if (!m) throw new HttpError(401, 'leash_token_required', `Send your ${BRAND.name} token as: Authorization: Bearer lsh_...`);
-  // one query: the token, whether its account has public receipts on, and the agent key it is bound to (if any)
-  const tok = await env.DB.prepare('SELECT t.*, a.receipts AS receipts_on, a.frozen_at, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM passkeys p WHERE p.account_id = t.account_id AND p.rp_id = ?) AS has_new_passkey FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?').bind(hosts(env)[0].rpId, await sha256hex(m[1])).first();
+  // one query: the token, whether its account has public receipts on and is frozen, its quorum settings (two-person
+  // seal), and the agent key it is bound to (if any)
+  const tok = await env.DB.prepare('SELECT t.*, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM passkeys p WHERE p.account_id = t.account_id AND p.rp_id = ?) AS has_new_passkey FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?').bind(hosts(env)[0].rpId, await sha256hex(m[1])).first();
   if (!tok || tok.revoked || tok.expires_at < now()) throw new HttpError(401, 'token_invalid');
   // a token bound to an agent key whose key is gone or revoked never works again (fails closed)
   if (tok.agent_key_id && (!tok.agent_keyid || tok.agent_revoked)) throw new HttpError(401, 'agent_key_revoked', 'The agent key this token is bound to was revoked.');
@@ -287,6 +313,11 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   try { bodyText = body ? new TextDecoder('utf-8', { fatal: true }).decode(body) : ''; } catch { throw new HttpError(400, 'bad_body', 'Request body must be valid UTF-8.'); }
 
   let d = decide(policy, provider, method, path, bodyText, url.search);
+  // A pre-approval, or a money cap, is one person approving in advance. While the team requires two seals (or someone
+  // other than the token's maker), both are paused: the call is held like any other irreversible call.
+  const team = Team.effective(tok);
+  const solo = Team.oneSealEnough(team);
+  if (!solo && d.decision === 'allow' && d.rule.endsWith(':preapproved')) d = { decision: 'hold', rule: d.rule.slice(0, -':preapproved'.length), why: d.why };
   // An approval binds the exact bytes sent upstream, and the content-type that tells the upstream how to read them.
   const bodyHash = body ? b64u(new Uint8Array(await crypto.subtle.digest('SHA-256', body))) : '';
   const reqHash = await sha256hex(JSON.stringify([method, upHost, path, url.search, request.headers.get('content-type') || '', bodyHash]));
@@ -301,7 +332,8 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   const secretOf = async () => (opened ??= await open(env, cred));
   // Brakes (src/brakes.js): a tripped token's writes wait; a Stripe refund or payout under the token's money caps may pass
   // the map; a write that would go upstream is counted against the breaker's limits.
-  const brake = await Brakes.apply(env, { d, tok, policy, provider, method, canon: path, bodyText, search: url.search, contentType: request.headers.get('content-type') || '', reqHash, P, fetcher, secretOf });
+  // (while two seals are required, the money caps are left out: they never let a call through then)
+  const brake = await Brakes.apply(env, { d, tok, policy: solo ? policy : { ...policy, money: null }, provider, method, canon: path, bodyText, search: url.search, contentType: request.headers.get('content-type') || '', reqHash, P, fetcher, secretOf });
   d = brake.d;
   if (d.decision === 'hold') {
     // an approved grant for exactly this request? consume it atomically
@@ -321,8 +353,9 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
         }
         h = { id: randomId(), expires_at: now() + HOLD_TTL };
         const pv = preview(url.search, bodyText, undefined, brake.lines);
-        await env.DB.prepare('INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .bind(h.id, tok.account_id, tok.id, reqHash, method, upHost, where.path, d.rule, d.why, now(), h.expires_at, pv).run();
+        // needs: the seals the team requires now; requested_by: who made this token (separation of duties)
+        await env.DB.prepare('INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview, needs, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(h.id, tok.account_id, tok.id, reqHash, method, upHost, where.path, d.rule, d.why, now(), h.expires_at, pv, team.quorum, Team.memberOf(tok)).run();
         await audit(env, tok.account_id, 'token:' + tok.id, 'hold', { ...where, rule: d.rule, hold: h.id, preview_sha256: await sha256hex(pv || '') }, seal);
         // wake the owner's devices after responding; the push itself carries nothing. At most one alert a minute per
         // account for held requests: the alert says how many are waiting, so a flood of holds is one buzz, not hundreds.
@@ -336,8 +369,8 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
       // the approve link goes where the owner can sign in: the product's host once they have a passkey there
       const approveUrl = `${await appOrigin(env, tok.account_id, !!tok.has_new_passkey)}/app#hold=${h.id}`;
       return json({
-        error: 'held_for_approval', hold_id: h.id, approve_url: approveUrl, expires_at: h.expires_at, rule: d.rule, map_version: MAP_VERSION,
-        message: `${BRAND.name} held this request${d.rule.startsWith('brake.') ? ':' : ' because it cannot be undone:'} ${d.why} Stop and ask your human to approve it at ${approveUrl} . After they approve, retry the exact same request once.`,
+        error: 'held_for_approval', hold_id: h.id, approve_url: approveUrl, expires_at: h.expires_at, rule: d.rule, map_version: MAP_VERSION, seals_needed: team.quorum,
+        message: `${BRAND.name} held this request${d.rule.startsWith('brake.') ? ':' : ' because it cannot be undone:'} ${d.why} Stop and ask your human${team.quorum > 1 ? `s (${team.quorum} different approvers)` : ''} to approve it at ${approveUrl} . After they approve, retry the exact same request once.`,
       }, 428);
     }
     await audit(env, tok.account_id, 'token:' + tok.id, 'proxy_approved', { ...where, rule: d.rule, hold: g.id }, seal);

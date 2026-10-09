@@ -56,9 +56,14 @@ export async function freeze(env, sess) {
     const a = await env.DB.prepare('SELECT frozen_at FROM accounts WHERE id = ?').bind(sess.accountId).first();
     return { ok: true, frozen: true, frozen_at: a ? a.frozen_at : null, already: true };
   }
-  // approvals nobody has used yet are void: nothing a human said yes to earlier fires after the freeze ends
-  const v = await env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND status = 'approved'").bind(sess.accountId).run();
-  await audit(env, sess.accountId, sess.kind, 'freeze', { by: sess.kind, voided_approvals: v.meta.changes });
+  // approvals nobody has used yet are void: nothing a human said yes to earlier fires after the freeze ends. On a team
+  // (src/team.js) that includes the seals already on waiting holds: they are dropped, and sealing starts again after
+  // the unfreeze.
+  const [v, s] = await env.DB.batch([
+    env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND status = 'approved'").bind(sess.accountId),
+    env.DB.prepare('DELETE FROM hold_votes WHERE account_id = ?1 AND hold_id IN (SELECT id FROM holds WHERE account_id = ?1 AND status = \'pending\')').bind(sess.accountId),
+  ]);
+  await audit(env, sess.accountId, sess.kind, 'freeze', { by: sess.kind, voided_approvals: v.meta.changes, ...(s.meta.changes ? { dropped_seals: s.meta.changes } : {}), ...(sess.memberId && sess.memberId !== sess.accountId ? { member: sess.memberId } : {}) });
   // every device is woken (the push has no content; the alert then says the account is frozen). Freezing again takes a
   // passkey in between, so this is at most one alert per human decision; the minute's limit is a seatbelt.
   const p = (async () => { if (await allow(env.DB, 'pushfreeze:' + sess.accountId, 1, 60_000, now())) await notify(env, sess.accountId, env.__pushFetch || fetch); })().catch(() => {});
@@ -77,7 +82,7 @@ export async function unfreezeFinish(env, sess, body) {
   if (sess.kind !== 'web') throw new HttpError(403, 'passkey_required');
   const ch = await takeChallenge(env, body.challengeId, 'unfreeze');
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
-  await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
+  await checkAssertion(env, body.credential, ch.challenge, sess); // the signed-in person's own passkey (on a team too)
   const r = await env.DB.prepare('UPDATE accounts SET frozen_at = NULL WHERE id = ? AND frozen_at IS NOT NULL RETURNING id').bind(sess.accountId).first();
   if (!r) throw new HttpError(409, 'not_frozen', 'This account is not frozen.');
   await audit(env, sess.accountId, 'web', 'unfreeze', { passkey: (await sha256hex(String(body.credential.id))).slice(0, 16) });
@@ -96,7 +101,7 @@ export async function resetFinish(env, sess, tokenId, body) {
   if (sess.kind !== 'web') throw new HttpError(403, 'passkey_required');
   const ch = await takeChallenge(env, body.challengeId, 'brake_reset:' + tokenId);
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
-  await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
+  await checkAssertion(env, body.credential, ch.challenge, sess); // the signed-in person's own passkey (on a team too)
   const r = await env.DB.prepare('UPDATE tokens SET tripped_at = NULL, tripped_why = NULL WHERE id = ? AND account_id = ? AND tripped_at IS NOT NULL RETURNING id').bind(tokenId, sess.accountId).first();
   if (!r) throw new HttpError(409, 'not_tripped', 'This token has not tripped.');
   // a fresh start: the old windows go (or the next write would trip it again at once), and the writes that waited because

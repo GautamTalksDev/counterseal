@@ -18,10 +18,14 @@ import { directoryTool } from './tools.js';
 import { stats, checkStatsToken, markSeen } from './admin.js';
 import * as Move from './move.js';
 import * as Brakes from './brakes.js';
+import * as Team from './team.js';
 import { BRAND } from './brand.js';
 export { ReceiptLog } from './log.js';
 
 const ID = '([0-9a-f]{24})';
+// the least role a signed-in route needs (src/team.js): reads are open to every member, writes default to MEMBER (a
+// viewer only reads and denies); the fifth element of a route overrides it
+const { viewer: ANY, member: MEMBER, approver: APPROVER, owner: OWNER } = Team.LEVEL;
 // on the old host, these stay (the dashboard and what it loads); /v1, /p and /.well-known are handled before this
 const KEEP_ON_OLD_HOST = /^\/(app(\/.*)?|sw\.js|manifest\.webmanifest|styles\.css|brand\.js|favicon\.svg|icon-\d+\.png|fonts\/.*)$/;
 const movedPermanently = (location) => new Response(null, { status: 301, headers: { location, 'cache-control': 'public, max-age=3600', 'strict-transport-security': 'max-age=63072000; includeSubDomains; preload', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } });
@@ -47,11 +51,14 @@ function withSiteHeaders(res) {
   return out;
 }
 const REG_PER_DAY = (env) => Number(env.REG_PER_IP_DAY) || 5;
-// [method, regex, guard, handler]
+// [method, regex, guard, handler, role?]
 //   public / publicw (with Origin check): per-IP D1 limit;  pub: public log reads, in-memory limit, CORS open
 //   key: receipts API key (lsr_);  session: read with any session;  write: session + CSRF for web
 //   webw: web (passkey) session only, never a CLI session
 //   guard: a guard key (lsg_) from a coding-agent hook; per-network limit in memory, the routes add their own limits
+//   role (signed-in routes): the least team role needed, ANY < MEMBER < APPROVER < OWNER. Default: ANY for session
+//   (reads), MEMBER for write and webw. A role is checked on the server for every request; a passkey proves presence,
+//   not authority.
 const ROUTES = [
   ['GET', /^\/v1\/meta$/, 'public', (c) => ({ app: A.hosts(c.env)[0].origin, legacyApp: A.hosts(c.env)[1]?.origin || null, ...metaOf() })],
   ['POST', /^\/v1\/auth\/register\/begin$/, 'publicw', (c) => A.registerBegin(c.env, c.body)],
@@ -63,37 +70,43 @@ const ROUTES = [
   }],
   ['POST', /^\/v1\/auth\/login\/begin$/, 'publicw', (c) => A.loginBegin(c.env)],
   ['POST', /^\/v1\/auth\/login\/finish$/, 'publicw', async (c) => { const out = await A.loginFinish(c.env, c.body); maybeSweep(c); return out; }],
-  ['POST', /^\/v1\/auth\/logout$/, 'write', (c) => A.logout(c.env, c.s)],
+  ['POST', /^\/v1\/auth\/logout$/, 'write', (c) => A.logout(c.env, c.s), ANY],
   // CLI sign-in (device code). The browser side is web session only: type the code, review where it started, then deny
-  // or approve with a passkey (src/auth.js explains the phishing defences).
+  // or approve with a passkey (src/auth.js explains the phishing defences). Any member may sign in their own command
+  // line; it gets their role.
   ['POST', /^\/v1\/device\/start$/, 'public', (c) => A.deviceStart(c.env, c.request, A.whereFrom(c.cf))],
   ['POST', /^\/v1\/device\/poll$/, 'public', (c) => A.devicePoll(c.env, c.body)],
-  ['POST', /^\/v1\/device\/lookup$/, 'webw', (c) => A.deviceLookup(c.env, c.s, c.body, A.whereFrom(c.cf))],
-  ['POST', /^\/v1\/device\/deny$/, 'webw', (c) => A.deviceDeny(c.env, c.s, c.body)],
-  ['POST', /^\/v1\/device\/approve\/begin$/, 'webw', (c) => A.deviceApproveBegin(c.env, c.s, c.body)],
-  ['POST', /^\/v1\/device\/approve\/finish$/, 'webw', (c) => A.deviceApproveFinish(c.env, c.s, c.body)],
-  // command line sessions: list (any session), revoke one and everything it made (web session only)
+  ['POST', /^\/v1\/device\/lookup$/, 'webw', (c) => A.deviceLookup(c.env, c.s, c.body, A.whereFrom(c.cf)), ANY],
+  ['POST', /^\/v1\/device\/deny$/, 'webw', (c) => A.deviceDeny(c.env, c.s, c.body), ANY],
+  ['POST', /^\/v1\/device\/approve\/begin$/, 'webw', (c) => A.deviceApproveBegin(c.env, c.s, c.body), ANY],
+  ['POST', /^\/v1\/device\/approve\/finish$/, 'webw', (c) => A.deviceApproveFinish(c.env, c.s, c.body), ANY],
+  // command line sessions: list (any session), revoke one and everything it made (web session only; your own, or
+  // anyone's for an owner)
   ['GET', /^\/v1\/sessions$/, 'session', (c) => A.listCliSessions(c.env, c.s)],
-  ['DELETE', /^\/v1\/sessions\/([0-9a-f]{24})$/, 'webw', (c) => A.revokeCliSession(c.env, c.s, c.m[1])],
+  ['DELETE', /^\/v1\/sessions\/([0-9a-f]{24})$/, 'webw', (c) => A.revokeCliSession(c.env, c.s, c.m[1]), ANY],
   // what a phone shows after a payload-free push: held requests, command line sign-ins and passkeys added in the last
-  // 15 minutes, and whether the account is frozen (and since when)
+  // 15 minutes, whether the account is frozen (and since when), and team events (someone joined; the quorum will be
+  // lowered)
   ['GET', /^\/v1\/alerts$/, 'session', async (c) => ({
     holds: (await B.listHolds(c.env, c.s, 'pending')).holds, signins: await A.recentCliSignins(c.env, c.s.accountId), passkeys: await Move.recentPasskeys(c.env, c.s.accountId),
     frozen_at: (await c.env.DB.prepare('SELECT frozen_at FROM accounts WHERE id = ?').bind(c.s.accountId).first())?.frozen_at ?? null,
+    team: await Team.recentEvents(c.env, c.s.accountId),
   })],
-  // Brakes. Freeze: any signed-in session (stopping is always safe). Unfreeze and resetting a tripped breaker: a web
-  // session and a fresh passkey ceremony, never a command line session.
-  ['POST', /^\/v1\/me\/freeze$/, 'write', (c) => Brakes.freeze(c.env, c.s)],
-  ['POST', /^\/v1\/me\/unfreeze\/begin$/, 'webw', (c) => Brakes.unfreezeBegin(c.env, c.s)],
-  ['POST', /^\/v1\/me\/unfreeze\/finish$/, 'webw', (c) => Brakes.unfreezeFinish(c.env, c.s, c.body)],
-  ['POST', new RegExp(`^/v1/tokens/${ID}/reset/begin$`), 'webw', (c) => Brakes.resetBegin(c.env, c.s, c.m[1])],
-  ['POST', new RegExp(`^/v1/tokens/${ID}/reset/finish$`), 'webw', (c) => Brakes.resetFinish(c.env, c.s, c.m[1], c.body)],
+  // Brakes. Freeze: any signed-in session of any member, a viewer too (stopping is always safe). Unfreeze and resetting
+  // a tripped breaker: an owner or approver, in a web session with a fresh passkey ceremony, never a command line session.
+  ['POST', /^\/v1\/me\/freeze$/, 'write', (c) => Brakes.freeze(c.env, c.s), ANY],
+  ['POST', /^\/v1\/me\/unfreeze\/begin$/, 'webw', (c) => Brakes.unfreezeBegin(c.env, c.s), APPROVER],
+  ['POST', /^\/v1\/me\/unfreeze\/finish$/, 'webw', (c) => Brakes.unfreezeFinish(c.env, c.s, c.body), APPROVER],
+  ['POST', new RegExp(`^/v1/tokens/${ID}/reset/begin$`), 'webw', (c) => Brakes.resetBegin(c.env, c.s, c.m[1]), APPROVER],
+  ['POST', new RegExp(`^/v1/tokens/${ID}/reset/finish$`), 'webw', (c) => Brakes.resetFinish(c.env, c.s, c.m[1], c.body), APPROVER],
   ['GET', /^\/v1\/me$/, 'session', async (c) => {
     const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan, frozen_at FROM accounts WHERE id = ?').bind(c.s.accountId).first();
     const u = await usageOf(c.env, c.s.accountId);
     const { receipts, ...rest } = account || {};
     return {
       account: account ? rest : null, kind: c.s.kind,
+      // who is signed in: on a team, one member with their own role (the account's founder: the account's id and name)
+      member: { id: c.s.memberId, role: c.s.role, name: c.s.memberName || account?.name || null, founder: c.s.memberId === c.s.accountId },
       // which host this is, and where the product lives (the app offers "Move to Counterseal" on the old host)
       host: { here: A.rp(c.env).origin, legacy: A.rp(c.env).legacy, primary: A.hosts(c.env)[0].origin },
       // receipts numbers at the top level as well, as the receipts API always had them
@@ -101,55 +114,79 @@ const ROUTES = [
       receipts: { on: !!receipts, usage: u.usage, today: u.today, skipped: u.skipped, quota: c.env.UNLIMITED ? null : quotaFor(c.env), dayCap: c.env.UNLIMITED ? null : dayCapFor(c.env) },
     };
   }],
-  ['POST', /^\/v1\/me\/delete\/begin$/, 'webw', (c) => deleteBegin(c.env, c.s)],
-  ['POST', /^\/v1\/me\/delete\/finish$/, 'webw', (c) => deleteAccount(c.env, c.s, c.body)],
-  // public receipts on or off. On: a web session. Off hides future decisions from the public log, which is what an agent
-  // that wanted to act unseen would want, so it needs a fresh passkey ceremony, and turning off is itself on the record.
+  // deleting the account erases the whole team's data: an owner, with a fresh passkey ceremony
+  ['POST', /^\/v1\/me\/delete\/begin$/, 'webw', (c) => deleteBegin(c.env, c.s), OWNER],
+  ['POST', /^\/v1\/me\/delete\/finish$/, 'webw', (c) => deleteAccount(c.env, c.s, c.body), OWNER],
+  // public receipts on or off (an owner). On: a web session. Off hides future decisions from the public log, which is
+  // what an agent that wanted to act unseen would want, so it needs a fresh passkey ceremony, and turning off is itself
+  // on the record.
   ['POST', /^\/v1\/me\/receipts\/on$/, 'webw', async (c) => {
     await c.env.DB.prepare('UPDATE accounts SET receipts = 1 WHERE id = ?').bind(c.s.accountId).run();
-    await audit(c.env, c.s.accountId, 'web', 'receipts_on', {});
+    await audit(c.env, c.s.accountId, 'web', 'receipts_on', who(c.s));
     return { ok: true, on: true };
-  }],
+  }, OWNER],
   ['POST', /^\/v1\/me\/receipts\/off\/begin$/, 'webw', async (c) => {
     const { id, challenge } = await A.newChallenge(c.env, 'receipts_off', c.s.accountId);
     return { challengeId: id, options: { challenge, rpId: A.rp(c.env).rpId, userVerification: 'required', timeout: 300000 } };
-  }],
+  }, OWNER],
   ['POST', /^\/v1\/me\/receipts\/off\/finish$/, 'webw', async (c) => {
     const ch = await A.takeChallenge(c.env, c.body.challengeId, 'receipts_off');
     if (ch.account_id !== c.s.accountId) throw new HttpError(403, 'forbidden');
-    await A.checkAssertion(c.env, c.body.credential, ch.challenge, c.s.accountId);
+    await A.checkAssertion(c.env, c.body.credential, ch.challenge, c.s);
     await c.env.DB.prepare('UPDATE accounts SET receipts = 0 WHERE id = ?').bind(c.s.accountId).run();
-    await audit(c.env, c.s.accountId, 'web', 'receipts_off', {});
+    await audit(c.env, c.s.accountId, 'web', 'receipts_off', who(c.s));
     return { ok: true, on: false };
-  }],
-  // the domain move: a one-time link from the old host, and a new passkey on the new host for the same account
-  ['POST', /^\/v1\/me\/move\/begin$/, 'webw', (c) => Move.linkBegin(c.env, c.s)],
-  ['POST', /^\/v1\/me\/move\/finish$/, 'webw', (c) => Move.linkFinish(c.env, c.s, c.body)],
+  }, OWNER],
+  // the domain move: a one-time link from the old host, and a new passkey on the new host for the same person
+  ['POST', /^\/v1\/me\/move\/begin$/, 'webw', (c) => Move.linkBegin(c.env, c.s), ANY],
+  ['POST', /^\/v1\/me\/move\/finish$/, 'webw', (c) => Move.linkFinish(c.env, c.s, c.body), ANY],
   ['POST', /^\/v1\/move\/begin$/, 'publicw', (c) => Move.registerBegin(c.env, c.body)],
   ['POST', /^\/v1\/move\/finish$/, 'publicw', (c) => Move.registerFinish(c.env, c.body)],
   ['GET', /^\/v1\/passkeys$/, 'session', (c) => Move.listPasskeys(c.env, c.s)],
-  // removing a passkey needs a fresh passkey ceremony and signs out the account's other web sessions
-  ['POST', new RegExp(`^/v1/passkeys/${ID}/remove/begin$`), 'webw', (c) => Move.removeBegin(c.env, c.s, c.m[1])],
-  ['POST', new RegExp(`^/v1/passkeys/${ID}/remove/finish$`), 'webw', (c) => Move.removeFinish(c.env, c.s, c.m[1], c.body)],
+  // removing one of your own passkeys needs a fresh passkey ceremony and signs out your other web sessions
+  ['POST', new RegExp(`^/v1/passkeys/${ID}/remove/begin$`), 'webw', (c) => Move.removeBegin(c.env, c.s, c.m[1]), ANY],
+  ['POST', new RegExp(`^/v1/passkeys/${ID}/remove/finish$`), 'webw', (c) => Move.removeFinish(c.env, c.s, c.m[1], c.body), ANY],
   ['GET', /^\/v1\/push\/key$/, 'session', (c) => Push.publicKey(c.env)],
   // alerts are a browser feature: only a web session adds, removes or tests a device (a stolen CLI session could
   // otherwise fill the account's 10 device slots, or learn when holds happen through a device of its own)
-  ['POST', /^\/v1\/push\/subscribe$/, 'webw', (c) => Push.subscribe(c.env, c.s, c.body)],
-  ['POST', /^\/v1\/push\/unsubscribe$/, 'webw', (c) => Push.unsubscribe(c.env, c.s, c.body)],
-  ['POST', /^\/v1\/push\/test$/, 'webw', async (c) => { await limit(c.env.DB, 'pushtest:' + c.s.accountId, 3, 60_000, now()); return Push.notify(c.env, c.s.accountId, c.env.__pushFetch || fetch); }],
+  ['POST', /^\/v1\/push\/subscribe$/, 'webw', (c) => Push.subscribe(c.env, c.s, c.body), ANY],
+  ['POST', /^\/v1\/push\/unsubscribe$/, 'webw', (c) => Push.unsubscribe(c.env, c.s, c.body), ANY],
+  ['POST', /^\/v1\/push\/test$/, 'webw', async (c) => { await limit(c.env.DB, 'pushtest:' + c.s.accountId, 3, 60_000, now()); return Push.notify(c.env, c.s.accountId, c.env.__pushFetch || fetch); }, ANY],
   ['GET', /^\/v1\/credentials$/, 'session', (c) => B.listCredentials(c.env, c.s)],
   ['POST', /^\/v1\/credentials$/, 'write', (c) => B.addCredential(c.env, c.s, c.body)],
-  // deleting a vaulted key breaks every token on it; an agent holding a CLI session must not be able to do that
-  ['DELETE', new RegExp(`^/v1/credentials/${ID}$`), 'webw', (c) => B.deleteCredential(c.env, c.s, c.m[1])],
+  // deleting a vaulted key breaks every token on it (the whole team's): an owner, never a CLI session
+  ['DELETE', new RegExp(`^/v1/credentials/${ID}$`), 'webw', (c) => B.deleteCredential(c.env, c.s, c.m[1]), OWNER],
   ['GET', /^\/v1\/tokens$/, 'session', (c) => B.listTokens(c.env, c.s)],
   ['POST', /^\/v1\/tokens$/, 'write', (c) => B.mintToken(c.env, c.s, c.body, false)],
-  ['POST', /^\/v1\/tokens\/passkey\/begin$/, 'webw', (c) => B.mintBegin(c.env, c.s)],
-  ['POST', /^\/v1\/tokens\/passkey\/finish$/, 'webw', (c) => B.mintFinish(c.env, c.s, c.body)],
+  // pre-approving irreversible calls is approving in advance: someone who may approve, and only while one seal is enough
+  ['POST', /^\/v1\/tokens\/passkey\/begin$/, 'webw', (c) => B.mintBegin(c.env, c.s), APPROVER],
+  ['POST', /^\/v1\/tokens\/passkey\/finish$/, 'webw', (c) => B.mintFinish(c.env, c.s, c.body), APPROVER],
   ['DELETE', new RegExp(`^/v1/tokens/${ID}$`), 'write', (c) => B.revokeToken(c.env, c.s, c.m[1])],
   ['GET', /^\/v1\/holds$/, 'session', (c) => B.listHolds(c.env, c.s, c.url.searchParams.get('status'))],
-  ['POST', new RegExp(`^/v1/holds/${ID}/approve/begin$`), 'webw', (c) => B.approveBegin(c.env, c.s, c.m[1])],
-  ['POST', new RegExp(`^/v1/holds/${ID}/approve/finish$`), 'webw', (c) => B.approveFinish(c.env, c.s, c.m[1], c.body)],
-  ['POST', new RegExp(`^/v1/holds/${ID}/deny$`), 'write', (c) => B.denyHold(c.env, c.s, c.m[1], c.body)],
+  // a seal: an owner or approver, with their own passkey (src/team.js checks the rest in the same transaction)
+  ['POST', new RegExp(`^/v1/holds/${ID}/approve/begin$`), 'webw', (c) => B.approveBegin(c.env, c.s, c.m[1]), APPROVER],
+  ['POST', new RegExp(`^/v1/holds/${ID}/approve/finish$`), 'webw', (c) => B.approveFinish(c.env, c.s, c.m[1], c.body), APPROVER],
+  // deny is always safe: any member, any session
+  ['POST', new RegExp(`^/v1/holds/${ID}/deny$`), 'write', (c) => B.denyHold(c.env, c.s, c.m[1], c.body), ANY],
+  // The team (two-person seal, src/team.js). Every change that adds people or changes what they may do needs an owner
+  // and a fresh passkey ceremony; revoking an invite only tightens. Joining is public, on the product's host, with the
+  // invite's token in the POST body.
+  ['GET', /^\/v1\/team$/, 'session', (c) => Team.getTeam(c.env, c.s)],
+  ['POST', /^\/v1\/team\/invites\/begin$/, 'webw', (c) => Team.inviteBegin(c.env, c.s, c.body), OWNER],
+  ['POST', /^\/v1\/team\/invites\/finish$/, 'webw', (c) => Team.inviteFinish(c.env, c.s, c.body), OWNER],
+  ['DELETE', new RegExp(`^/v1/team/invites/${ID}$`), 'write', (c) => Team.revokeInvite(c.env, c.s, c.m[1]), OWNER],
+  ['POST', new RegExp(`^/v1/team/members/${ID}/role/begin$`), 'webw', (c) => Team.roleBegin(c.env, c.s, c.m[1], c.body), OWNER],
+  ['POST', new RegExp(`^/v1/team/members/${ID}/role/finish$`), 'webw', (c) => Team.roleFinish(c.env, c.s, c.m[1], c.body), OWNER],
+  // removal: an owner removes anyone (the rules in team.js permitting); anyone may leave
+  ['POST', new RegExp(`^/v1/team/members/${ID}/remove/begin$`), 'webw', (c) => Team.removeBegin(c.env, c.s, c.m[1]), ANY],
+  ['POST', new RegExp(`^/v1/team/members/${ID}/remove/finish$`), 'webw', (c) => Team.removeFinish(c.env, c.s, c.m[1], c.body), ANY],
+  ['POST', /^\/v1\/team\/quorum\/begin$/, 'webw', (c) => Team.quorumBegin(c.env, c.s, c.body), OWNER],
+  ['POST', /^\/v1\/team\/quorum\/finish$/, 'webw', (c) => Team.quorumFinish(c.env, c.s, c.body), OWNER],
+  ['POST', /^\/v1\/team\/quorum\/cancel\/begin$/, 'webw', (c) => Team.cancelBegin(c.env, c.s), APPROVER],
+  ['POST', /^\/v1\/team\/quorum\/cancel\/finish$/, 'webw', (c) => Team.cancelFinish(c.env, c.s, c.body), APPROVER],
+  ['POST', /^\/v1\/invites\/lookup$/, 'publicw', (c) => Team.inviteLookup(c.env, c.request, c.body)],
+  ['POST', /^\/v1\/invites\/begin$/, 'publicw', (c) => Team.joinBegin(c.env, c.request, c.body)],
+  ['POST', /^\/v1\/invites\/finish$/, 'publicw', (c) => Team.joinFinish(c.env, c.request, c.body)],
   // Guard keys (lsg_): what a coding-agent hook holds to ask for approvals. Making one or revoking one never loosens
   // anything (a guard key can ask, never approve), so a CLI session may do both.
   ['GET', /^\/v1\/guard\/keys$/, 'session', (c) => G.listKeys(c.env, c.s)],
@@ -189,14 +226,14 @@ async function deleteAccount(env, s, body) {
   if (body?.confirm !== 'delete') throw new HttpError(400, 'confirm_required', 'Send {"confirm":"delete"}.');
   const ch = await A.takeChallenge(env, body.challengeId, 'delete');
   if (ch.account_id !== s.accountId) throw new HttpError(403, 'forbidden');
-  await A.checkAssertion(env, body.credential, ch.challenge, s.accountId);
+  await A.checkAssertion(env, body.credential, ch.challenge, s);
   const id = s.accountId;
-  // order matters: receipts keys stop working first, then the log is unlinked, then the rows go
+  // order matters: receipts keys stop working first, then the log is unlinked, then the rows go (the whole team's)
   await forgetAccount(env, id);
   await env.DB.batch([
     ...deleteStatements(env.DB, id),
     ...Brakes.deleteStatements(env.DB, id), // their tokens' daily totals and breaker windows, before the tokens go
-    ...['push_subs', 'holds', 'guard_keys', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
+    ...['push_subs', 'hold_votes', 'holds', 'guard_keys', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes', 'invites', 'members'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
     env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id),
   ]);
   return { body: { deleted: true, note: 'Account deleted. Receipts already in the public log stay there by design; they are no longer linked to you on our side.' }, cookie: '__Host-leash=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0' };
@@ -209,7 +246,10 @@ const SECURITY_EVENTS = new Set(['api_key_required', 'api_key_invalid', 'csrf', 
   'challenge_expired', 'bad_challenge', 'bad_origin', 'bad_rp', 'user_verification_required', 'too_large', 'quota', 'daily_quota', 'log_at_capacity',
   'not_configured', 'log_key_invalid', 'log_key_changed', 'token_invalid', 'agent_signature_required', 'bad_agent_signature', 'agent_signature_replayed',
   'agent_key_revoked', 'passkey_required', 'bad_proof', 'key_taken', 'code_not_found', 'bad_user_code', 'too_many_holds',
-  'guard_key_required', 'guard_key_invalid', 'hash_mismatch', 'account_frozen']);
+  'guard_key_required', 'guard_key_invalid', 'hash_mismatch', 'account_frozen',
+  'role_required', 'approver_required', 'own_request', 'already_sealed', 'seal_not_yet', 'invite_invalid', 'already_member', 'hold_changed']);
+/** an audit detail's `member` on a team (the founder's entries keep their shape) */
+const who = (s) => (s.memberId && s.memberId !== s.accountId ? { member: s.memberId } : {});
 const logPath = (url) => url.pathname.startsWith('/p/') ? url.pathname.split('/').slice(0, 3).join('/') + '/...' : url.pathname.replace(/\/[0-9a-f]{24}(?=\/|$)/g, '/:id');
 function securityLog(e, request, url) {
   if (!(e instanceof HttpError) || !SECURITY_EVENTS.has(e.code)) return;
@@ -261,7 +301,7 @@ export async function handle(request, rawEnv, opts = {}) {
       if (isPublic) return new Response(null, { status: 204, headers: { ...CORS, 'access-control-allow-methods': 'GET', 'access-control-max-age': '86400' } });
       return json({ error: 'no_cors' }, 403);
     }
-    for (const [method, re, guard, fn] of ROUTES) {
+    for (const [method, re, guard, fn, role] of ROUTES) {
       if (method !== request.method) continue;
       const m = url.pathname.match(re);
       if (!m) continue;
@@ -283,6 +323,9 @@ export async function handle(request, rawEnv, opts = {}) {
       if (guard === 'session' || guard === 'write' || guard === 'webw') {
         c.s = await A.session(env, request, guard !== 'session');
         if (guard === 'webw' && c.s.kind !== 'web') throw new HttpError(403, 'passkey_required', `This needs your passkey in the ${BRAND.name} app.`);
+        // the team role, on the server, for every signed-in request (reads: any member; writes: not a viewer, unless the
+        // route says otherwise)
+        Team.requireLevel(c.s, role ?? (guard === 'session' ? ANY : MEMBER));
         const seen = markSeen(env, c.s.accountId);
         if (seen) waitUntil(seen);
         // reads cost no D1 write for their limit; writes are counted in D1 so the limit holds across isolates
@@ -310,7 +353,7 @@ export async function handle(request, rawEnv, opts = {}) {
 
 // Expired rows are always rejected at read time; this only tidies them away. There is no cron (the account's five cron
 // triggers are used by other Workers): it runs on about 1 in 50 requests, and after sign-ins and sign-ups at most every
-// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 14 statements (D1 allows 50).
+// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 16 statements (D1 allows 50).
 export async function sweep(env, t = Date.now()) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM challenges WHERE expires_at < ?').bind(t),
@@ -322,6 +365,10 @@ export async function sweep(env, t = Date.now()) {
     env.DB.prepare("UPDATE holds SET status = 'expired' WHERE status IN ('pending','approved') AND expires_at < ?").bind(t),
     // request previews are only needed while a human is deciding; drop them a day after the hold is closed
     env.DB.prepare("UPDATE holds SET preview = NULL WHERE preview IS NOT NULL AND status NOT IN ('pending','approved') AND expires_at < ?").bind(t - 86400_000),
+    // two-person seal: seals are only needed while their hold is open (at most 40 minutes; the audit log keeps every
+    // seal), and an invite that expired a day ago is gone
+    env.DB.prepare('DELETE FROM hold_votes WHERE at < ?').bind(t - 2 * 86400_000),
+    env.DB.prepare('DELETE FROM invites WHERE expires_at < ?').bind(t - 86400_000),
     ...cleanupStatements(env.DB, t),
     ...Brakes.sweepStatements(env.DB, t), // breaker windows that ended, daily money totals older than 35 days
   ]);

@@ -220,6 +220,11 @@ export function brokerReceipt({ action, detail, auditHash, at, mapVersion }) {
   if (detail.rule && RULE.test(detail.rule)) meta.rule = detail.rule;
   if (detail.agent_key) meta.agent_key = true;
   if (detail.passkey) meta.passkey = true;
+  // two-person seal: how many seals were required and how many there were. Counts only: never who, which passkey or when
+  if (action === 'approve' && Number.isInteger(detail.quorum) && detail.quorum >= 2 && detail.quorum <= 10 && Array.isArray(detail.votes)) {
+    meta.quorum = detail.quorum;
+    meta.votes = Math.min(detail.votes.length, 10);
+  }
   return { agent: 'broker', action: method && host ? `${method} ${host}` : action === 'approve' ? 'approve' : 'decision', decision: DECISION[action], parent: auditHash, ts: at, meta };
 }
 
@@ -350,7 +355,8 @@ export const LEDGER_ROUTES = [
     // made by a CLI session: it ends when that session ends, and revoking the session revokes it
     const cli = c.s.kind === 'cli' ? await A.sessionId(c.s.hash) : null;
     const expiresAt = cli ? c.s.expiresAt : null;
-    await c.env.DB.prepare('INSERT INTO api_keys (id, account_id, hash, label, signer_pub, created_at, session_id, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id, c.s.accountId, await sha256hex(key), label, signer, now(), cli, expiresAt).run();
+    // member_id: who made it (removing them from a team revokes it)
+    await c.env.DB.prepare('INSERT INTO api_keys (id, account_id, hash, label, signer_pub, created_at, session_id, expires_at, member_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, c.s.accountId, await sha256hex(key), label, signer, now(), cli, expiresAt, c.s.memberId || null).run();
     await audit(c.env, c.s.accountId, c.s.kind, 'receipts_key_created', { id, label, signed: !!signer, ...(cli ? { session: cli, expires_at: expiresAt } : {}) });
     return { id, key, label, ...(expiresAt ? { expiresAt } : {}), note: `Shown once. Only a hash is kept.${expiresAt ? ' It ends with this command line sign-in; make lasting keys in the app.' : ''}` };
   }],

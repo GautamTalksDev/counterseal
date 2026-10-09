@@ -38,11 +38,12 @@ export async function linkFinish(env, sess, body) {
   onOldHost(env);
   const ch = await takeChallenge(env, body.challengeId, 'move_link');
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
-  await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
+  await checkAssertion(env, body.credential, ch.challenge, sess);
   await limit(env.DB, 'move:' + sess.accountId, MOVES_PER_HOUR, 3600_000, now());
   const token = b64u(rand(32));
   const expires = now() + MOVE_TTL;
-  await env.DB.prepare('INSERT INTO move_links (hash, account_id, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(await sha256hex(token), sess.accountId, now(), expires).run();
+  // the new passkey will be this person's (on a team, the member who made the link)
+  await env.DB.prepare('INSERT INTO move_links (hash, account_id, created_at, expires_at, member_id) VALUES (?, ?, ?, ?, ?)').bind(await sha256hex(token), sess.accountId, now(), expires, sess.memberId || null).run();
   await audit(env, sess.accountId, 'web', 'move_link_created', { expires_at: expires });
   return { url: `${hosts(env)[0].origin}/app#move=${token}`, expiresAt: expires };
 }
@@ -80,15 +81,16 @@ export async function registerFinish(env, body) {
   const c = await verifyRegistration(body.credential || {}, { challenge: ch.challenge, origin: r.origin, rpId: r.rpId });
   if (await env.DB.prepare('SELECT 1 AS x FROM passkeys WHERE cred_id = ?').bind(c.credId).first()) throw new HttpError(409, 'passkey_exists', 'That passkey is already registered.');
   // consume the token, once, for the account it was made for
-  const used = await env.DB.prepare('UPDATE move_links SET used_at = ? WHERE hash = ? AND account_id = ? AND used_at IS NULL AND expires_at > ? RETURNING account_id').bind(now(), hash, ch.account_id, now()).first();
+  const used = await env.DB.prepare('UPDATE move_links SET used_at = ? WHERE hash = ? AND account_id = ? AND used_at IS NULL AND expires_at > ? RETURNING account_id, member_id').bind(now(), hash, ch.account_id, now()).first();
   if (!used) throw new HttpError(400, 'move_link_invalid', 'This link was used, has expired, or is wrong. Make a new one on the old host.');
-  await env.DB.prepare('INSERT INTO passkeys (cred_id, account_id, alg, jwk, sign_count, created_at, rp_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(c.credId, used.account_id, c.alg, JSON.stringify(c.jwk), c.signCount, now(), r.rpId).run();
-  await audit(env, used.account_id, 'web', 'passkey_added', { host: r.origin, via: 'move' });
+  const member = used.member_id || used.account_id;
+  await env.DB.prepare('INSERT INTO passkeys (cred_id, account_id, alg, jwk, sign_count, created_at, rp_id, member_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(c.credId, used.account_id, c.alg, JSON.stringify(c.jwk), c.signCount, now(), r.rpId, member).run();
+  await audit(env, used.account_id, 'web', 'passkey_added', { host: r.origin, via: 'move', ...(member !== used.account_id ? { member } : {}) });
   // whoever used the link now holds a passkey on this account: every device with alerts on is told at once
   const p = notify(env, used.account_id, env.__pushFetch || fetch).catch(() => {});
   if (env.__ctx && env.__ctx.waitUntil) env.__ctx.waitUntil(p); else await p;
-  return startWebSession(env, used.account_id);
+  return startWebSession(env, used.account_id, member);
 }
 
 /** passkeys added in the last 15 minutes (not the one the account was made with), for the alert a phone shows */
@@ -98,15 +100,17 @@ export async function recentPasskeys(env, accountId) {
   return Promise.all(rows.map(async (p) => ({ id: await pkId(p.cred_id), host: hosts(env).find((h) => h.rpId === passkeyRpId(env, p))?.origin || null, created_at: p.created_at })));
 }
 
-// ---- your passkeys: list them, and remove one you no longer use (never the last)
+// ---- your passkeys: list them, and remove one you no longer use (never the last). On a team, "your" means the signed-in
+// person's own: nobody sees the ids of, or removes, another member's passkeys (an owner removes the member instead).
 const pkId = async (credId) => (await sha256hex('passkey|' + credId)).slice(0, 24);
+const OWN = 'account_id = ? AND COALESCE(member_id, account_id) = ?';
 export async function listPasskeys(env, sess) {
-  const rows = (await env.DB.prepare('SELECT cred_id, rp_id, created_at, last_used FROM passkeys WHERE account_id = ? ORDER BY created_at').bind(sess.accountId).all()).results;
+  const rows = (await env.DB.prepare(`SELECT cred_id, rp_id, created_at, last_used FROM passkeys WHERE ${OWN} ORDER BY created_at`).bind(sess.accountId, sess.memberId).all()).results;
   const { passkeyRpId } = await import('./auth.js');
   return { passkeys: await Promise.all(rows.map(async (p) => ({ id: await pkId(p.cred_id), host: hosts(env).find((h) => h.rpId === passkeyRpId(env, p))?.origin || null, created_at: p.created_at, last_used: p.last_used }))) };
 }
 async function removable(env, sess, id) {
-  const rows = (await env.DB.prepare('SELECT cred_id FROM passkeys WHERE account_id = ?').bind(sess.accountId).all()).results;
+  const rows = (await env.DB.prepare(`SELECT cred_id FROM passkeys WHERE ${OWN}`).bind(sess.accountId, sess.memberId).all()).results;
   let target = null;
   for (const p of rows) if ((await pkId(p.cred_id)) === id) target = p.cred_id;
   if (!target) throw new HttpError(404, 'not_found');
@@ -124,11 +128,12 @@ export async function removeBegin(env, sess, id) {
 export async function removeFinish(env, sess, id, body) {
   const ch = await takeChallenge(env, body.challengeId, 'passkey_remove:' + id);
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
-  await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
+  await checkAssertion(env, body.credential, ch.challenge, sess);
   const target = await removable(env, sess, id);
+  // signs out this person's other browsers (never another member's)
   const [, out] = await env.DB.batch([
-    env.DB.prepare('DELETE FROM passkeys WHERE cred_id = ? AND account_id = ?').bind(target, sess.accountId),
-    env.DB.prepare("DELETE FROM sessions WHERE account_id = ? AND kind = 'web' AND hash != ?").bind(sess.accountId, sess.hash),
+    env.DB.prepare(`DELETE FROM passkeys WHERE cred_id = ? AND ${OWN}`).bind(target, sess.accountId, sess.memberId),
+    env.DB.prepare(`DELETE FROM sessions WHERE ${OWN} AND kind = 'web' AND hash != ?`).bind(sess.accountId, sess.memberId, sess.hash),
   ]);
   const signedOut = out?.meta?.changes || 0;
   await audit(env, sess.accountId, 'web', 'passkey_removed', { passkey: id, signed_out: signedOut });

@@ -20,6 +20,7 @@ import { markSeen } from './admin.js';
 import { frozenError } from './brakes.js';
 import { int } from './ledger.js';
 import { BRAND } from './brand.js';
+import * as Team from './team.js';
 
 export const AGENTS = ['claude-code', 'codex', 'cursor', 'copilot', 'gemini', 'antigravity', 'mcp'];
 /** the kinds a guard key may ask for, and the method word their holds and public receipts carry */
@@ -62,8 +63,9 @@ export async function createKey(env, sess, body) {
   const expiresAt = cli ? sess.expiresAt : null;
   const key = 'lsg_' + b64u(rand(32));
   const id = randomId();
-  await env.DB.prepare('INSERT INTO guard_keys (id, account_id, hash, label, session_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, sess.accountId, await sha256hex(key), label, cli, expiresAt, t).run();
+  // member_id: who made it (with self-approval off, they cannot seal what it asks for; removing them revokes it)
+  await env.DB.prepare('INSERT INTO guard_keys (id, account_id, hash, label, session_id, expires_at, created_at, member_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, sess.accountId, await sha256hex(key), label, cli, expiresAt, t, sess.memberId || null).run();
   await audit(env, sess.accountId, sess.kind, 'guard_key_created', { id, label, ...(cli ? { session: cli, expires_at: expiresAt } : {}) });
   return {
     id, key, label, expiresAt,
@@ -72,7 +74,7 @@ export async function createKey(env, sess, body) {
 }
 
 export async function listKeys(env, sess) {
-  const r = await env.DB.prepare('SELECT id, label, created_at, last_used, expires_at, revoked, session_id FROM guard_keys WHERE account_id = ? ORDER BY created_at DESC LIMIT 100').bind(sess.accountId).all();
+  const r = await env.DB.prepare('SELECT id, label, created_at, last_used, expires_at, revoked, session_id, COALESCE(member_id, account_id) AS member_id FROM guard_keys WHERE account_id = ? ORDER BY created_at DESC LIMIT 100').bind(sess.accountId).all();
   return { keys: r.results.map(({ session_id, ...k }) => ({ ...k, made_by: session_id ? 'cli' : 'web' })) };
 }
 
@@ -87,11 +89,12 @@ export async function revokeKey(env, sess, id) {
   return { ok: true, closed: h.meta.changes };
 }
 
-/** the guard key in the Authorization header, with whether its account has public receipts on (one query) */
+/** the guard key in the Authorization header, with whether its account has public receipts on, is frozen, and its
+ *  quorum settings (one query) */
 export async function guardKey(env, request) {
   const m = (request.headers.get('authorization') || '').match(KEY);
   if (!m) throw new HttpError(401, 'guard_key_required', `Send your ${BRAND.name} guard key as: Authorization: Bearer lsg_...`);
-  const k = await env.DB.prepare('SELECT g.id, g.account_id, g.revoked, g.expires_at, g.last_used, a.receipts AS receipts_on, a.frozen_at FROM guard_keys g JOIN accounts a ON a.id = g.account_id WHERE g.hash = ?')
+  const k = await env.DB.prepare('SELECT g.id, g.account_id, g.revoked, g.expires_at, g.last_used, g.member_id, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at FROM guard_keys g JOIN accounts a ON a.id = g.account_id WHERE g.hash = ?')
     .bind(await sha256hex(m[1])).first();
   if (!k || k.revoked || (k.expires_at !== null && k.expires_at <= now())) throw new HttpError(401, 'guard_key_invalid', 'This guard key was revoked or has ended. Make a new one in the app, or run leashcli guard install again.');
   return k;
@@ -162,10 +165,12 @@ export async function create(c) {
   }
   const id = randomId(), expiresAt = t + HOLD_TTL, method = KINDS[r.kind];
   const context = JSON.stringify({ ...(r.cwd ? { cwd: r.cwd } : {}), ...(r.session ? { session: r.session } : {}), ...(r.map ? { map: r.map } : {}) });
+  // the seals the team requires now (two-person seal), and who made this guard key (separation of duties)
+  const needs = Team.effective(k, t).quorum, requestedBy = Team.memberOf(k);
   // one statement: two hooks asking for the same command at the same moment make one hold, not two
-  const ins = await env.DB.prepare(`INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview, kind, agent, context)
-    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15 WHERE NOT EXISTS (SELECT 1 FROM holds WHERE token_id = ?3 AND req_hash = ?4 AND status = 'pending' AND expires_at > ?10)`)
-    .bind(id, k.account_id, tokenId, hash, method, r.agent, r.summary, r.rule, r.why, t, expiresAt, pv, r.kind, r.agent, context === '{}' ? null : context).run();
+  const ins = await env.DB.prepare(`INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview, kind, agent, context, needs, requested_by)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17 WHERE NOT EXISTS (SELECT 1 FROM holds WHERE token_id = ?3 AND req_hash = ?4 AND status = 'pending' AND expires_at > ?10)`)
+    .bind(id, k.account_id, tokenId, hash, method, r.agent, r.summary, r.rule, r.why, t, expiresAt, pv, r.kind, r.agent, context === '{}' ? null : context, needs, requestedBy).run();
   if (!ins.meta.changes) {
     const p = await env.DB.prepare("SELECT id, expires_at FROM holds WHERE token_id = ? AND req_hash = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1").bind(tokenId, hash).first();
     if (p) return json({ id: p.id, status: 'pending', hash, approve_url: await url(p.id), expires_at: p.expires_at, created: false }, 202);
@@ -182,7 +187,8 @@ export async function create(c) {
   return json({ id, status: 'pending', hash, approve_url: await url(id), expires_at: expiresAt, created: true }, 202);
 }
 
-const readHold = (env, k, id) => env.DB.prepare("SELECT id, status, deny_reason, expires_at, req_hash FROM holds WHERE id = ? AND token_id = ? AND kind IN ('shell','tool')").bind(id, guardTokenId(k.id)).first();
+// with the seals it has so far and the seals it needs (two-person seal: a hook can say "1 of 2 seals")
+const readHold = (env, k, id) => env.DB.prepare("SELECT id, status, deny_reason, expires_at, req_hash, needs, (SELECT COUNT(*) FROM hold_votes v WHERE v.hold_id = holds.id AND v.req_hash = holds.req_hash) AS seals FROM holds WHERE id = ? AND token_id = ? AND kind IN ('shell','tool')").bind(id, guardTokenId(k.id)).first();
 
 /** GET /v1/approvals/:id?wait=N: the decision, waiting up to N seconds for one. No D1 writes at all. */
 export async function status(c, id) {
@@ -200,7 +206,7 @@ export async function status(c, id) {
     if (!h) throw new HttpError(404, 'not_found');
   }
   const st = statusOf(h);
-  return { id: h.id, status: st, deny_reason: st === 'denied' ? h.deny_reason || null : null, expires_at: h.expires_at, hash: h.req_hash };
+  return { id: h.id, status: st, deny_reason: st === 'denied' ? h.deny_reason || null : null, expires_at: h.expires_at, hash: h.req_hash, seals: h.seals || 0, needs: Math.max(h.needs || 1, Team.effective(k).quorum) };
 }
 
 /** POST /v1/approvals/:id/use {hash}: an approval is spent once, on exactly the command it was given for */
