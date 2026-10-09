@@ -144,6 +144,8 @@ for (const a of document.querySelectorAll('#snav a')) a.onclick = (e) => { e.pre
 function route() {
   const hm = location.hash.match(/^#hold=([0-9a-f]{24})$/);
   if (hm) show('holds');
+  // the alert after a passkey was added opens the passkey list
+  if (location.hash === '#account') { show('account'); history.replaceState(null, '', '/app'); }
   if (hm) setTimeout(() => { const n = $('hold-' + hm[1]); if (n) n.scrollIntoView({ behavior: 'smooth' }); }, 300);
   const dm = /^#device(=.*)?$/.exec(location.hash);
   if (dm && $('devicePanel').hidden) deviceOpen(!!dm[1]);
@@ -288,7 +290,10 @@ async function passkeysView() {
   for (const x of p.passkeys) {
     const rm = el('button', { className: 'btn sm dan', textContent: 'Remove' });
     rm.disabled = p.passkeys.length < 2;
-    rm.onclick = async () => { if (!confirm('Remove this passkey? It will no longer sign in.')) return; try { await api('DELETE', `/v1/passkeys/${x.id}`); passkeysView(); } catch (e) { toast(e.message); } };
+    rm.onclick = async () => {
+      if (!confirm('Remove this passkey? It will no longer sign in, and every other browser signed in to this account is signed out. Confirm with your passkey.')) return;
+      try { const r = await ceremony(`/v1/passkeys/${x.id}/remove/begin`, `/v1/passkeys/${x.id}/remove/finish`); toast(`Passkey removed.${r.signedOut ? ` ${r.signedOut} other browser session(s) signed out.` : ''}`); passkeysView(); } catch (e) { toast(e.message); }
+    };
     P.append(el('div', {}, el('span', {}, el('b', { textContent: x.host ? new URL(x.host).host : 'passkey' }), el('span', { className: 'dim', textContent: `  added ${new Date(x.created_at).toLocaleDateString()}${x.last_used ? ', last used ' + new Date(x.last_used).toLocaleDateString() : ''}` })), rm));
   }
 }

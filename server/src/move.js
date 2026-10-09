@@ -15,6 +15,7 @@ import { verifyRegistration } from './webauthn.js';
 import { newChallenge, takeChallenge, checkAssertion, rp, hosts, startWebSession } from './auth.js';
 import { audit } from './audit.js';
 import { limit } from './ratelimit.js';
+import { notify } from './push.js';
 
 export const MOVE_TTL = 10 * 60_000, MOVES_PER_HOUR = 3;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
@@ -84,7 +85,17 @@ export async function registerFinish(env, body) {
   await env.DB.prepare('INSERT INTO passkeys (cred_id, account_id, alg, jwk, sign_count, created_at, rp_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .bind(c.credId, used.account_id, c.alg, JSON.stringify(c.jwk), c.signCount, now(), r.rpId).run();
   await audit(env, used.account_id, 'web', 'passkey_added', { host: r.origin, via: 'move' });
+  // whoever used the link now holds a passkey on this account: every device with alerts on is told at once
+  const p = notify(env, used.account_id, env.__pushFetch || fetch).catch(() => {});
+  if (env.__ctx && env.__ctx.waitUntil) env.__ctx.waitUntil(p); else await p;
   return startWebSession(env, used.account_id);
+}
+
+/** passkeys added in the last 15 minutes (not the one the account was made with), for the alert a phone shows */
+export async function recentPasskeys(env, accountId) {
+  const rows = (await env.DB.prepare('SELECT p.cred_id, p.rp_id, p.created_at FROM passkeys p JOIN accounts a ON a.id = p.account_id WHERE p.account_id = ? AND p.created_at > ? AND p.created_at > a.created_at + 60000 ORDER BY p.created_at DESC LIMIT 5').bind(accountId, now() - 15 * 60_000).all()).results;
+  const { passkeyRpId } = await import('./auth.js');
+  return Promise.all(rows.map(async (p) => ({ id: await pkId(p.cred_id), host: hosts(env).find((h) => h.rpId === passkeyRpId(env, p))?.origin || null, created_at: p.created_at })));
 }
 
 // ---- your passkeys: list them, and remove one you no longer use (never the last)
@@ -94,13 +105,32 @@ export async function listPasskeys(env, sess) {
   const { passkeyRpId } = await import('./auth.js');
   return { passkeys: await Promise.all(rows.map(async (p) => ({ id: await pkId(p.cred_id), host: hosts(env).find((h) => h.rpId === passkeyRpId(env, p))?.origin || null, created_at: p.created_at, last_used: p.last_used }))) };
 }
-export async function removePasskey(env, sess, id) {
+async function removable(env, sess, id) {
   const rows = (await env.DB.prepare('SELECT cred_id FROM passkeys WHERE account_id = ?').bind(sess.accountId).all()).results;
   let target = null;
   for (const p of rows) if ((await pkId(p.cred_id)) === id) target = p.cred_id;
   if (!target) throw new HttpError(404, 'not_found');
   if (rows.length < 2) throw new HttpError(409, 'last_passkey', 'This is your only passkey. Add another one before you remove it.');
-  await env.DB.prepare('DELETE FROM passkeys WHERE cred_id = ? AND account_id = ?').bind(target, sess.accountId).run();
-  await audit(env, sess.accountId, 'web', 'passkey_removed', { passkey: id });
-  return { ok: true };
+  return target;
+}
+// Removing a passkey takes a sign-in method away from the owner, so, like deleting the account, it needs a fresh passkey
+// ceremony: a stolen cookie alone cannot lock the owner out. It also signs out every other web session of the account,
+// so a browser that signed in with the removed passkey (for example after a leaked move link) is out at once.
+export async function removeBegin(env, sess, id) {
+  await removable(env, sess, id);
+  const { id: challengeId, challenge } = await newChallenge(env, 'passkey_remove:' + id, sess.accountId);
+  return { challengeId, options: { challenge, rpId: rp(env).rpId, userVerification: 'required', timeout: 300000 } };
+}
+export async function removeFinish(env, sess, id, body) {
+  const ch = await takeChallenge(env, body.challengeId, 'passkey_remove:' + id);
+  if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
+  await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
+  const target = await removable(env, sess, id);
+  const [, out] = await env.DB.batch([
+    env.DB.prepare('DELETE FROM passkeys WHERE cred_id = ? AND account_id = ?').bind(target, sess.accountId),
+    env.DB.prepare("DELETE FROM sessions WHERE account_id = ? AND kind = 'web' AND hash != ?").bind(sess.accountId, sess.hash),
+  ]);
+  const signedOut = out?.meta?.changes || 0;
+  await audit(env, sess.accountId, 'web', 'passkey_removed', { passkey: id, signed_out: signedOut });
+  return { ok: true, signedOut };
 }

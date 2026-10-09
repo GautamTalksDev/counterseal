@@ -166,9 +166,13 @@ test('Move to Counterseal: a passkey-confirmed, one-time, 10 minute link adds a 
   const pks = (await w.req('GET', NEW + '/v1/passkeys', { cookie, origin: null, xleash: false })).body.passkeys;
   assert.deepEqual(pks.map((p) => p.host).sort(), [NEW, OLD].sort());
   const oldId = pks.find((p) => p.host === OLD).id, newId = pks.find((p) => p.host === NEW).id;
-  assert.equal((await w.req('DELETE', ...at(NEW, `/v1/passkeys/${oldId}`, { cookie }))).status, 200);
+  // removing needs a fresh passkey ceremony (second-pass hardening); the one-step DELETE is gone
+  assert.equal((await w.req('DELETE', ...at(NEW, `/v1/passkeys/${oldId}`, { cookie }))).status, 404);
+  const rb = await w.req('POST', ...at(NEW, `/v1/passkeys/${oldId}/remove/begin`, { cookie, body: {} }));
+  const rf = await w.req('POST', ...at(NEW, `/v1/passkeys/${oldId}/remove/finish`, { cookie, body: { challengeId: rb.body.challengeId, credential: await done.auth.get(rb.body.options) } }));
+  assert.equal(rf.status, 200, JSON.stringify(rf.body));
   assert.equal((await login(w, OLD, u.auth)).body.error, 'unknown_passkey');
-  assert.equal((await w.req('DELETE', ...at(NEW, `/v1/passkeys/${newId}`, { cookie }))).body.error, 'last_passkey');
+  assert.equal((await w.req('POST', ...at(NEW, `/v1/passkeys/${newId}/remove/begin`, { cookie, body: {} }))).body.error, 'last_passkey');
 });
 
 test('Move link: expiry, replay of a half-used link, wrong account, and the rate limit', async () => {

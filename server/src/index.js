@@ -53,7 +53,7 @@ const ROUTES = [
   ['GET', /^\/v1\/sessions$/, 'session', (c) => A.listCliSessions(c.env, c.s)],
   ['DELETE', /^\/v1\/sessions\/([0-9a-f]{24})$/, 'webw', (c) => A.revokeCliSession(c.env, c.s, c.m[1])],
   // what a phone shows after a payload-free push: held requests, and command line sign-ins of the last 15 minutes
-  ['GET', /^\/v1\/alerts$/, 'session', async (c) => ({ holds: (await B.listHolds(c.env, c.s, 'pending')).holds, signins: await A.recentCliSignins(c.env, c.s.accountId) })],
+  ['GET', /^\/v1\/alerts$/, 'session', async (c) => ({ holds: (await B.listHolds(c.env, c.s, 'pending')).holds, signins: await A.recentCliSignins(c.env, c.s.accountId), passkeys: await Move.recentPasskeys(c.env, c.s.accountId) })],
   ['GET', /^\/v1\/me$/, 'session', async (c) => {
     const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan FROM accounts WHERE id = ?').bind(c.s.accountId).first();
     const u = await usageOf(c.env, c.s.accountId);
@@ -94,7 +94,9 @@ const ROUTES = [
   ['POST', /^\/v1\/move\/begin$/, 'publicw', (c) => Move.registerBegin(c.env, c.body)],
   ['POST', /^\/v1\/move\/finish$/, 'publicw', (c) => Move.registerFinish(c.env, c.body)],
   ['GET', /^\/v1\/passkeys$/, 'session', (c) => Move.listPasskeys(c.env, c.s)],
-  ['DELETE', new RegExp(`^/v1/passkeys/${ID}$`), 'webw', (c) => Move.removePasskey(c.env, c.s, c.m[1])],
+  // removing a passkey needs a fresh passkey ceremony and signs out the account's other web sessions
+  ['POST', new RegExp(`^/v1/passkeys/${ID}/remove/begin$`), 'webw', (c) => Move.removeBegin(c.env, c.s, c.m[1])],
+  ['POST', new RegExp(`^/v1/passkeys/${ID}/remove/finish$`), 'webw', (c) => Move.removeFinish(c.env, c.s, c.m[1], c.body)],
   ['GET', /^\/v1\/push\/key$/, 'session', (c) => Push.publicKey(c.env)],
   // alerts are a browser feature: only a web session adds, removes or tests a device (a stolen CLI session could
   // otherwise fill the account's 10 device slots, or learn when holds happen through a device of its own)

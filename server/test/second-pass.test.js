@@ -97,6 +97,51 @@ test('who can sign and record for the account is on the record: agent keys and r
   assert.equal((await w.req('GET', '/v1/audit/verify', { cookie: u.cookie })).body.ok, true);
 });
 
+test('removing a passkey needs a fresh passkey and signs out the other browsers; a passkey added by a move link alerts every device', async () => {
+  const NEW = 'https://counterseal.test', OLD = 'https://leash.test';
+  const w = new World();
+  const u = await w.user('Old', '198.51.100.61');
+  Object.assign(w.env, { ORIGIN: NEW, RP_ID: 'counterseal.test', LEGACY_ORIGIN: OLD, LEGACY_RP_ID: 'leash.test' });
+  await withVapid(w);
+  const at = (host, path, o = {}) => [host + path, { origin: host, ...o }];
+  assert.equal((await w.req('POST', ...at(OLD, '/v1/push/subscribe', { cookie: u.cookie, body: { endpoint: FCM + 'old-phone' } }))).status, 200);
+  // a second browser signed in on the old host
+  const lb = await w.req('POST', ...at(OLD, '/v1/auth/login/begin', { body: {} }));
+  const other = (await w.req('POST', ...at(OLD, '/v1/auth/login/finish', { body: { challengeId: lb.body.challengeId, credential: await u.auth.get(lb.body.options) } }))).headers.get('set-cookie').split(';')[0];
+  await timeShift(5 * 60_000, async () => {
+    // the move: whoever holds the link gets a passkey, and every device hears about it at once
+    const mb = await w.req('POST', ...at(OLD, '/v1/me/move/begin', { cookie: u.cookie, body: {} }));
+    const link = (await w.req('POST', ...at(OLD, '/v1/me/move/finish', { cookie: u.cookie, body: { challengeId: mb.body.challengeId, credential: await u.auth.get(mb.body.options) } }))).body.url;
+    const token = link.split('#move=')[1];
+    const auth = new Authenticator(NEW, 'counterseal.test');
+    const rb = await w.req('POST', ...at(NEW, '/v1/move/begin', { body: { token } }));
+    const rf = await w.req('POST', ...at(NEW, '/v1/move/finish', { body: { token, challengeId: rb.body.challengeId, credential: await auth.create(rb.body.options) } }));
+    assert.equal(rf.status, 200);
+    assert.deepEqual(w.pushes, [FCM + 'old-phone'], 'the old phone is woken');
+    const al = (await w.req('GET', OLD + '/v1/alerts', { cookie: u.cookie, ...bare })).body;
+    assert.equal(al.passkeys.length, 1); assert.equal(al.passkeys[0].host, NEW);
+    const cookie = rf.headers.get('set-cookie').split(';')[0];
+    const pks = (await w.req('GET', NEW + '/v1/passkeys', { cookie, ...bare })).body.passkeys;
+    const oldId = pks.find((p) => p.host === OLD).id;
+    // no ceremony, no removal; a CLI session never; a ceremony for another passkey id does not carry over
+    assert.equal((await w.req('POST', ...at(NEW, `/v1/passkeys/${oldId}/remove/finish`, { cookie, body: {} }))).status, 400);
+    const cli = await cliFor(w, u);
+    assert.equal((await w.req('POST', OLD + `/v1/passkeys/${oldId}/remove/begin`, { bearer: cli, ...bare, body: {} })).body.error, 'passkey_required');
+    const newId = pks.find((p) => p.host === NEW).id;
+    const wrong = await w.req('POST', ...at(NEW, `/v1/passkeys/${newId}/remove/begin`, { cookie, body: {} }));
+    assert.equal((await w.req('POST', ...at(NEW, `/v1/passkeys/${oldId}/remove/finish`, { cookie, body: { challengeId: wrong.body.challengeId, credential: await auth.get(wrong.body.options) } }))).body.error, 'challenge_expired');
+    // the real thing
+    const b = await w.req('POST', ...at(NEW, `/v1/passkeys/${oldId}/remove/begin`, { cookie, body: {} }));
+    const f = await w.req('POST', ...at(NEW, `/v1/passkeys/${oldId}/remove/finish`, { cookie, body: { challengeId: b.body.challengeId, credential: await auth.get(b.body.options) } }));
+    assert.equal(f.status, 200, JSON.stringify(f.body)); assert.equal(f.body.signedOut, 2);
+    for (const c of [u.cookie, other]) assert.equal((await w.req('GET', OLD + '/v1/me', { cookie: c, ...bare })).status, 401, 'the other browsers are signed out');
+    assert.equal((await w.req('GET', NEW + '/v1/me', { cookie, ...bare })).status, 200, 'this one stays');
+    assert.equal((await w.req('GET', NEW + '/v1/tokens', { bearer: cli, ...bare })).status, 200, 'CLI sessions are listed and revoked on their own');
+    const e = w.env.DB.raw.prepare("SELECT detail FROM audit WHERE action = 'passkey_removed'").get();
+    assert.deepEqual(JSON.parse(e.detail), { passkey: oldId, signed_out: 2 });
+  });
+});
+
 test('phone alerts belong to the browser: a CLI session cannot add, remove or test a device; a moved browser counts toward its new account', async () => {
   const w = new World();
   await withVapid(w);

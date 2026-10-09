@@ -1,5 +1,5 @@
-// Counterseal service worker: turns an empty Web Push "wake up" into a notification about the held request.
-// The push carries no data; the request details come from the service over your own signed-in session.
+// Counterseal service worker: turns an empty Web Push "wake up" into a notification about a held request, a command
+// line sign-in or a passkey added. The push carries no data; the details come from the service over your own session.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
@@ -9,16 +9,21 @@ self.addEventListener('push', (e) => {
     let body = 'Open Counterseal to check. (Could not load the details on this device.)';
     let tag = 'leash-hold', url = '/app';
     try {
-      // held requests, and command line sign-ins of the last 15 minutes (the alert that lets you revoke one)
+      // held requests, and command line sign-ins and passkeys added in the last 15 minutes; the newest event is shown
       const r = await fetch('/v1/alerts', { credentials: 'same-origin', cache: 'no-store' });
       if (r.ok) {
-        const { holds, signins } = await r.json();
-        const s = Array.isArray(signins) && signins[0];
-        if (s && typeof s.id === 'string' && /^[0-9a-f]{24}$/.test(s.id) && (!holds || !holds.length || s.created_at > holds[0].created_at)) {
+        const { holds, signins, passkeys } = await r.json();
+        const at = (x) => (x && Number.isFinite(x.created_at) ? x.created_at : 0);
+        const s = Array.isArray(signins) && signins[0], k = Array.isArray(passkeys) && passkeys[0], h0 = holds && holds[0];
+        if (s && /^[0-9a-f]{24}$/.test(String(s.id)) && at(s) >= at(h0) && at(s) >= at(k)) {
           const where = [s.country, s.network].filter((x) => typeof x === 'string' && x).join(', ');
           title = 'A command line was signed in to your Counterseal account';
           body = `${where ? 'From ' + where + '. ' : ''}Not you? Tap to revoke it and everything it made.`;
           tag = 'leash-cli-' + s.id; url = '/app#cli=' + s.id;
+        } else if (k && at(k) >= at(h0)) {
+          title = 'A passkey was added to your Counterseal account';
+          body = `${typeof k.host === 'string' ? 'For ' + k.host + '. ' : ''}Not you? Tap to review your passkeys and remove it.`;
+          tag = 'leash-pk-' + String(k.id).slice(0, 24); url = '/app#account';
         } else if (holds && !holds.length) { title = 'Counterseal alerts are working'; body = 'Nothing is waiting for you right now.'; }
         else if (holds && holds.length) {
           const h = holds[0];
