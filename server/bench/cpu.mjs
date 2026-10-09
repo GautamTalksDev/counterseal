@@ -77,7 +77,8 @@ const url = (p) => 'https://leash.test/p/github' + p;
 await measure('proxy GET, unbound token (allowed, not sealed)', () => request('GET', url('/repos/a/b'), { bearer: plain }));
 await measure('proxy GET, bound token (RFC 9421 verify + nonce)', async () => { const h = await signBrokerRequest({ method: 'GET', url: url('/repos/a/b') }, { key, kid: ak.keyid }); return request('GET', url('/repos/a/b'), { bearer: bound, headers: h }); });
 await measure('proxy POST, bound token, 1 KB body (allowed + sealed)', async (i) => { const body = JSON.stringify({ title: 'x'.repeat(1000), i }); const h = await signBrokerRequest({ method: 'POST', url: url('/repos/a/b/issues'), body, contentType: 'application/json' }, { key, kid: ak.keyid }); return request('POST', url('/repos/a/b/issues'), { bearer: bound, raw: body, headers: { ...h, 'content-type': 'application/json' } }); });
-await measure('proxy DELETE, bound token (held + push check + sealed)', async (i) => { const h = await signBrokerRequest({ method: 'DELETE', url: url('/repos/a/r' + i) }, { key, kid: ak.keyid }); return request('DELETE', url('/repos/a/r' + i), { bearer: bound, headers: h }); }, (st) => st === 428);
+// a token may have 20 requests waiting (approval fatigue cap): close earlier holds outside the measurement
+await measure('proxy DELETE, bound token (held + push check + sealed)', async (i) => { w.env.DB.raw.prepare("UPDATE holds SET status = 'denied' WHERE status = 'pending'").run(); const h =await signBrokerRequest({ method: 'DELETE', url: url('/repos/a/r' + i) }, { key, kid: ak.keyid }); return request('DELETE', url('/repos/a/r' + i), { bearer: bound, headers: h }); }, (st) => st === 428);
 await measure('approve a hold (passkey verify + sealed)', async (i) => {
   const h = await w.req('DELETE', url('/repos/z/q' + i), { bearer: plain, ...anon });
   const bb = await w.req('POST', `/v1/holds/${h.body.hold_id}/approve/begin`, { cookie: u.cookie, body: {} });
