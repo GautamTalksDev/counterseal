@@ -20,6 +20,7 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | No agent or API key holder can forge a broker receipt | `source: "broker"` is set only by the broker, outside the receipt; the receipts API fills only the inner receipt and refuses unknown fields |
 | Public receipts leak nothing private | Broker receipts carry the method, the provider host, the decision, rule id, map version, two booleans, the time and the hash of the private audit entry; per-entry salted submitter commitments; never a path, query, body, key, token, account id, name, email or IP (tested) |
 | A coding agent's held command waits for your passkey (guard, not yet deployed) | The guard asks `POST /v1/approvals` with a guard key (`lsg_`) that can ask and read its own approvals, never approve; an approval covers one exact command, its agent and folder name (SHA-256 bound), once, within 10 minutes, consumed atomically. Enforced on the agent's machine: a seatbelt, not a sandbox |
+| An agent stays inside the money you gave it | Stripe refunds and payouts pass unattended only under a token's per-call and per-day caps (set with a passkey, one currency, amounts read by the map's strict form parser and held when anything is ambiguous, the day's total reserved atomically); a breaker holds the writes of a token that makes too many in an hour or repeats one request; Freeze stops every token at once and only a passkey ends it. This covers calls through Counterseal, not LLM tokens and not SQL sent over a database connection |
 | A signed reported receipt was signed by that key | Receipts keys bound to an Ed25519 signer (proof of possession naming the log and the account) accept only receipts that signer signed, with a `ts` within 10 minutes, each signature once; small-order and non-canonical keys and signatures are refused |
 
 ## Controls, mapped to OWASP Top 10 (2025) and OWASP API Security Top 10 (2023)
@@ -34,7 +35,7 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | Two hosts | Each host has its own RP ID, chosen by the request's Origin (or its URL) from that allow list; a client never names one; passkeys and challenges are refused on the other host; host-only cookies; the old host serves `/v1`, `/p` and `/app` and redirects other pages | A01, A07 |
 | Moving an account | One-time link made after a fresh passkey assertion on the old host: 32 random bytes, stored hashed, single use, bound to the account, 10 minutes, 3 an hour, in the URL fragment and POST bodies only, audited; the passkey it adds alerts the owner's devices | A07 |
 | Authorization | Every query is scoped by `account_id`; another account's holds, tokens, credentials, agent keys, receipts keys and receipts return 404 (tested) | A01, API1 |
-| Privilege separation | CLI sessions can mint tokens, register agent keys, make guard keys and deny holds, but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, turn receipts on or off, approve, deny or revoke CLI sign-ins, or delete the account | A01, A06 |
+| Privilege separation | CLI sessions can mint tokens (with a breaker if they like), register agent keys, make guard keys, deny holds and freeze the account (stopping is always safe), but cannot approve holds, pre-approve irreversible operations, set money caps, reset a tripped breaker, unfreeze, delete vaulted keys, revoke agent keys, turn receipts on or off, approve, deny or revoke CLI sign-ins, or delete the account | A01, A06 |
 | Secrets | AES-256-GCM per secret, data key wrapped by a master key (Workers secret), AAD binds account, row and provider; tokens, sessions and receipts keys stored as hashes; agent keys public only (a JWK with `d` is refused) | A04 |
 | Input | Parameterized SQL; bodies capped while streaming (16 KB for the API, 256 KB for receipts, 1 MB for the proxy); strict JSON; strict receipt schema; plain-decimal query parameters | A05, API8 |
 | SSRF | Upstream hosts fixed per provider, no redirects; push endpoints limited to known push services; the Web Bot Auth checker's directory fetch reaches only https public host names on port 443, at the fixed well-known path, no redirects, 5 s, 64 KB | A01, API7 |
@@ -153,3 +154,13 @@ validation, the exact command on the card, the long poll's zero writes, limits, 
 and with the CLI session that made it, D1 budgets) and the migration test on live-shaped data. Guard keys follow the
 second pass: they end with the CLI session that made them and are revoked with it even after it signed out, guard holds
 share the account's 100 waiting holds and its one alert a minute, and guard key events are in the audit log.
+
+## Brakes, 9 Oct 2026
+
+Money caps on Stripe refunds and payouts, a breaker per token, and Freeze (threat model S17 to S20; migration 0008, additive).
+Amounts are read by the map's own strict form parser and held when they cannot be read one way; the day's total is reserved
+with one conditional statement; only refunds and payouts can pass; caps, a breaker reset and an unfreeze need a passkey,
+while a freeze can come from any signed-in session. Not covered, and said so: LLM spend, SQL over a connection string, calls
+already in flight when a freeze lands, and a total that can reach twice the daily cap across midnight UTC.
+Tests: `server/test/brakes-money.test.js`, `brakes-breaker.test.js`, `brakes-freeze.test.js`, `brakes-headline.test.js`,
+`brakes-mcp.test.js`, and the migration test.

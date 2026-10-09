@@ -27,6 +27,7 @@
   <a href="#model">The model</a>
   <a href="#keys">How keys are protected</a>
   <a href="#approvals">How approvals work</a>
+  <a href="#brakes">Caps, breaker and Freeze</a>
   <a href="#receipts">How the public log is protected</a>
   <a href="#agentkeys">How agent keys work</a>
   <a href="#hosts">Two hosts</a>
@@ -75,6 +76,16 @@
     <li><strong>A seatbelt, not a sandbox.</strong> The guard runs on the agent's machine. An agent that edits its hook settings or wraps a command in a script is not stopped by it. Only keys kept in the vault are enforced by the server, so for a hard stop give your agent a Counterseal token instead of the real key.</li>
   </ul>
 
+  <h2 id="brakes">Money caps, the breaker and Freeze</h2>
+  <ul>
+    <li><strong>Small refunds flow, big ones wait.</strong> A token made with your passkey can let a Stripe refund or payout through without asking when it is under a per-call and a per-day cap, in one currency. Only those two calls can pass; every other money call stays held.</li>
+    <li><strong>Amounts are read the way the map reads them.</strong> The amount comes from a plain form read by the same strict parser that holds repeated and disguised parameters. A repeated, escaped or oddly spelled amount, a query string, a JSON body, a currency in another spelling, or an amount that is not a plain whole number is held, never guessed. A refund's currency and what is left come from Stripe, with your key.</li>
+    <li><strong>The day's total cannot be raced.</strong> It is reserved by one conditional statement, so two calls at once cannot both fit under a cap they would exceed together. A refusal from Stripe hands the amount back; a server error or no answer keeps it counted.</li>
+    <li><strong>A breaker for loops.</strong> A token with limits trips when it makes too many writes in an hour or repeats one exact request; its writes then wait for you and your devices are told once. Reads still pass.</li>
+    <li><strong>Freeze stops everything, and only a passkey ends it.</strong> Any signed-in session can freeze (stopping is always safe); every call of every token then answers 423 and nothing is approved. Setting caps, resetting a breaker and unfreezing need your passkey, never a command line session.</li>
+    <li><strong>Where it stops.</strong> These cover calls through Counterseal. They do not cap LLM tokens or SQL sent over a database connection, a day is the UTC calendar day (a total can reach twice the cap across midnight), and calls already in flight when you freeze finish.</li>
+  </ul>
+
   <h2 id="receipts">How the public log is protected</h2>
   <ul>
     <li><strong>Append only, one writer.</strong> The log is an RFC 6962 Merkle tree in one Durable Object, so appends are strictly in order and the tree cannot fork; each append is written in one storage transaction, so a failure leaves nothing half written.</li>
@@ -115,7 +126,7 @@
     <tr><td>Sessions</td><td><code>__Host-</code> cookie, HttpOnly, Secure, SameSite=Strict, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app with everything they made</td><td>A07</td></tr>
     <tr><td>CSRF</td><td>Web writes require the same Origin and an <code>x-leash: 1</code> header; CORS only on the public log's read endpoints</td><td>A01</td></tr>
     <tr><td>Authorization</td><td>Every query is scoped by account; another account's holds, tokens, keys, agent keys and receipts return 404 (tested)</td><td>A01, API1</td></tr>
-    <tr><td>Privilege separation</td><td>CLI sessions can mint and revoke tokens, deny holds, make and revoke guard keys, and make agent keys and receipts keys, but cannot approve holds, pre-approve irreversible operations, delete vaulted keys, revoke agent keys, turn public receipts on or off, add alert devices, remove passkeys, or approve or revoke command line sign-ins</td><td>A01, A06</td></tr>
+    <tr><td>Privilege separation</td><td>CLI sessions can mint and revoke tokens, deny holds, make and revoke guard keys, freeze the account, and make agent keys and receipts keys, but cannot approve holds, pre-approve irreversible operations, set money caps, reset a tripped breaker, unfreeze, delete vaulted keys, revoke agent keys, turn public receipts on or off, add alert devices, remove passkeys, or approve or revoke command line sign-ins</td><td>A01, A06</td></tr>
     <tr><td>Secrets</td><td>Envelope encryption with AAD per row; no API returns a secret; tokens, sessions and receipts keys stored as hashes</td><td>A04</td></tr>
     <tr><td>Injection</td><td>All SQL is parameterized; request bodies are size-capped while streaming and parsed as JSON only</td><td>A05</td></tr>
     <tr><td>SSRF</td><td>Upstream hosts fixed per provider; no redirects; push endpoints limited to known push services; the checker's directory fetch only reaches https public host names on port 443, the fixed well-known path, no redirects, 5 s, 64 KB</td><td>A01, API7</td></tr>

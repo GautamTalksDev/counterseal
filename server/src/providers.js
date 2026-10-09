@@ -127,6 +127,25 @@ function copiesOf(c, name) {
 /** any copy of these names outside a JSON body (form reading of the body, or the query string) */
 const outsideJson = (c) => c.form.some((l) => l.length) || c.query.some((l) => l.length);
 
+/** The watched parameters of a form body, read one way only: {name: value} for each name that is present, or undefined
+ * when the request cannot be read with certainty. Money caps (src/brakes.js) read amounts through this, so they see what
+ * the map sees and refuse what the map's rules would hold: a JSON or multipart body, a copy in the query string, a name
+ * repeated anywhere (also under a ";" split), an odd spelling (brackets, spaces, another case, escapes), or one name whose
+ * value differs between the ways a server may split the body. */
+export function strictForm(body, search, names) {
+  const c = paramCopies(body, search, names);
+  if (!c || c.j !== undefined || c.json.length || c.query.some((l) => l.length)) return undefined;
+  const out = {};
+  for (const n of names) {
+    const { all, n: k } = copiesOf(c, n);
+    if (k > 1 || all.some((x) => x.odd)) return undefined;
+    if (!all.length) continue;
+    if (new Set(all.map((x) => x.value)).size > 1) return undefined;
+    out[n] = all[0].value;
+  }
+  return out;
+}
+
 // Some servers let a POST say which method it really is (Rack and Laravel read `_method` from a form body, Symfony also
 // from the query string). LEASH matches rules on the real method, so a request carrying `_method` anywhere a server
 // might read it is held on every provider, and it cannot be pre-approved. Override headers (X-HTTP-Method-Override and

@@ -43,10 +43,54 @@ $('register').onclick = async () => {
 $('login').onclick = async () => { try { await ceremony('/v1/auth/login/begin', '/v1/auth/login/finish'); boot(); } catch (e) { toast(e.message); } };
 $('logout').onclick = async () => { await api('POST', '/v1/auth/logout', {}); location.reload(); };
 
+// ---- Brakes: amounts with the currency's own decimals (the same table as the server's, server/src/money.js), Freeze
+const ZERO = new Set('bif clp djf gnf jpy kmf krw mga pyg rwf vnd vuv xaf xof xpf'.split(' '));
+const THREE = new Set('bhd jod kwd omr tnd'.split(' '));
+const exponent = (cur) => (ZERO.has(cur) ? 0 : THREE.has(cur) ? 3 : 2);
+/** 124000 usd -> "1,240.00 USD" (whole numbers only; never a float) */
+function fmtMinor(amount, cur) {
+  const e = exponent(cur), s = String(amount).padStart(e + 1, '0');
+  return `${(e ? s.slice(0, -e) : s).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${e ? '.' + s.slice(-e) : ''} ${cur.toUpperCase()}`;
+}
+/** "50.00" in a currency -> its smallest unit as a whole number, or null if it is not an amount in that currency */
+function toMinor(text, cur) {
+  const e = exponent(cur), m = /^(\d{1,12})(?:\.(\d{1,3}))?$/.exec(text.trim());
+  if (!m || (m[2] || '').length > e) return null;
+  const n = Number(m[1] + (m[2] || '').padEnd(e, '0'));
+  return Number.isSafeInteger(n) && n >= 1 ? n : null;
+}
+const HOLD_BADGE = { 'brake.tripped': 'Breaker tripped', 'brake.money-per-call': 'Over a cap', 'brake.money-per-day': 'Over a cap', 'brake.money-currency': 'Wrong currency', 'brake.money-unreadable': 'Not readable' };
+const TRIP_WHY = { writes_per_hour: 'too many writes in an hour', repeat: 'the same request again and again' };
+/** what a token's brakes say, in words: one line each */
+function brakesLines(x, spent) {
+  const l = x.policy.limits, m = x.policy.money, out = [];
+  if (l && l.writesPerHour) out.push(`Breaker: trips after ${l.writesPerHour} write${l.writesPerHour === 1 ? '' : 's'} in an hour.`);
+  if (l && l.repeatsPer5Min) out.push(`Breaker: trips when the same request is sent more than ${l.repeatsPer5Min} times in 5 minutes.`);
+  if (m) out.push(`Money caps: Stripe refunds and payouts pass up to ${fmtMinor(m.perCall, m.currency)} a call and ${fmtMinor(m.perDay, m.currency)} a UTC day. Let through today: ${fmtMinor((spent && spent[m.currency]) || 0, m.currency)}.`);
+  return out;
+}
+/** the bar at the top: Freeze is always on screen, and while frozen it says so and offers the passkey way out */
+let frozenNow = false;
+function freezeBar(at) {
+  const on = !!at;
+  frozenNow = on;
+  $('freezeBar').classList.toggle('on', on);
+  $('fzTitle').textContent = on ? `Frozen since ${new Date(at).toLocaleTimeString()}` : 'Agents are running';
+  $('fzSub').textContent = on ? 'Every agent token is refused (423) and nothing is approved. Only your passkey ends it.' : 'One tap stops every agent token. Only your passkey starts them again.';
+  $('freezeBtn').hidden = on; $('unfreezeBtn').hidden = !on;
+}
+$('freezeBtn').onclick = async () => {
+  try { const r = await api('POST', '/v1/me/freeze', {}); freezeBar(r.frozen_at); toast('Frozen. Every agent token is stopped.'); load(); } catch (e) { toast(e.message); }
+};
+$('unfreezeBtn').onclick = async () => {
+  try { await ceremony('/v1/me/unfreeze/begin', '/v1/me/unfreeze/finish'); freezeBar(null); toast('Unfrozen. Your agents can work again.'); load(); } catch (e) { toast(e.message); }
+};
+
 // ---- data
 let meta;
 async function load() {
   const [c, t, h, a, ak, me] = await Promise.all([api('GET', '/v1/credentials'), api('GET', '/v1/tokens'), api('GET', '/v1/holds'), api('GET', '/v1/audit'), api('GET', '/v1/agent-keys'), api('GET', '/v1/me')]);
+  freezeBar(me.account.frozen_at);
   // holds
   const H = $('holds');
   // keep the cursor in a deny reason being typed across the refresh
@@ -71,7 +115,19 @@ async function load() {
     const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke' });
     rv.onclick = async () => { await api('DELETE', `/v1/tokens/${x.id}`); load(); };
     const bound = x.agent_key ? `, signed by ${x.agent_key_label}${x.agent_key_revoked ? ' (key revoked: token stopped)' : ''}` : '';
-    T.append(el('div', {}, el('span', {}, el('b', { textContent: x.label }), el('span', { className: 'dim', textContent: `  ${x.provider}, expires ${new Date(x.expires_at).toLocaleDateString()}${x.policy.unattendedIrreversible.length ? ', has pre-approvals' : ''}${bound}` })), rv));
+    const brakes = brakesLines(x, x.spent_today);
+    // a tripped breaker: its writes are waiting; a passkey resets it
+    let rs = null;
+    if (x.tripped_at) {
+      rs = el('button', { className: 'btn sm pri', textContent: 'Reset with passkey' });
+      rs.onclick = async () => { try { await ceremony(`/v1/tokens/${x.id}/reset/begin`, `/v1/tokens/${x.id}/reset/finish`); toast('Reset. This token\'s writes flow again.'); load(); } catch (e) { toast(e.message); } };
+    }
+    T.append(el('div', {},
+      el('span', {}, el('b', { textContent: x.label }), x.tripped_at ? el('span', { className: 'badge dan', textContent: 'Tripped' }) : null,
+        el('span', { className: 'dim', textContent: `  ${x.provider}, expires ${new Date(x.expires_at).toLocaleDateString()}${x.policy.unattendedIrreversible.length ? ', has pre-approvals' : ''}${bound}` }),
+        x.tripped_at ? el('span', { className: 'dim brk tripped', textContent: `Tripped at ${new Date(x.tripped_at).toLocaleTimeString()} (${TRIP_WHY[x.tripped_why] || 'a limit'}). Its writes wait for you; reads still pass.` }) : null,
+        ...brakes.map((t) => el('span', { className: 'dim brk', textContent: t }))),
+      el('span', { className: 'acts' }, rs, rv)));
   }
   $('noTokens').hidden = t.tokens.some((y) => !y.revoked);
   // agent keys
@@ -107,6 +163,7 @@ function holdCard(x) {
   const guard = kind !== 'proxy';
   const ok = el('button', { className: 'btn pri', type: 'button', textContent: 'Approve with passkey' });
   const no = el('button', { className: 'btn dan', type: 'button', textContent: 'Deny' });
+  if (frozenNow) { ok.disabled = true; ok.title = 'Unfreeze first: nothing is approved while frozen.'; }
   ok.onclick = async () => {
     try { await ceremony(`/v1/holds/${x.id}/approve/begin`, `/v1/holds/${x.id}/approve/finish`); toast(guard ? 'Approved. The agent can run that exact command once, within 10 minutes.' : 'Approved. The agent can retry that exact request once.'); load(); } catch (e) { toast(e.message); }
   };
@@ -137,8 +194,9 @@ function holdCard(x) {
     : null;
   return el('div', { className: 'hold' + (guard ? ' hold-guard' : ''), id: 'hold-' + x.id },
     el('div', { className: 'hold-top' },
-      el('span', { className: 'badges' }, el('span', { className: 'badge warn', textContent: 'Held' }), el('span', { className: 'badge kind', textContent: KIND[kind] })),
+      el('span', { className: 'badges' }, el('span', { className: 'badge warn', textContent: HOLD_BADGE[x.rule] || 'Held' }), el('span', { className: 'badge kind', textContent: KIND[kind] })),
       el('span', { className: 'dim mono', textContent: `${who}${guard && x.agent && x.agent !== who ? ' (' + x.agent + ')' : ''}  ${new Date(x.created_at).toLocaleTimeString()}` })),
+    x.headline ? el('div', { className: 'amount', textContent: x.headline }) : null, // a held Stripe refund or payout: its amount first, in large type
     guard
       ? el('div', { className: 'what' }, el('span', { className: 'agent', textContent: x.agent || 'agent' }), ` ${WANTS[kind]}${where ? ', ' + where : ''}:`)
       : el('div', { className: 'what', textContent: `${x.method} ${x.host}${x.path}` }),
@@ -149,11 +207,36 @@ function holdCard(x) {
     reasonRow);
 }
 
+/** the Brakes fields of the new token form: {limits?, money?}, or throws an Error saying what to fix */
+function brakesFromForm() {
+  const out = {}, whole = (id, lo, hi, what) => {
+    const v = $(id).value.trim(); if (!v) return null;
+    const n = /^\d{1,5}$/.test(v) ? Number(v) : NaN;
+    if (!(n >= lo && n <= hi)) throw new Error(`${what} must be a whole number from ${lo} to ${hi}.`);
+    return n;
+  };
+  const w = whole('brWrites', 1, 5000, 'Writes an hour'), r = whole('brRepeats', 2, 100, 'The repeat limit');
+  if (w || r) out.limits = { ...(w ? { writesPerHour: w } : {}), ...(r ? { repeatsPer5Min: r } : {}) };
+  const cur = $('brCur').value.trim().toLowerCase(), call = $('brCall').value.trim(), day = $('brDay').value.trim();
+  if (cur || call || day) {
+    if (!/^[a-z]{3}$/.test(cur)) throw new Error('Money caps need a currency of three letters, like usd.');
+    const pc = toMinor(call, cur), pd = toMinor(day, cur);
+    if (pc === null || pd === null) throw new Error(`Type the caps as amounts in ${cur.toUpperCase()}${exponent(cur) ? ` with up to ${exponent(cur)} decimals` : ', without decimals'}, like ${exponent(cur) ? '50.00' : '5000'}.`);
+    if (pd < pc) throw new Error('The daily cap must be at least the per-call cap.');
+    out.money = { currency: cur, perCall: pc, perDay: pd };
+    $('brHint').textContent = `That is ${pc} and ${pd} in ${cur.toUpperCase()}'s smallest unit (what Stripe's API counts in).`;
+  }
+  return out;
+}
 async function mint(pre) {
   try {
     let policy;
     const raw = $('policy').value.trim();
     if (raw) policy = JSON.parse(raw);
+    const brakes = brakesFromForm();
+    if (brakes.limits || brakes.money) policy = { ...(policy || {}), ...brakes };
+    // money caps loosen holds, so they are only ever set with the passkey
+    if (brakes.money) pre = true;
     const body = { credentialId: $('tokCred').value, label: $('tokLabel').value.trim() || 'agent', policy, ...($('tokAgentKey').value ? { agentKeyId: $('tokAgentKey').value } : {}) };
     const r = pre ? await ceremony('/v1/tokens/passkey/begin', '/v1/tokens/passkey/finish', body) : await api('POST', '/v1/tokens', body);
     $('newToken').hidden = false;
@@ -192,8 +275,10 @@ function show(view) {
 }
 for (const a of document.querySelectorAll('#snav a')) a.onclick = (e) => { e.preventDefault(); show(a.dataset.view); };
 
-// ---- deep links: #hold=<id>, #device (command line sign-in), #cli=<id> (the alert after one)
+// ---- deep links: #hold=<id>, #device (command line sign-in), #cli=<id> (the alert after one), #freeze (the alert's
+// Freeze button could not freeze: this only brings you to the button, it never presses it)
 function route() {
+  if (location.hash === '#freeze') { window.scrollTo(0, 0); ($('freezeBtn').hidden ? $('unfreezeBtn') : $('freezeBtn')).focus(); }
   const hm = location.hash.match(/^#hold=([0-9a-f]{24})$/);
   if (hm) show('holds');
   // the alert after a passkey was added opens the passkey list

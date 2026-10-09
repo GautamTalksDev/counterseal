@@ -104,7 +104,32 @@ sequenceDiagram
 
 A token can carry `unattendedIrreversible` rules for calls an agent may run unattended, **but only a passkey holder can mint
 such a token**. A CLI session cannot, because an agent running on the same laptop can read the CLI's config file. The same
-goes for approving holds (a coding agent's commands included), revoking agent keys and turning public receipts off.
+goes for approving holds (a coding agent's commands included), revoking agent keys and turning public receipts off, and for everything that loosens a brake
+(below): setting money caps, resetting a tripped breaker and unfreezing. Stopping things never needs a passkey.
+
+### Brakes
+
+Three ways to keep an agent small. They apply to calls that go through Counterseal (Stripe refunds and payouts, and writes in
+general). They do not cap LLM tokens, and they do not cover SQL sent straight over a database connection.
+
+- **Money caps.** A token made with your passkey can carry `"money": {"currency": "usd", "perCall": 5000, "perDay": 20000}`
+  (whole numbers of the currency's smallest unit: 50.00 and 200.00 USD). A Stripe refund or payout under both caps passes
+  without asking. Above them, your phone asks for a passkey, with the amount in large type. Only `POST /v1/refunds` and
+  `POST /v1/payouts` can pass, in that one currency, as a plain form that reads one way: a repeated, escaped or
+  ambiguous amount, a query string, a JSON body or an unfamiliar currency spelling is held, and so is every other money
+  call (transfers, charges, top-ups, confirms). A refund without an amount means everything left on the charge, which
+  Counterseal asks Stripe about with your key. The day is the UTC calendar day, and calls you approve are yours: they are
+  not counted. The rest of the token's policy still applies (an allow list or a hold rule that leaves the refund out keeps
+  it held).
+- **Breaker.** `"limits": {"writesPerHour": 200, "repeatsPer5Min": 3}`, which any session may set. A write is any request that
+  is not a GET or HEAD. Past a limit the token trips: its writes wait until a passkey resets it, reads still pass, and
+  your devices are told once. `repeatsPer5Min: 3` trips on the fourth identical request (same method, path, query, content
+  type and body) within 5 minutes.
+- **Freeze.** One tap in the app, `leashcli freeze`, or the Freeze button on a phone alert stops every agent token
+  (HTTP 423), voids approvals nobody used yet and pauses approving. Any signed-in session can freeze; only a passkey in the
+  app unfreezes.
+
+A token without `limits` and `money` costs no extra database writes. See the [policy reference](docs/POLICY.md).
 
 ## Quickstart
 
@@ -140,7 +165,8 @@ link (Account, "Move with passkey") that adds a counterseal passkey to the same 
 ```
 
 The `leash_request` tool lets the agent call any configured API. When a call is held, the tool result tells the agent to
-stop, give you the approve link, and retry the identical call after you approve.
+stop, give you the approve link, and retry the identical call after you approve. APIs that take a form instead of JSON
+(Stripe) use the tool's `form` field; `leashcli mcp` sends it as `application/x-www-form-urlencoded`.
 
 ### Give the agent its own key (Prove who)
 
@@ -229,6 +255,7 @@ server/        Cloudflare Worker: API, proxy, vault, WebAuthn, policy, audit, th
   src/ledger.js      receipts: the public log API, the receipts API, broker receipts
   src/agentkeys.js   agent keys: proof of possession, RFC 9421 broker signatures
   src/approvals.js   the Approvals API and guard keys: approvals for a coding agent's commands and tool calls
+  src/brakes.js      money caps, the breaker and Freeze (src/money.js: how amounts are read and shown)
   test/              node:test suite: virtual passkeys, fake upstream, migration on data from the live code
   bench/cpu.mjs      CPU of the hot paths
   dev/local.js       full local server on node:sqlite
@@ -249,12 +276,12 @@ node dev/local.js 8790                          # http://localhost:8790 (passkey
 
 ## Deploy
 
-See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), four additive migrations (0004, 0005, 0006, 0010), `wrangler deploy`.
+See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), five additive migrations (0004, 0005, 0006, 0008, 0010), `wrangler deploy`.
 
 ## Status and roadmap
 
 Brokers GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify; phone and desktop alerts for held calls (Web Push,
-payload-free); public receipts; agent keys. In this repo, not yet deployed: the Approvals API and guard keys for a
+payload-free); public receipts; agent keys; money caps, a breaker and Freeze. In this repo, not yet deployed: the Approvals API and guard keys for a
 coding agent's commands. Next: AWS (SigV4 re-signing), PlanetScale; two-person
 approval; SSO for teams; external witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
 

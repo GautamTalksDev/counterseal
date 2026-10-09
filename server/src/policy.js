@@ -1,7 +1,10 @@
 // Token policy. A token can only narrow what its credential can do; it never widens it.
 // Order: deny > irreversible map (held unless pre-approved by a passkey holder) > hold > allow > default.
+// Brakes (src/brakes.js) sit around this: a frozen account and a tripped token are checked first, and money caps may
+// let a Stripe refund or payout through the map, but only if everything after the map (hold, allow, default) agrees.
 import { HttpError } from './util.js';
 import { globMatch, globToRe, irreversibleRule, matchPath, PROVIDERS } from './providers.js';
+import { normaliseBrakes } from './money.js';
 
 const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
@@ -46,6 +49,11 @@ export function normalisePolicy(p, byPasskey) {
     unattendedIrreversible: rules(p.unattendedIrreversible, 'unattendedIrreversible'),
   };
   if (out.unattendedIrreversible.length && !byPasskey) throw new HttpError(403, 'passkey_required', 'Only a passkey holder can let irreversible operations through without approval.');
+  // Brakes. `limits` (the breaker) only narrows, so any session may set it. `money` loosens (below its caps, Stripe
+  // refunds and payouts pass unattended), so like unattendedIrreversible only a passkey ceremony can set it.
+  const { limits, money } = normaliseBrakes(p, byPasskey);
+  out.limits = limits;
+  out.money = money;
   return out;
 }
 
@@ -66,6 +74,15 @@ export function decide(policy, provider, method, canon, body, search = '') {
     if (!irr.always && hit(policy.unattendedIrreversible, [method], path)) return { decision: 'allow', rule: irr.id + ':preapproved', why: irr.why };
     return { decision: 'hold', rule: irr.id, why: irr.why };
   }
+  return afterMap(policy, provider, method, canon);
+}
+
+/** The part of decide() after the irreversible map: hold rules, the allow list and the default. Money caps use it to ask
+ * "would this token's own policy let this call through?" before turning a map hold into an allow. */
+export function afterMap(policy, provider, method, canon) {
+  const ci = !!PROVIDERS[provider]?.ci, path = matchPath(provider, canon);
+  const hit = (list, m, p) => hitRaw(list, m, p, ci);
+  const strict = method === 'HEAD' ? ['HEAD', 'GET'] : [method];
   if (hit(policy.hold, strict, path)) return { decision: 'hold', rule: 'policy.hold', why: 'Your policy asks for approval on this endpoint.' };
   if (policy.allow.length) {
     if (hit(policy.allow, [method], path)) return { decision: 'allow', rule: 'policy.allow', why: '' };

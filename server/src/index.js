@@ -17,6 +17,7 @@ import { logKey } from './note.js';
 import { directoryTool } from './tools.js';
 import { stats, checkStatsToken, markSeen } from './admin.js';
 import * as Move from './move.js';
+import * as Brakes from './brakes.js';
 import { BRAND } from './brand.js';
 export { ReceiptLog } from './log.js';
 
@@ -74,10 +75,21 @@ const ROUTES = [
   // command line sessions: list (any session), revoke one and everything it made (web session only)
   ['GET', /^\/v1\/sessions$/, 'session', (c) => A.listCliSessions(c.env, c.s)],
   ['DELETE', /^\/v1\/sessions\/([0-9a-f]{24})$/, 'webw', (c) => A.revokeCliSession(c.env, c.s, c.m[1])],
-  // what a phone shows after a payload-free push: held requests, and command line sign-ins of the last 15 minutes
-  ['GET', /^\/v1\/alerts$/, 'session', async (c) => ({ holds: (await B.listHolds(c.env, c.s, 'pending')).holds, signins: await A.recentCliSignins(c.env, c.s.accountId), passkeys: await Move.recentPasskeys(c.env, c.s.accountId) })],
+  // what a phone shows after a payload-free push: held requests, command line sign-ins and passkeys added in the last
+  // 15 minutes, and whether the account is frozen (and since when)
+  ['GET', /^\/v1\/alerts$/, 'session', async (c) => ({
+    holds: (await B.listHolds(c.env, c.s, 'pending')).holds, signins: await A.recentCliSignins(c.env, c.s.accountId), passkeys: await Move.recentPasskeys(c.env, c.s.accountId),
+    frozen_at: (await c.env.DB.prepare('SELECT frozen_at FROM accounts WHERE id = ?').bind(c.s.accountId).first())?.frozen_at ?? null,
+  })],
+  // Brakes. Freeze: any signed-in session (stopping is always safe). Unfreeze and resetting a tripped breaker: a web
+  // session and a fresh passkey ceremony, never a command line session.
+  ['POST', /^\/v1\/me\/freeze$/, 'write', (c) => Brakes.freeze(c.env, c.s)],
+  ['POST', /^\/v1\/me\/unfreeze\/begin$/, 'webw', (c) => Brakes.unfreezeBegin(c.env, c.s)],
+  ['POST', /^\/v1\/me\/unfreeze\/finish$/, 'webw', (c) => Brakes.unfreezeFinish(c.env, c.s, c.body)],
+  ['POST', new RegExp(`^/v1/tokens/${ID}/reset/begin$`), 'webw', (c) => Brakes.resetBegin(c.env, c.s, c.m[1])],
+  ['POST', new RegExp(`^/v1/tokens/${ID}/reset/finish$`), 'webw', (c) => Brakes.resetFinish(c.env, c.s, c.m[1], c.body)],
   ['GET', /^\/v1\/me$/, 'session', async (c) => {
-    const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan FROM accounts WHERE id = ?').bind(c.s.accountId).first();
+    const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan, frozen_at FROM accounts WHERE id = ?').bind(c.s.accountId).first();
     const u = await usageOf(c.env, c.s.accountId);
     const { receipts, ...rest } = account || {};
     return {
@@ -183,6 +195,7 @@ async function deleteAccount(env, s, body) {
   await forgetAccount(env, id);
   await env.DB.batch([
     ...deleteStatements(env.DB, id),
+    ...Brakes.deleteStatements(env.DB, id), // their tokens' daily totals and breaker windows, before the tokens go
     ...['push_subs', 'holds', 'guard_keys', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
     env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id),
   ]);
@@ -196,7 +209,7 @@ const SECURITY_EVENTS = new Set(['api_key_required', 'api_key_invalid', 'csrf', 
   'challenge_expired', 'bad_challenge', 'bad_origin', 'bad_rp', 'user_verification_required', 'too_large', 'quota', 'daily_quota', 'log_at_capacity',
   'not_configured', 'log_key_invalid', 'log_key_changed', 'token_invalid', 'agent_signature_required', 'bad_agent_signature', 'agent_signature_replayed',
   'agent_key_revoked', 'passkey_required', 'bad_proof', 'key_taken', 'code_not_found', 'bad_user_code', 'too_many_holds',
-  'guard_key_required', 'guard_key_invalid', 'hash_mismatch']);
+  'guard_key_required', 'guard_key_invalid', 'hash_mismatch', 'account_frozen']);
 const logPath = (url) => url.pathname.startsWith('/p/') ? url.pathname.split('/').slice(0, 3).join('/') + '/...' : url.pathname.replace(/\/[0-9a-f]{24}(?=\/|$)/g, '/:id');
 function securityLog(e, request, url) {
   if (!(e instanceof HttpError) || !SECURITY_EVENTS.has(e.code)) return;
@@ -297,7 +310,7 @@ export async function handle(request, rawEnv, opts = {}) {
 
 // Expired rows are always rejected at read time; this only tidies them away. There is no cron (the account's five cron
 // triggers are used by other Workers): it runs on about 1 in 50 requests, and after sign-ins and sign-ups at most every
-// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 14 statements.
+// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 14 statements (D1 allows 50).
 export async function sweep(env, t = Date.now()) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM challenges WHERE expires_at < ?').bind(t),
@@ -310,6 +323,7 @@ export async function sweep(env, t = Date.now()) {
     // request previews are only needed while a human is deciding; drop them a day after the hold is closed
     env.DB.prepare("UPDATE holds SET preview = NULL WHERE preview IS NOT NULL AND status NOT IN ('pending','approved') AND expires_at < ?").bind(t - 86400_000),
     ...cleanupStatements(env.DB, t),
+    ...Brakes.sweepStatements(env.DB, t), // breaker windows that ended, daily money totals older than 35 days
   ]);
 }
 let lastSweep = 0;

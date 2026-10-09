@@ -7,6 +7,7 @@
 //   leash token <credentialId> [--label x] [--policy file.json] [--ttl hours] [--agent-key <id>]
 //   leash agent-key [file] [--label x]  make an Ed25519 agent key (private key stays in the file) and register it
 //   leash agent-keys                 list agent keys
+//   leash freeze                     stop every agent token on the account at once (unfreezing needs your passkey, in the app)
 //   leash watch                      print new holds with their approve links as they happen
 //   leash mcp                        MCP server over stdio; set LEASH_TOKENS="github=lsh_...,railway=lsh_..."
 //                                    and, for tokens bound to an agent key, LEASH_AGENT_KEY=<path to the key file>
@@ -59,6 +60,29 @@ function hidden(prompt) {
 const flag = (args, name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const table = (rows, cols) => { for (const r of rows) console.log(cols.map((c) => String(r[c] ?? '')).join('  ')); };
 
+/** a form body the way Stripe reads it: name=value pairs in the order given, an object one level down as name[key], a list
+ * as name[0]. Names are plain words (nothing that could be read as two parameters), values are strings, numbers or booleans. */
+const NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+function formEncode(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error('form must be an object of fields.');
+  const p = new URLSearchParams();
+  const put = (k, v) => {
+    if (v === null || v === undefined) return;
+    if (!['string', 'number', 'boolean'].includes(typeof v) || (typeof v === 'number' && !Number.isFinite(v))) throw new Error(`form field ${k} must be a string, number or boolean.`);
+    p.append(k, String(v));
+  };
+  for (const [k, v] of Object.entries(o)) {
+    if (!NAME.test(k)) throw new Error(`form field name ${JSON.stringify(k.slice(0, 40))} is not a plain word.`);
+    if (v && typeof v === 'object') {
+      for (const [k2, v2] of Object.entries(v)) {
+        if (!NAME.test(k2)) throw new Error(`form field name ${JSON.stringify(k2.slice(0, 40))} is not a plain word.`);
+        put(`${k}[${k2}]`, v2);
+      }
+    } else put(k, v);
+  }
+  return p.toString();
+}
+
 // ---------------------------------------------------------------- MCP (JSON-RPC 2.0 over stdio, newline-delimited)
 function mcp() {
   const tokens = Object.fromEntries((process.env.LEASH_TOKENS || '').split(',').map((s) => s.trim().split('=')).filter((p) => p.length === 2 && /^lsh_/.test(p[1])));
@@ -72,7 +96,7 @@ function mcp() {
   const send = (m) => process.stdout.write(JSON.stringify(m) + '\n');
   const tools = [{
     name: 'leash_request',
-    description: 'Call a cloud API (' + (providers.join(', ') || 'none configured') + ') through the broker. You never hold the real key. Irreversible operations (deleting data, force pushes, moving money, destructive SQL) are HELD for human approval: if the result says held_for_approval, stop, tell the human the approve_url, and after they approve, retry the exact same call once. Do not try another route around a hold.',
+    description: 'Call a cloud API (' + (providers.join(', ') || 'none configured') + ') through the broker. You never hold the real key. Irreversible operations (deleting data, force pushes, moving money, destructive SQL) are HELD for human approval: if the result says held_for_approval, stop, tell the human the approve_url, and after they approve, retry the exact same call once. Do not try another route around a hold. If the result says account_frozen, your human has stopped every agent: stop, tell them, and do not retry. A hold whose rule starts with brake. means a limit was reached: the same, stop and ask your human.',
     inputSchema: {
       type: 'object', additionalProperties: false, required: ['provider', 'method', 'path'],
       properties: {
@@ -81,6 +105,7 @@ function mcp() {
         path: { type: 'string', description: 'API path, e.g. /repos/acme/app/issues (GitHub), /zones (Cloudflare, without /client/v4)' },
         query: { type: 'object', additionalProperties: { type: 'string' } },
         body: { description: 'JSON body for POST/PUT/PATCH' },
+        form: { type: 'object', description: 'Form fields for POST/PUT/PATCH to an API that takes a form, not JSON (Stripe). Use this or body, not both. Values are strings, numbers or booleans; an object one level down is sent as name[key], a list as name[0], name[1].' },
       },
     },
   }];
@@ -101,8 +126,12 @@ function mcp() {
         if (typeof a.path !== 'string' || !a.path.startsWith('/') || a.path.length > 2000) return send({ jsonrpc: '2.0', id, result: { isError: true, content: [{ type: 'text', text: 'path must start with /' }] } });
         const qs = a.query && typeof a.query === 'object' ? '?' + new URLSearchParams(a.query).toString() : '';
         const url = new URL(`${server()}/p/${a.provider}${a.path}${qs}`).href;
-        const body = a.body !== undefined && a.method !== 'GET' ? JSON.stringify(a.body) : undefined;
-        const headers = { authorization: `Bearer ${tok}`, accept: 'application/json', ...(a.body !== undefined ? { 'content-type': 'application/json' } : {}) };
+        if (a.body !== undefined && a.form !== undefined) return send({ jsonrpc: '2.0', id, result: { isError: true, content: [{ type: 'text', text: 'Send body (JSON) or form, not both.' }] } });
+        let form;
+        if (a.form !== undefined) { try { form = formEncode(a.form); } catch (e) { return send({ jsonrpc: '2.0', id, result: { isError: true, content: [{ type: 'text', text: e.message }] } }); } }
+        const body = a.method === 'GET' ? undefined : form !== undefined ? form : a.body !== undefined ? JSON.stringify(a.body) : undefined;
+        const ctype = form !== undefined ? 'application/x-www-form-urlencoded' : a.body !== undefined ? 'application/json' : undefined;
+        const headers = { authorization: `Bearer ${tok}`, accept: 'application/json', ...(ctype ? { 'content-type': ctype } : {}) };
         if (signer) Object.assign(headers, await signBrokerRequest({ method: a.method, url, body, contentType: headers['content-type'] }, await signer));
         const r = await fetch(url, { method: a.method, redirect: 'error', headers, body });
         let text = await r.text();
@@ -172,6 +201,12 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli
       break;
     }
     case 'revoke': await api('DELETE', `/v1/tokens/${args[0]}`); console.log('Revoked.'); break;
+    case 'freeze': {
+      // stopping is always safe, so any signed-in session can do it; only a passkey in the app can undo it
+      const r = await api('POST', '/v1/me/freeze', {});
+      console.log(`${r.already ? 'Already frozen' : 'Frozen'}: every agent token on this account is stopped (HTTP 423) until you unfreeze it with your passkey at ${server()}/app. This command line cannot unfreeze.`);
+      break;
+    }
     case 'holds': table((await api('GET', '/v1/holds')).holds, ['id', 'method', 'host', 'path', 'rule']); break;
     case 'watch': {
       const seen = new Set();
@@ -198,7 +233,7 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli
     case 'mcp': mcp(); break;
     case '--version': case '-v': console.log(VERSION); break;
     default:
-      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token <credentialId> [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | holds | watch | agent-key [file] [--label] | agent-keys | mcp');
+      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token <credentialId> [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp');
   }
 } catch (e) {
   die(`leash: ${e.message}`);

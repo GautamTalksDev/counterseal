@@ -32,6 +32,7 @@
   <a href="#held">When a call is held</a>
   <a href="#guard">Approvals for commands</a>
   <a href="#policy">Token policies</a>
+  <a href="#brakes">Brakes</a>
   <a href="#providers">Providers and the map</a>
   <b>Record</b>
   <a href="#receipts">Receipts: the public log</a>
@@ -90,7 +91,7 @@ npx leashcli token &lt;key-id&gt; --label coding-agent</pre></li>
     }
   }
 }</pre>
-  <p>The tool tells the agent that held calls need a human, so a well-behaved agent stops and gives you the approval link instead of looking for another way in.</p>
+  <p>The tool tells the agent that held calls need a human, so a well-behaved agent stops and gives you the approval link instead of looking for another way in. For an API that takes a form instead of JSON (Stripe), the tool has a <code>form</code> field next to <code>body</code>: <code>{"charge": "ch_...", "amount": 2500}</code> is sent as <code>application/x-www-form-urlencoded</code> (from leashcli 0.2.1).</p>
 
   <h2 id="proxy">Calling through the proxy</h2>
   <p>Any agent, script or SDK can call the broker directly. Swap the provider's base URL for the proxy and the real key for your token:</p>
@@ -155,6 +156,8 @@ curl -s https://counterseal.gautamkhosla.com/v1/approvals/&lt;id&gt;/use \
     <tr><td><code>readOnly</code></td><td>Only GET and HEAD.</td></tr>
     <tr><td><code>perMinute</code></td><td>Rate limit for this token, 1 to 600. Default 120.</td></tr>
     <tr><td><code>unattendedIrreversible</code></td><td>Irreversible calls allowed without approval. Can only be set with your passkey, in the app.</td></tr>
+    <tr><td><code>limits</code></td><td>The breaker: <code>writesPerHour</code> (1 to 5000) and <code>repeatsPer5Min</code> (2 to 100). Any session may set it. See <a href="#brakes">Brakes</a>.</td></tr>
+    <tr><td><code>money</code></td><td>Money caps for Stripe refunds and payouts: <code>currency</code>, <code>perCall</code>, <code>perDay</code>. Can only be set with your passkey. See <a href="#brakes">Brakes</a>.</td></tr>
   </table>
   <p>A rule is <code>{ "method": "GET", "path": "/glob" }</code>. <code>*</code> matches one path segment, <code>**</code> any depth, <code>{a,b}</code> alternatives. Paths are relative to the provider's API base. Evaluation order: deny, readOnly, the irreversible map, hold, allow, default.</p>
   <h3>Recipes</h3>
@@ -162,6 +165,26 @@ curl -s https://counterseal.gautamkhosla.com/v1/approvals/&lt;id&gt;/use \
   <pre>{ "readOnly": true, "allow": [{ "path": "/repos/acme/**" }, { "path": "/orgs/acme/**" }] }</pre>
   <p>Hold every write to Stripe, not just the money-moving ones:</p>
   <pre>{ "allow": [{ "method": "GET", "path": "/v1/**" }], "default": "hold" }</pre>
+
+  <h2 id="brakes">Brakes: money caps, a breaker and Freeze</h2>
+  <p>Three ways to keep an agent small. They cover calls that go through Counterseal, not LLM tokens, and not SQL sent straight over a database connection.</p>
+  <h3>Money caps</h3>
+  <p>Let a support agent refund small amounts without asking and wait for your passkey above that. Set <code>money</code> when you make the token with your passkey (in the app: Create with passkey). Amounts are whole numbers of the currency's smallest unit, as Stripe counts them: <code>5000</code> is 50.00 USD, 5,000 JPY or 50.000 KWD.</p>
+  <pre>{ "money": { "currency": "usd", "perCall": 5000, "perDay": 20000 } }</pre>
+  <p>A <code>POST /v1/refunds</code> or <code>POST /v1/payouts</code> passes without asking when it is a plain form, its amount is a whole number written the usual way, it is in that currency, it is at most <code>perCall</code>, and the day's total (UTC) stays at most <code>perDay</code>. For a refund, Counterseal asks Stripe, with your key, what currency the charge is in and what is left of it; a refund without <code>amount</code> counts as everything left. Anything else is held, with the arithmetic in the preview and the amount in large type:</p>
+  <table>
+    <tr><th>Rule id</th><th>Held because</th></tr>
+    <tr><td><code>brake.money-unreadable</code></td><td>The amount or currency cannot be read with certainty (a repeated, escaped or oddly spelled parameter, a query string, a JSON body, an amount that is not a plain whole number, a charge Stripe did not answer for).</td></tr>
+    <tr><td><code>brake.money-currency</code></td><td>The call is in another currency than the caps.</td></tr>
+    <tr><td><code>brake.money-per-call</code></td><td>Over <code>perCall</code>.</td></tr>
+    <tr><td><code>brake.money-per-day</code></td><td>Today's total plus this call would be over <code>perDay</code>.</td></tr>
+  </table>
+  <p>A call that passes is recorded with the rule <code>st.money:capped</code>; its amount is in your audit log and never in the public receipt. Transfers, charges, top-ups, confirms and captures, and anything not spelled exactly <code>/v1/refunds</code> or <code>/v1/payouts</code>, stay held. What you approve is yours and is not counted against the day. When Stripe refuses a call (a 4xx) the amount is handed back; after a 5xx or no answer it stays counted.</p>
+  <h3>Breaker</h3>
+  <pre>{ "limits": { "writesPerHour": 200, "repeatsPer5Min": 3 } }</pre>
+  <p>Any session may set <code>limits</code>. A write is any request that is not a GET or HEAD. When a token makes more than <code>writesPerHour</code> writes in an hour, or sends the same exact request (method, path, query, content type and body) more than <code>repeatsPer5Min</code> times in 5 minutes, it trips: that write and every later one is held with rule <code>brake.tripped</code> until you reset the token with your passkey (Agent tokens, Reset), and reads keep passing. Your devices are told once. A token with neither limit costs nothing extra.</p>
+  <h3>Freeze</h3>
+  <p>The Freeze bar at the top of the app, <code>leash freeze</code>, or the Freeze button on a phone alert stops every token of the account at once: each call answers <code>423 account_frozen</code>, approvals nobody used yet are void, and approving waits. Any signed-in session can freeze. Only your passkey, in the app, unfreezes.</p>
 
   <h2 id="providers">Providers and the map</h2>
   <p>The irreversible map covers 10 APIs: GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify. Management APIs only; SQL sent straight over a database connection string never passes through Counterseal. The current irreversible map, with the reason for every rule, is on the <a href="/#map">homepage</a> and at <code>GET /v1/meta</code>. Every DELETE is held on GitHub, Cloudflare, Stripe, Supabase, Vercel, Neon, Fly.io and Resend, and every Railway mutation is held unless every field is a redeploy or restart. Vercel, Neon and Fly.io hold production promotions and rollbacks, restores that overwrite data, secret and token changes, and access grants; Resend holds batch sends, broadcasts and any email to more than one recipient. Shopify is brokered through its Admin GraphQL endpoint only, at the store address you give when you add the key (<code>your-store.myshopify.com</code>, checked strictly), and holds mutations that delete, move money, cancel, change gift cards or customer data, or cannot be read. Also held: force pushes, repo transfers, Stripe refunds and payouts, Cloudflare purges of everything, a whole host or a URL prefix, and any SQL on Supabase or D1 that is not a single plain read (SELECT, WITH ... SELECT, EXPLAIN without ANALYZE, SHOW), including Supabase migrations and D1 imports. Paths are matched in one canonical form (no empty segments, no <code>;</code> path parameters, escapes of plain letters decoded, one trailing slash dropped) and that canonical path is sent upstream. Rules match it without regard to case, the map also ignores a format suffix such as <code>.json</code>, and a HEAD counts as a GET. A body the broker cannot read one way on a route with a body rule is held: a watched parameter that appears twice, in both the body and the query string, or as a case variant, and JSON with repeated keys. A request that carries a method override (<code>_method</code>) is held on every provider and cannot be pre-approved.</p>
@@ -223,6 +246,7 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>leash token &lt;key-id&gt; [--label x] [--ttl hours] [--policy file.json]</code></td><td>Mint an agent token. 0.2.1 adds <code>--agent-key &lt;id&gt;</code>.</td></tr>
     <tr><td><code>leash tokens</code></td><td>List active tokens.</td></tr>
     <tr><td><code>leash revoke &lt;token-id&gt;</code></td><td>Revoke a token immediately.</td></tr>
+    <tr><td><code>leash freeze</code></td><td>Stop every agent token on the account at once. Only your passkey, in the app, unfreezes. From 0.2.1.</td></tr>
     <tr><td><code>leash holds</code></td><td>List calls waiting for you.</td></tr>
     <tr><td><code>leash watch</code></td><td>Print and ring for each new hold.</td></tr>
     <tr><td><code>leash mcp</code></td><td>Run the MCP server for your agent.</td></tr>
@@ -241,7 +265,10 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>GET, POST /v1/tokens</code></td><td>List or mint agent tokens. <code>agentKeyId</code> binds the token to an agent key.</td></tr>
     <tr><td><code>POST /v1/tokens/passkey/begin, /finish</code></td><td>Mint a token with pre-approved irreversible operations. Passkey.</td></tr>
     <tr><td><code>DELETE /v1/tokens/:id</code></td><td>Revoke a token.</td></tr>
-    <tr><td><code>GET /v1/holds</code></td><td>Calls and commands waiting for you, each with its <code>kind</code> (<code>proxy</code>, <code>shell</code>, <code>tool</code>, <code>deploy</code>) and a <code>preview</code> of what it would do (for a call: query string, SQL or GraphQL, body, at most 2 KB; for a command: the whole command).</td></tr>
+    <tr><td><code>POST /v1/tokens/:id/reset/begin, /finish</code></td><td>Reset a tripped breaker (<code>409 not_tripped</code> if it has not tripped). Passkey. Web only.</td></tr>
+    <tr><td><code>POST /v1/me/freeze</code></td><td>Freeze the account: every <code>lsh_</code> token is answered <code>423</code>. Any signed-in session, the command line included. <code>GET /v1/me</code> shows <code>account.frozen_at</code>.</td></tr>
+    <tr><td><code>POST /v1/me/unfreeze/begin, /finish</code></td><td>End a freeze (<code>409 not_frozen</code> if it is not frozen). Passkey. Web only.</td></tr>
+    <tr><td><code>GET /v1/holds</code></td><td>Calls and commands waiting for you, each with its <code>kind</code> (<code>proxy</code>, <code>shell</code>, <code>tool</code>, <code>deploy</code>) and a <code>preview</code> of what it would do (for a call: query string, SQL or GraphQL, body, at most 2 KB; for a command: the whole command). A held Stripe refund or payout has a <code>headline</code> with its amount.</td></tr>
     <tr><td><code>POST /v1/holds/:id/approve/begin, /finish</code></td><td>Approve a hold. Passkey.</td></tr>
     <tr><td><code>POST /v1/holds/:id/deny</code></td><td>Deny a hold. Optional <code>{"reason"}</code> (200 characters), handed back to a guard.</td></tr>
     <tr><td><code>GET, POST /v1/guard/keys</code>, <code>DELETE /v1/guard/keys/:id</code></td><td>Guard keys (<code>lsg_</code>, shown once). Revoking one closes its open approvals.</td></tr>
@@ -261,7 +288,7 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>POST /v1/device/start</code>, <code>POST /v1/device/poll</code></td><td>Command line sign-in (RFC 8628 device code): a code to type at <code>/app#device</code>, valid 5 minutes, 10 starts an hour per network; poll every <code>interval</code> seconds.</td></tr>
     <tr><td><code>POST /v1/device/lookup</code>, <code>/v1/device/deny</code>, <code>/v1/device/approve/begin, /finish</code></td><td>In the app: where a sign-in started, then deny it, or approve it with a passkey. Web only.</td></tr>
     <tr><td><code>GET /v1/sessions</code>, <code>DELETE /v1/sessions/:id</code></td><td>Command line sign-ins of the last 7 days; revoke one and every token, agent key and receipts key it made, even after it signed out (revoking is web only).</td></tr>
-    <tr><td><code>GET /v1/alerts</code></td><td>What a phone alert shows: waiting holds, and command line sign-ins and passkeys added in the last 15 minutes.</td></tr>
+    <tr><td><code>GET /v1/alerts</code></td><td>What a phone alert shows: waiting holds (a held refund or payout has a <code>headline</code> with its amount), command line sign-ins and passkeys added in the last 15 minutes, and <code>frozen_at</code>.</td></tr>
     <tr><td><code>GET /v1/push/key</code>, <code>POST /v1/push/subscribe</code>, <code>/unsubscribe</code>, <code>/test</code></td><td>Phone and desktop alerts (Web Push, no payload), up to 10 devices. Web only.</td></tr>
     <tr><td><code>POST /v1/me/delete/begin, /finish</code></td><td>Delete your account and everything linked to it (public log entries stay, unlinked). Passkey. Finish body <code>{"confirm":"delete", challengeId, credential}</code>. Web only.</td></tr>
     <tr><td><code>ANY /p/:provider/*</code></td><td>The agent proxy. Bearer <code>lsh_</code> token (and the agent's signature when the token is bound).</td></tr>
@@ -285,7 +312,9 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td>409</td><td><code>replay</code>, <code>key_taken</code>, <code>signer_taken</code></td><td>A signed receipt sent twice; a public key registered to another account.</td></tr>
     <tr><td>409</td><td><code>too_many_credentials</code>, <code>too_many_tokens</code>, <code>too_many_keys</code>, <code>too_many_agent_keys</code>, <code>too_many_guard_keys</code>, <code>too_many_devices</code></td><td>A ceiling per account: 50 vault keys, 200 live tokens, 20 receipts keys, 20 agent keys, 20 guard keys, 10 alert devices.</td></tr>
     <tr><td>413</td><td><code>too_large</code></td><td>Request body over the limit.</td></tr>
-    <tr><td>428</td><td><code>held_for_approval</code></td><td>Irreversible. Approve, then retry once.</td></tr>
+    <tr><td>409</td><td><code>not_frozen</code>, <code>not_tripped</code></td><td>An unfreeze or a reset for something that is not frozen or tripped.</td></tr>
+    <tr><td>423</td><td><code>account_frozen</code></td><td>The owner froze the account: every agent token is stopped until they unfreeze it with a passkey. Stop and tell your human; do not retry. Approving is refused with the same error while frozen.</td></tr>
+    <tr><td>428</td><td><code>held_for_approval</code></td><td>Irreversible, or a brake (the rule starts with <code>brake.</code>): over a money cap, unreadable, or the token's breaker tripped. Approve, then retry once.</td></tr>
     <tr><td>429</td><td><code>slow_down</code></td><td>Too many requests. The message says when to retry.</td></tr>
     <tr><td>429</td><td><code>too_many_holds</code></td><td>20 requests from this token or guard key (or 100 on the account) are already waiting for approval; nothing new is held or alerted until a human decides.</td></tr>
     <tr><td>503</td><td><code>log_at_capacity</code></td><td>The public log reached its daily capacity. Nothing was recorded; try after 00:00 UTC.</td></tr>

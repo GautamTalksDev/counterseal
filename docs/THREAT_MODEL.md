@@ -18,9 +18,9 @@ can read on the machine it runs on, an attacker who prompt-injects that agent ca
 | Actor | Can | Cannot |
 |---|---|---|
 | The agent (honest but wrong, or prompt-injected) | Use its `lsh_` token; sign with its agent key; read the CLI config on its machine | See a real key; approve a hold; mint a token with pre-approved irreversible calls; turn receipts off |
-| Someone holding a leaked `lsh_` token, unbound | Make the calls that token's policy allows, until it expires or is revoked | Exceed the policy; get past a hold; read the key |
+| Someone holding a leaked `lsh_` token, unbound | Make the calls that token's policy allows, until it expires or is revoked; if the token has money caps, refund or pay out up to its per-call and per-day caps; trip the token's own breaker | Exceed the policy or its caps; get past a hold; read the key; trip or spend any other token |
 | Someone holding a leaked `lsh_` token bound to an agent key | Nothing: every request is refused before the policy, the token's rate limit or the upstream | Use it without the agent's private key |
-| Someone holding a stolen CLI session | List holds; mint ordinary tokens; register agent keys and bind tokens to them; make and revoke guard keys; deny holds; for at most 7 days | Approve holds; mint pre-approved tokens; read keys; delete vaulted keys; revoke agent keys; turn receipts on or off; approve or revoke CLI sign-ins; delete the account; keep anything it made after the owner revokes it |
+| Someone holding a stolen CLI session | List holds; mint ordinary tokens (with a breaker if it likes); register agent keys and bind tokens to them; make and revoke guard keys; deny holds; freeze the account (which only stops things; the owner is alerted); for at most 7 days | Approve holds; mint pre-approved tokens or tokens with money caps; reset a tripped breaker; unfreeze; read keys; delete vaulted keys; revoke agent keys; turn receipts on or off; approve or revoke CLI sign-ins; delete the account; keep anything it made after the owner revokes it |
 | Someone holding a guard key (`lsg_`), for example the agent the guard runs next to | Ask for approvals (60 new an hour, 20 waiting); read and use its own approvals | Approve anything; see another key's or a brokered hold; list holds; reach the vault; outlive the CLI session that made it; alert more than once a minute |
 | A device-code phisher (starts `leashcli login` and sends someone the code) | Get a CLI session in that person's account if they sign in, type the code, ignore the country and network shown, confirm they ran it and approve with their passkey | Put the code in a link the app accepts; reuse a code; keep the session past 7 days or past a revoke; act unseen (audit entry and device alert at sign-in) |
 | Someone holding a receipts API key (`lsr_`) | Record receipts within the account's quotas (public, reported, never `source: "broker"`) | Make a broker receipt; record signed receipts without the signer; replay a signed receipt |
@@ -122,6 +122,54 @@ fails to decrypt (`vault_error`) and a row that no longer passes the check stops
 database CHECK; only `/admin/api/<version>/graphql.json` is brokered, everything else is refused with `unsupported_path`
 before the key is read; redirects are never followed. Public receipts carry `myshopify.com`, never the store. Tests:
 *Shopify store host*, *Shopify store host cannot be changed behind the broker*, *Shopify privacy*.
+
+### Brakes (money caps, the breaker, Freeze)
+
+**S17. Moving more money than the caps allow.** The cap is only as good as the reading of the amount. The amount comes
+from the map's strict form parser (`strictForm`, built on the same copies-of-every-parameter reading that holds
+`confirm=true` tricks), and anything it cannot read one way is held: a repeated amount (also under a `;` split), an
+escaped, bracketed, spaced or other-case name, a copy in the query string, a JSON or multipart body, a body over 4 KB,
+a content type that is not a plain form. An amount is accepted only as `[1-9][0-9]{0,11}`: no sign, zeros in front,
+fraction, exponent, space, other digits or empty value; a currency only as three lower case letters. A refund must name
+exactly one charge or payment intent in the usual id form and must not come from a customer balance. Only the two calls
+are ever let through, spelled exactly (`/v1/Refunds`, `.json`, `/v1/charges/<id>/refund`, application fee refunds,
+transfers, charges, top-ups, confirms and captures stay held by the map). A refund's currency and what is left come from
+Stripe, looked up with the vaulted key (a failed, redirected, oversized or oddly shaped answer is held); a refund without
+an amount counts as everything left. Caps are in one currency, so another currency is held, never compared. Tests:
+*amount tricks*, *a lookup that fails*, *currency mismatch*, *every other money call stays held* (`test/brakes-money.test.js`).
+Residual: the day is the UTC calendar day, so a total can reach twice the daily cap across midnight; a retry of the same
+call counts again; a payment intent's lookup is an upper bound (what it received); a leaked capped token can still move
+money up to its caps until it is revoked (a bound token is not usable without its agent).
+
+**S18. Racing the daily cap, or a failure that hands money back twice.** The day's total is reserved by one conditional
+statement (`INSERT ... ON CONFLICT DO UPDATE ... WHERE total + amount <= cap RETURNING`), so concurrent calls cannot both
+pass; a refused call writes nothing. A reservation is given back only for a definite refusal from Stripe (a status below
+500 that is not 2xx) or a call that never left (the vault could not open); a 5xx or no answer keeps it, because the money
+may have moved. A cap only ever turns a map hold into an allow when the rest of the token's policy allows the call, and
+caps whose stored form cannot be read hold every refund and payout, even a pre-approved one. Tests: *concurrent calls race the daily
+cap*, *a refusal from Stripe gives the reservation back*, *caps that cannot be read ... fail closed*.
+
+**S19. Dodging or abusing the breaker.** The breaker counts only writes that would go upstream, after the signature check
+and the policy, so a replayed signed request (refused with `agent_signature_replayed`) and a thief without the agent key
+(refused with `agent_signature_required`) count for nothing; a repeat is the exact request (method, path, query, content
+type and body), so changing headers such as `Idempotency-Key` does not dodge it, and changing the body is caught by the
+hourly count when both limits are set. Counters are per token, so one token cannot trip or spend another. A trip is one
+conditional update, so concurrent calls trip it once and wake the owner once. A tripped token cannot flood the holds table
+or the phone: it is held to the 20 waiting requests per token, and its later holds do not spend the minute's alert.
+Resetting needs a passkey ceremony tied to that one token and is on the record. Residual: windows are fixed, so a burst
+across a window's end can reach twice the limit; an agent that varies its body and stays under the hourly count is not
+stopped by the repeat limit. Tests: `test/brakes-breaker.test.js`.
+
+**S20. Freeze as a weapon, or a freeze that does not hold.** Any signed-in session may freeze, because stopping is always
+safe: a stolen CLI session can make the owner's agents stop (a nuisance, not a loss; devices are alerted, and the owner
+unfreezes with a passkey). Unfreezing needs a web session and a fresh passkey ceremony bound to the unfreeze, so a stolen
+CLI session or cookie cannot undo it. A frozen account is answered `423` before anything else is read or written for the
+call (no signature check, no body, no token rate limit row), so a looping agent adds no database writes beyond the
+per-network limit every proxied call pays, and one note in the owner's audit log per token every 10 minutes. Approvals nobody
+used yet are voided when the freeze starts, and approving is refused while frozen, so nothing a human said yes to earlier
+fires after the freeze ends. Not covered: calls already in flight when the freeze lands; receipts API keys (`lsr_`),
+which cannot act on a provider. Modules that decide for an account without an `lsh_` token (approvals, deploy gates) must
+call `isFrozen` (`src/brakes.js`). Tests: `test/brakes-freeze.test.js`.
 
 ### The joints between the three parts
 

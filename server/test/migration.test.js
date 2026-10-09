@@ -135,4 +135,25 @@ test('live-shaped data written by the deployed code keeps working after 0004 and
   assert.equal((await now('POST', `/v1/holds/${ask.body.id}/approve/finish`, { cookie, body: { challengeId: gb.body.challengeId, credential: await auth.get(gb.body.options) } })).status, 200);
   assert.equal((await now('POST', `/v1/approvals/${ask.body.id}/use`, { bearer: gk.body.key, origin: null, xleash: false, body: { hash: ask.body.hash } })).status, 200);
   assert.equal((await now('GET', '/v1/audit/verify', { cookie })).body.ok, true);
+
+  // ---- Brakes (0008): the rows the live code wrote are not tripped, not frozen and have no caps; the new tables start empty
+  assert.equal(db.raw.prepare('SELECT COUNT(*) n FROM tokens WHERE tripped_at IS NOT NULL').get().n, 0);
+  assert.equal(db.raw.prepare('SELECT frozen_at FROM accounts').get().frozen_at, null);
+  assert.equal(db.raw.prepare('SELECT COUNT(*) n FROM spend').get().n + db.raw.prepare('SELECT COUNT(*) n FROM counters').get().n, 0);
+  assert.equal(JSON.parse(db.raw.prepare('SELECT policy FROM tokens WHERE id = ?').get(tok.id).policy).limits, undefined, 'a policy written before limits and money existed has neither');
+  const tokens = (await now('GET', '/v1/tokens', { cookie })).body.tokens;
+  assert.ok(tokens.length >= 2 && tokens.every((t) => t.tripped_at === null && t.spent_today === undefined));
+  // a live token's writes are not counted and cost what they did; a freeze stops it, from the live command line session
+  // too, and only the live passkey ends it
+  const write = () => w.req('POST', '/p/github/repos/acme/app/issues', { bearer: tok.token, origin: null, xleash: false, body: { title: 'x' } });
+  const before = await write();
+  assert.equal(before.status, 200);
+  assert.equal(db.raw.prepare('SELECT COUNT(*) n FROM counters').get().n, 0);
+  assert.equal((await now('POST', '/v1/me/freeze', { bearer: cli, origin: null, xleash: false, body: {} })).status, 200);
+  assert.equal((await write()).status, 423);
+  assert.equal((await now('GET', '/p/github/repos/acme/app', { bearer: tok.token, origin: null, xleash: false })).status, 423);
+  assert.equal((await now('POST', '/v1/me/unfreeze/begin', { bearer: cli, origin: null, xleash: false, body: {} })).body.error, 'passkey_required');
+  const ub = await now('POST', '/v1/me/unfreeze/begin', { cookie, body: {} });
+  assert.equal((await now('POST', '/v1/me/unfreeze/finish', { cookie, body: { challengeId: ub.body.challengeId, credential: await auth.get(ub.body.options) } })).status, 200, 'the passkey made by the live code unfreezes');
+  assert.equal((await write()).status, 200);
 });

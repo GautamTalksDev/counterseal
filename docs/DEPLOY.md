@@ -6,12 +6,12 @@ Object (`ReceiptLog`, the public log) and static assets. It fits the Workers Fre
 ## Upgrading the live service (from the broker-only version)
 
 The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005_cli_signin.sql`,
-`0006_approvals.sql` and `0010_provider_host.sql` only add tables, indexes and defaulted or nullable columns, so the code that runs today keeps
+`0006_approvals.sql`, `0008_brakes.sql` and `0010_provider_host.sql` only add tables, indexes and defaulted or nullable columns, so the code that runs today keeps
 working on the migrated database, and the new code keeps working with everything the old code wrote
 (`server/test/migration.test.js` runs the deployed code, migrates, then runs the new code). CLI sessions made before 0005
 keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as `kind: "proxy"` (a brokered API
 call); 0006 adds the guard keys table and the coding-agent approvals (branch `feat/approvals`, not yet deployed). 0010 adds one
-nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed).
+nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0008 (Brakes, branch `feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and `counters`; every existing token and account is not tripped, not frozen and has no caps.
 
 ```bash
 cd server
@@ -21,7 +21,7 @@ npx -y wrangler@4 d1 time-travel info leash
 # 2. new secrets (names only; values never leave your machine)
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK        # the log's Ed25519 signing key; prints the public part to stderr: keep it
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx -y wrangler@4 secret put STATS_TOKEN   # optional: /v1/admin/stats
-# 3. the additive migrations (applies 0004 to 0006 and 0010; 0001 to 0003 are already applied)
+# 3. the additive migrations (applies 0004 to 0006, 0008 and 0010; 0001 to 0003 are already applied)
 npx -y wrangler@4 d1 migrations apply leash --remote
 # 4. the code (creates the ReceiptLog Durable Object through the "v1" migration in wrangler.jsonc)
 npx -y wrangler@4 deploy
@@ -73,7 +73,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" |
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))" | npx -y wrangler@4 secret put IP_SALT
 node dev/vapid-keygen.mjs | npx -y wrangler@4 secret put VAPID_PRIVATE_JWK   # phone alerts (Web Push); optional
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK          # the public log
-npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0006, then 0010 (0007 to 0009 are numbers other features will use)
+npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0006, then 0008 and 0010 (0007 and 0009 are numbers other features will use)
 npx -y wrangler@4 deploy
 ```
 
@@ -122,6 +122,11 @@ after sign-ins.
 | Same command asked again while pending or approved | 0 | none |
 | Waiting for a decision (`GET /v1/approvals/<id>?wait=20`) | 0 (at most 12 D1 queries, all reads) | none |
 | Approval used (`POST /v1/approvals/<id>/use`), sealed | about 6 | 1 request, about 7 rows |
+| Brakes: a write on a token with `writesPerHour` | one more (the hour's count) | |
+| Brakes: ... with `repeatsPer5Min` too | two more (a row per distinct request in its 5 minutes, reused for repeats) | |
+| Brakes: a capped Stripe refund or payout | one more (the day's total), plus one lookup at Stripe (a subrequest, no D1) | |
+| Brakes: a call on a frozen account | 1 (the per-network limit); no token row, no audit entry except one per token every 10 minutes | none |
+| Brakes: a token without `limits` or `money` | none | |
 | Receipts API, one unsigned receipt | about 3 | 1 request |
 | Public log read (stats, checkpoint, key) | 0 | 0 within 10 s of the last head read per isolate |
 | Public log read (entries, proofs) | 0 | 1 |
@@ -146,6 +151,11 @@ Workers). Medians, with the 95th percentile in brackets:
 | Proxied POST, bound, 1 KB body, sealed | 1.6 ms (3.2) | 0.5 ms |
 | Held DELETE, bound, sealed | 1.1 ms (2.4) | 0.5 ms |
 | Approve a hold (passkey verify), sealed | 1.1 ms (3.3) | 0.6 ms |
+| Brakes: POST with both breaker limits, sealed | 1.4 ms (3.6) | 0.7 ms |
+| Brakes: capped refund (Stripe lookup stubbed), sealed | 1.7 ms (4.1) | 0.6 ms |
+| Brakes: refund over the cap, held, sealed | 1.5 ms (5.5) | 0.6 ms |
+| Brakes: call on a frozen account (423) | 0.3 ms (0.5) | |
+| Brakes: freeze / unfreeze (passkey verify) / reset a tripped token (passkey verify) | 0.4 ms (0.8) / 0.9 ms (1.7) / 1.0 ms (3.3) | |
 | Receipts API, 25 unsigned (the cap) | 2.5 ms (5.0) | 3.9 ms |
 | Receipts API, 12 signed (the cap) | 3.3 ms (5.6) | 1.6 ms |
 | `/v1/stats` | 0.1 ms (0.5) | |

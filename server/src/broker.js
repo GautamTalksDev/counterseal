@@ -11,6 +11,7 @@ import { notify } from './push.js';
 import { verifyAgentSignature, d1Seen, ownActive } from './agentkeys.js';
 import { BRAND } from './brand.js';
 import { markSeen } from './admin.js';
+import * as Brakes from './brakes.js';
 
 const HOLD_TTL = 30 * 60_000, GRANT_TTL = 10 * 60_000, MAX_BODY = 1_048_576, MAX_RESP = 10 * 1_048_576;
 export const PENDING_PER_TOKEN = 20, PENDING_PER_ACCOUNT = 100, MAX_CREDENTIALS = 50, MAX_LIVE_TOKENS = 200, LIST_TOKENS = 500;
@@ -92,8 +93,11 @@ export async function mintFinish(env, sess, body) {
 }
 
 export async function listTokens(env, sess) {
-  const r = await env.DB.prepare('SELECT t.id, t.label, t.policy, t.minted_by, t.expires_at, t.revoked, t.created_at, t.last_used, c.provider, c.label AS credential, k.keyid AS agent_key, k.label AS agent_key_label, k.revoked_at AS agent_key_revoked FROM tokens t JOIN credentials c ON c.id = t.credential_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id WHERE t.account_id = ? ORDER BY t.created_at DESC LIMIT ?').bind(sess.accountId, LIST_TOKENS).all();
-  return { tokens: r.results.map((t) => ({ ...t, policy: JSON.parse(t.policy) })) };
+  const r = await env.DB.prepare('SELECT t.id, t.label, t.policy, t.minted_by, t.expires_at, t.revoked, t.created_at, t.last_used, t.tripped_at, t.tripped_why, c.provider, c.label AS credential, k.keyid AS agent_key, k.label AS agent_key_label, k.revoked_at AS agent_key_revoked FROM tokens t JOIN credentials c ON c.id = t.credential_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id WHERE t.account_id = ? ORDER BY t.created_at DESC LIMIT ?').bind(sess.accountId, LIST_TOKENS).all();
+  const tokens = r.results.map((t) => ({ ...t, policy: JSON.parse(t.policy) }));
+  // what each token's money caps have let through today (UTC), per currency, in the currency's smallest unit
+  const spent = tokens.some((t) => t.policy.money) ? await Brakes.spentToday(env, sess.accountId) : {};
+  return { tokens: tokens.map((t) => (spent[t.id] ? { ...t, spent_today: spent[t.id] } : t)) };
 }
 
 export async function revokeToken(env, sess, id) {
@@ -110,7 +114,8 @@ export async function listHolds(env, sess, status) {
   // the label of what asked: an agent token, or for a coding-agent approval the guard key (token_id "g:<key id>")
   const r = await env.DB.prepare("SELECT h.*, COALESCE(t.label, g.label) AS token_label FROM holds h LEFT JOIN tokens t ON t.id = h.token_id LEFT JOIN guard_keys g ON h.kind != 'proxy' AND g.id = substr(h.token_id, 3) AND g.account_id = h.account_id WHERE h.account_id = ? AND h.status = ? ORDER BY h.created_at DESC LIMIT 100").bind(sess.accountId, st).all();
   const base = await appOrigin(env, sess.accountId);
-  return { holds: r.results.map(({ req_hash, context, ...h }) => ({ ...h, context: holdContext(context), approve_url: `${base}/app#hold=${h.id}` })) };
+  // `headline`: the amount of a held Stripe refund or payout, for large type (the first line of its preview)
+  return { holds: r.results.map(({ req_hash, context, ...h }) => ({ ...h, context: holdContext(context), approve_url: `${base}/app#hold=${h.id}`, headline: Brakes.headlineOf(h.preview, h.rule) })) };
 }
 /** a guard hold's context as the app shows it: the folder name and the agent's session, nothing else */
 function holdContext(raw) {
@@ -120,8 +125,10 @@ function holdContext(raw) {
 
 export async function approveBegin(env, sess, holdId) {
   if (sess.kind !== 'web') throw new HttpError(403, 'passkey_required', `Approve in the ${BRAND.name} app with your passkey.`);
-  const h = await env.DB.prepare("SELECT id FROM holds WHERE id = ? AND account_id = ? AND status = 'pending' AND expires_at > ?").bind(holdId, sess.accountId, now()).first();
+  const h = await env.DB.prepare("SELECT h.id, a.frozen_at FROM holds h JOIN accounts a ON a.id = h.account_id WHERE h.id = ? AND h.account_id = ? AND h.status = 'pending' AND h.expires_at > ?").bind(holdId, sess.accountId, now()).first();
   if (!h) throw new HttpError(404, 'not_found');
+  // nothing is released while frozen (an approval would only wait for the freeze to end): unfreeze first
+  if (h.frozen_at) throw new HttpError(423, 'account_frozen', 'This account is frozen. Unfreeze it with your passkey first; approvals wait until then.');
   const { id, challenge } = await newChallenge(env, 'approve:' + holdId, sess.accountId);
   return { challengeId: id, options: { challenge, rpId: rp(env).rpId, userVerification: 'required', timeout: 300000 } };
 }
@@ -131,9 +138,13 @@ export async function approveFinish(env, sess, holdId, body) {
   const ch = await takeChallenge(env, body.challengeId, 'approve:' + holdId);
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
   await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
-  const h = await env.DB.prepare("UPDATE holds SET status = 'approved', decided_at = ?, expires_at = ? WHERE id = ? AND account_id = ? AND status = 'pending' AND expires_at > ? RETURNING method, host, rule, kind, context")
-    .bind(now(), now() + GRANT_TTL, holdId, sess.accountId, now()).first();
-  if (!h) throw new HttpError(404, 'not_found');
+  // a freeze between begin and finish also stops the approval (the account is checked in the same statement)
+  const h = await env.DB.prepare("UPDATE holds SET status = 'approved', decided_at = ?, expires_at = ? WHERE id = ? AND account_id = ? AND status = 'pending' AND expires_at > ? AND NOT EXISTS (SELECT 1 FROM accounts WHERE id = ? AND frozen_at IS NOT NULL) RETURNING method, host, rule, kind, context")
+    .bind(now(), now() + GRANT_TTL, holdId, sess.accountId, now(), sess.accountId).first();
+  if (!h) {
+    if (await Brakes.isFrozen(env, sess.accountId)) throw new HttpError(423, 'account_frozen', 'This account is frozen. Unfreeze it with your passkey first; approvals wait until then.');
+    throw new HttpError(404, 'not_found');
+  }
   // which passkey approved: a short fingerprint of its credential id (the owner can match it to their passkey)
   const passkey = (await sha256hex(String(body.credential.id))).slice(0, 16);
   await audit(env, sess.accountId, 'web', 'approve', { hold: holdId, method: h.method, host: h.host, rule: h.rule, passkey, ...guardDetail(h) });
@@ -191,9 +202,10 @@ export function canonPath(p) {
 const PREVIEW = 2048;
 const INVISIBLE = /[​-‏‪-‮⁠-⁩﻿­؜]/g;
 const visible = (t) => String(t).replace(INVISIBLE, (c) => `<U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}>`);
-/** max: the window; approvals for commands (approvals.js) pass one big enough that the exact command is never cut */
-export function preview(search, text, max = PREVIEW) {
-  const head = summarize(search, text);
+/** max: the window; approvals for commands (approvals.js) pass one big enough that the exact command is never cut.
+ * lead: lines Counterseal wrote itself that come first (a money cap's amount and arithmetic, see brakes.js) */
+export function preview(search, text, max = PREVIEW, lead = []) {
+  const head = [...lead, ...summarize(search, text)];
   const raw = [search, text].filter(Boolean).join('\n\n');
   if (!raw && !head.length) return null;
   if (raw.length > max) head.push(`Request is ${raw.length} characters; only the first part is shown below. The ${BRAND.name} summary above covers all of it.`);
@@ -225,10 +237,17 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   const m = authz.match(/^Bearer (lsh_[A-Za-z0-9_-]{43})$/);
   if (!m) throw new HttpError(401, 'leash_token_required', `Send your ${BRAND.name} token as: Authorization: Bearer lsh_...`);
   // one query: the token, whether its account has public receipts on, and the agent key it is bound to (if any)
-  const tok = await env.DB.prepare('SELECT t.*, a.receipts AS receipts_on, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM passkeys p WHERE p.account_id = t.account_id AND p.rp_id = ?) AS has_new_passkey FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?').bind(hosts(env)[0].rpId, await sha256hex(m[1])).first();
+  const tok = await env.DB.prepare('SELECT t.*, a.receipts AS receipts_on, a.frozen_at, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM passkeys p WHERE p.account_id = t.account_id AND p.rp_id = ?) AS has_new_passkey FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?').bind(hosts(env)[0].rpId, await sha256hex(m[1])).first();
   if (!tok || tok.revoked || tok.expires_at < now()) throw new HttpError(401, 'token_invalid');
   // a token bound to an agent key whose key is gone or revoked never works again (fails closed)
   if (tok.agent_key_id && (!tok.agent_keyid || tok.agent_revoked)) throw new HttpError(401, 'agent_key_revoked', 'The agent key this token is bound to was revoked.');
+  // Freeze: the owner stopped every token. Answered before anything else is read or written for this call (no body, no
+  // signature check, no token rate limit row, no last_used), so an agent looping against a frozen account adds no
+  // database writes beyond the per-network limit every proxied call already pays.
+  if (tok.frozen_at) {
+    Brakes.noteFrozenBlock(env, tok, request.method.toUpperCase(), P.host);
+    throw Brakes.frozenError();
+  }
   const seen = markSeen(env, tok.account_id);
   if (seen) { if (env.__ctx) env.__ctx.waitUntil(seen); else await seen; }
   const cred = await env.DB.prepare('SELECT * FROM credentials WHERE id = ? AND account_id = ?').bind(tok.credential_id, tok.account_id).first();
@@ -267,7 +286,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   let bodyText = '';
   try { bodyText = body ? new TextDecoder('utf-8', { fatal: true }).decode(body) : ''; } catch { throw new HttpError(400, 'bad_body', 'Request body must be valid UTF-8.'); }
 
-  const d = decide(policy, provider, method, path, bodyText, url.search);
+  let d = decide(policy, provider, method, path, bodyText, url.search);
   // An approval binds the exact bytes sent upstream, and the content-type that tells the upstream how to read them.
   const bodyHash = body ? b64u(new Uint8Array(await crypto.subtle.digest('SHA-256', body))) : '';
   const reqHash = await sha256hex(JSON.stringify([method, upHost, path, url.search, request.headers.get('content-type') || '', bodyHash]));
@@ -277,6 +296,13 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
     await audit(env, tok.account_id, 'token:' + tok.id, 'deny', { ...where, rule: d.rule }, seal);
     throw new HttpError(403, 'leash_denied', d.why, { rule: d.rule });
   }
+  // The real key is opened at most once per call, and only when something needs it (a money cap's lookup, the forward).
+  let opened;
+  const secretOf = async () => (opened ??= await open(env, cred));
+  // Brakes (src/brakes.js): a tripped token's writes wait; a Stripe refund or payout under the token's money caps may pass
+  // the map; a write that would go upstream is counted against the breaker's limits.
+  const brake = await Brakes.apply(env, { d, tok, policy, provider, method, canon: path, bodyText, search: url.search, contentType: request.headers.get('content-type') || '', reqHash, P, fetcher, secretOf });
+  d = brake.d;
   if (d.decision === 'hold') {
     // an approved grant for exactly this request? consume it atomically
     const g = await env.DB.prepare("UPDATE holds SET status = 'used' WHERE id = (SELECT id FROM holds WHERE token_id = ? AND req_hash = ? AND status = 'approved' AND expires_at > ? LIMIT 1) RETURNING id")
@@ -286,44 +312,61 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
       if (!h) {
         // Approval fatigue: someone holding a leaked token could make thousands of distinct held requests, each one an
         // alert, hoping a tired human taps approve. A token gets at most 20 waiting requests and an account 100; past
-        // that, nothing new is held or alerted until a human has looked.
+        // that, nothing new is held or alerted until a human has looked. (A tripped breaker holds every write of its
+        // token, so this is also what stops a loop of different writes from filling the holds table.)
         const n = await env.DB.prepare("SELECT (SELECT COUNT(*) FROM holds WHERE token_id = ?1 AND status = 'pending' AND expires_at > ?3) AS tok, (SELECT COUNT(*) FROM holds WHERE account_id = ?2 AND status = 'pending' AND expires_at > ?3) AS acct")
           .bind(tok.id, tok.account_id, now()).first();
         if (n.tok >= PENDING_PER_TOKEN || n.acct >= PENDING_PER_ACCOUNT) {
           throw new HttpError(429, 'too_many_holds', `${n.tok >= PENDING_PER_TOKEN ? `${n.tok} requests from this token are` : `${n.acct} requests are`} already waiting for approval, so this one was not held or sent. Stop and ask your human to review the waiting requests first.`);
         }
         h = { id: randomId(), expires_at: now() + HOLD_TTL };
-        const pv = preview(url.search, bodyText);
+        const pv = preview(url.search, bodyText, undefined, brake.lines);
         await env.DB.prepare('INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
           .bind(h.id, tok.account_id, tok.id, reqHash, method, upHost, where.path, d.rule, d.why, now(), h.expires_at, pv).run();
         await audit(env, tok.account_id, 'token:' + tok.id, 'hold', { ...where, rule: d.rule, hold: h.id, preview_sha256: await sha256hex(pv || '') }, seal);
         // wake the owner's devices after responding; the push itself carries nothing. At most one alert a minute per
-        // account for held requests: the alert says how many are waiting, so a flood of holds is one buzz, not hundreds
-        const p = (async () => { if (await allow(env.DB, 'pushhold:' + tok.account_id, 1, 60_000, now())) await notify(env, tok.account_id, env.__pushFetch || fetch); })().catch(() => {});
-        if (env.__ctx) env.__ctx.waitUntil(p); else await p;
+        // account for held requests: the alert says how many are waiting, so a flood of holds is one buzz, not hundreds.
+        // A tripped token's later holds stay quiet altogether: the call that tripped it already woke them, and the rest
+        // wait in the list (they do not even spend the minute's alert).
+        if (d.rule !== 'brake.tripped' || brake.tripped) {
+          const p = (async () => { if (await allow(env.DB, 'pushhold:' + tok.account_id, 1, 60_000, now())) await notify(env, tok.account_id, env.__pushFetch || fetch); })().catch(() => {});
+          if (env.__ctx) env.__ctx.waitUntil(p); else await p;
+        }
       }
       // the approve link goes where the owner can sign in: the product's host once they have a passkey there
       const approveUrl = `${await appOrigin(env, tok.account_id, !!tok.has_new_passkey)}/app#hold=${h.id}`;
       return json({
         error: 'held_for_approval', hold_id: h.id, approve_url: approveUrl, expires_at: h.expires_at, rule: d.rule, map_version: MAP_VERSION,
-        message: `${BRAND.name} held this request because it cannot be undone: ${d.why} Stop and ask your human to approve it at ${approveUrl} . After they approve, retry the exact same request once.`,
+        message: `${BRAND.name} held this request${d.rule.startsWith('brake.') ? ':' : ' because it cannot be undone:'} ${d.why} Stop and ask your human to approve it at ${approveUrl} . After they approve, retry the exact same request once.`,
       }, 428);
     }
     await audit(env, tok.account_id, 'token:' + tok.id, 'proxy_approved', { ...where, rule: d.rule, hold: g.id }, seal);
   }
 
   // forward
-  const secret = await open(env, cred);
+  let secretNow;
+  try { secretNow = await secretOf(); } catch (e) {
+    // the call never left: whatever a money cap reserved for it goes back
+    if (brake.reserved) await Brakes.release(env, brake.reserved).catch(() => {});
+    throw e;
+  }
   const headers = new Headers();
   for (const h of PASS_REQ) { const v = request.headers.get(h); if (v) headers.set(h, v); }
-  for (const [k, v] of Object.entries(P.auth(secret))) headers.set(k, v);
+  for (const [k, v] of Object.entries(P.auth(secretNow))) headers.set(k, v);
   if (!headers.has('user-agent')) headers.set('user-agent', 'leash-proxy');
   const upstream = `https://${upHost}${P.base}${path}${url.search}`;
   let res;
   try {
     res = await fetcher(upstream, { method, headers, body: body && body.length ? body : undefined, redirect: 'manual' });
   } catch {
+    // no answer: the call may or may not have happened, so what a money cap reserved for it stays counted
     throw new HttpError(502, 'upstream_unreachable');
+  }
+  // a refusal from the upstream (4xx and the like) means the money did not move: the cap's reservation goes back. A 2xx
+  // keeps it, and so does a 5xx, because the upstream may have done it before failing.
+  let released = false;
+  if (brake.reserved && Brakes.definitelyNotDone(res.status)) {
+    released = await Brakes.release(env, brake.reserved).then(() => true, (e) => { console.error(JSON.stringify({ event: 'release_failed', message: String(e?.message || e).slice(0, 200) })); return false; });
   }
   const len = Number(res.headers.get('content-length') || 0);
   if (len > MAX_RESP) throw new HttpError(502, 'upstream_too_large');
@@ -339,6 +382,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   ]);
   if (agentKey && !(tok.agent_last_used > now() - 60_000)) await env.DB.prepare('UPDATE agent_keys SET last_used = ? WHERE id = ?').bind(now(), tok.agent_key_id).run();
   // writes are on the record; an approved call was already sealed as "executed", so its result is not sealed twice
-  if (method !== 'GET' && method !== 'HEAD') await audit(env, tok.account_id, 'token:' + tok.id, 'proxy', { ...where, status: res.status, rule: d.rule }, d.decision === 'hold' ? { receipts: false } : seal);
+  // (a call a money cap let through also records what it was, for the owner: never in the public receipt)
+  if (method !== 'GET' && method !== 'HEAD') await audit(env, tok.account_id, 'token:' + tok.id, 'proxy', { ...where, status: res.status, rule: d.rule, ...(brake.money ? { money: brake.money, ...(released ? { released: true } : {}) } : {}) }, d.decision === 'hold' ? { receipts: false } : seal);
   return new Response(res.body, { status: res.status, headers: out });
 }

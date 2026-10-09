@@ -139,3 +139,36 @@ await measure(`POST /v1/receipts, ${LIMITS.MAX_SIGNED_BATCH} signed (the cap)`, 
 await measure('POST /v1/receipts, 1 unsigned', (i) => request('POST', '/v1/receipts', { bearer: rkey, body: { receipt: { agent: 'a', action: 'one ' + i } } }));
 await measure('GET /v1/stats (cached head)', () => request('GET', '/v1/stats'));
 await measure('GET /v1/log/proof/inclusion', () => request('GET', '/v1/log/proof/inclusion?index=3'));
+
+// ---- Brakes: the breaker's counters, money caps (a Stripe lookup stub, no network), Freeze and a reset
+const stripeCred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'stripe', secret: 'sk_test_' + 'B'.repeat(24) } })).body.id;
+const CHG = 'ch_3NbenchChargeABCDEF01';
+w.reply = (to, init) => {
+  const j = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } });
+  return init.method === 'GET' && to.includes('/v1/charges/') ? j({ id: CHG, object: 'charge', amount: 900000, amount_captured: 900000, amount_refunded: 0, captured: true, currency: 'usd' }) : j({ ok: true });
+};
+const ceremony = async (begin, finish, body = {}) => { const b = await w.req('POST', begin, { cookie: u.cookie, body }); return w.req('POST', finish, { cookie: u.cookie, body: { ...body, challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) } }); };
+const mintFor = async (credentialId, policy) => (await w.req('POST', '/v1/tokens', { cookie: u.cookie, body: { credentialId, policy } })).body.token;
+const limited = await mintFor(cred, { perMinute: 600, limits: { writesPerHour: 5000, repeatsPer5Min: 100 } });
+const capped = (await ceremony('/v1/tokens/passkey/begin', '/v1/tokens/passkey/finish', { credentialId: stripeCred, label: 'support agent', policy: { perMinute: 600, money: { currency: 'usd', perCall: 100000, perDay: 99999999999 }, limits: { writesPerHour: 5000, repeatsPer5Min: 100 } } })).body.token;
+const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
+const fresh = () => w.env.DB.raw.prepare('DELETE FROM ratelimits').run(); // the account limit (300 writes a minute) is not what is measured
+await measure('proxy POST, both breaker limits (counted + allowed + sealed)', (i) => request('POST', url('/repos/a/b/issues'), { bearer: limited, body: { title: 'brakes', i } }));
+await measure('proxy POST /v1/refunds, under the caps (lookup, reserve, count, sealed)', (i) => request('POST', 'https://leash.test/p/stripe/v1/refunds', { bearer: capped, raw: `charge=${CHG}&amount=${100 + i}`, headers: FORM }));
+await measure('proxy POST /v1/refunds, over the cap (lookup + held + push check + sealed)', (i) => { w.env.DB.raw.prepare("UPDATE holds SET status = 'denied' WHERE status = 'pending'").run(); return request('POST', 'https://leash.test/p/stripe/v1/refunds', { bearer: capped, raw: `charge=${CHG}&amount=${200000 + i}`, headers: FORM }); }, (st) => st === 428);
+await measure('freeze (any signed-in session)', async () => { fresh(); if (w.env.DB.raw.prepare('SELECT frozen_at FROM accounts').get().frozen_at) await ceremony('/v1/me/unfreeze/begin', '/v1/me/unfreeze/finish'); return request('POST', '/v1/me/freeze', { cookie: u.cookie, body: {} }); });
+await measure('proxy GET, frozen account (423, nothing else read or written)', () => request('GET', url('/repos/a/b'), { bearer: plain }), (st) => st === 423);
+await measure('unfreeze (passkey verify)', async () => {
+  fresh();
+  await w.req('POST', '/v1/me/freeze', { cookie: u.cookie, body: {} });
+  const b = await w.req('POST', '/v1/me/unfreeze/begin', { cookie: u.cookie, body: {} });
+  return request('POST', '/v1/me/unfreeze/finish', { cookie: u.cookie, body: { challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) } });
+});
+await measure('reset a tripped token (passkey verify)', async (i) => {
+  fresh();
+  const t = await w.req('POST', '/v1/tokens', { cookie: u.cookie, body: { credentialId: cred, label: 'trips ' + i, policy: { limits: { writesPerHour: 1 } } } });
+  await w.req('POST', '/p/github/repos/a/b/issues', { bearer: t.body.token, ...anon, body: { n: 1 } });
+  await w.req('POST', '/p/github/repos/a/b/issues', { bearer: t.body.token, ...anon, body: { n: 2 } }); // trips it
+  const b = await w.req('POST', `/v1/tokens/${t.body.id}/reset/begin`, { cookie: u.cookie, body: {} });
+  return request('POST', `/v1/tokens/${t.body.id}/reset/finish`, { cookie: u.cookie, body: { challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) } });
+});
