@@ -14,3 +14,5 @@ CREATE INDEX sessions_by_account ON sessions(account_id, kind);
 ALTER TABLE tokens ADD COLUMN session_id TEXT;
 ALTER TABLE agent_keys ADD COLUMN session_id TEXT;
 ALTER TABLE api_keys ADD COLUMN session_id TEXT;
+-- a receipts key made by a CLI session ends with that session, like its tokens (NULL: no end)
+ALTER TABLE api_keys ADD COLUMN expires_at INTEGER;

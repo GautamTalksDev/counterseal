@@ -208,8 +208,11 @@ $('devApprove').onclick = async () => {
 async function cliAlert(id) {
   const { sessions } = await api('GET', '/v1/sessions');
   const s = sessions.find((x) => x.id === id);
-  $('cliRevoke').hidden = !s; $('cliMine').textContent = s ? 'It was me' : 'Close';
-  $('cliWhat').textContent = s ? `Signed in ${new Date(s.created_at).toLocaleString()} from ${place(s)}.` : 'That sign-in has already ended or was revoked.';
+  const open = s && s.status !== 'revoked';
+  $('cliRevoke').hidden = !open; $('cliMine').textContent = open ? 'It was me' : 'Close';
+  $('cliRevoke').textContent = s && s.status === 'ended' ? 'Revoke what it made' : 'Revoke it';
+  $('cliWhat').textContent = !s ? 'That sign-in is not on this account, or is more than 7 days old.'
+    : `Signed in ${new Date(s.created_at).toLocaleString()} from ${place(s)}.${s.status === 'ended' ? ' It has signed out or expired, but tokens and keys it made may still work.' : s.status === 'revoked' ? ' It was revoked.' : ''}`;
   $('cliMine').onclick = () => { history.replaceState(null, '', '/app'); route(); };
   $('cliRevoke').onclick = async () => {
     try { const r = await api('DELETE', `/v1/sessions/${id}`); toast(`Revoked, with ${r.revoked.tokens} token(s), ${r.revoked.agentKeys} agent key(s) and ${r.revoked.receiptsKeys} receipts key(s) it made.`); history.replaceState(null, '', '/app'); route(); load(); } catch (e) { toast(e.message); }
@@ -219,12 +222,13 @@ async function cliSessionsView() {
   const { sessions } = await api('GET', '/v1/sessions');
   const L = $('cliSessions'); L.replaceChildren();
   for (const s of sessions) {
-    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke' });
-    rv.onclick = async () => {
+    const rv = s.status === 'revoked' ? null : el('button', { className: 'btn sm dan', textContent: s.status === 'ended' ? 'Revoke what it made' : 'Revoke' });
+    if (rv) rv.onclick = async () => {
       if (!confirm('Revoke this command line sign-in? It is signed out, and every token, agent key and receipts key it made is revoked.')) return;
       try { await api('DELETE', `/v1/sessions/${s.id}`); cliSessionsView(); load(); } catch (e) { toast(e.message); }
     };
-    L.append(el('div', {}, el('span', {}, el('b', { textContent: new Date(s.created_at).toLocaleString() }), el('span', { className: 'dim', textContent: `  from ${place(s)}, ends ${new Date(s.expires_at).toLocaleDateString()}` })), rv));
+    const state = s.status === 'live' ? `ends ${new Date(s.expires_at).toLocaleDateString()}${s.current ? ' (this one)' : ''}` : s.status === 'ended' ? 'signed out or expired' : 'revoked';
+    L.append(el('div', {}, el('span', {}, el('b', { textContent: new Date(s.created_at).toLocaleString() }), el('span', { className: 'dim', textContent: `  from ${place(s)}, ${state}` })), rv));
   }
 }
 

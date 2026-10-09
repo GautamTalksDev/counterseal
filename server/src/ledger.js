@@ -86,7 +86,8 @@ export async function apiKey(env, request) {
   const m = (request.headers.get('authorization') || '').match(/^Bearer (lsr_[A-Za-z0-9_-]{43})$/);
   if (!m) throw new HttpError(401, 'api_key_required', 'Send your receipts API key as: Authorization: Bearer lsr_...');
   const k = await env.DB.prepare('SELECT * FROM api_keys WHERE hash = ?').bind(await sha256hex(m[1])).first();
-  if (!k || k.revoked) throw new HttpError(401, 'api_key_invalid');
+  // a receipts key made by a CLI session ends with it (expires_at); others have none
+  if (!k || k.revoked || (k.expires_at && k.expires_at < now())) throw new HttpError(401, 'api_key_invalid');
   return k;
 }
 
@@ -317,7 +318,7 @@ export const LEDGER_ROUTES = [
   }],
 
   // ---- receipts API keys (lsr_). Binding a signer needs proof of possession of the private key.
-  ['GET', /^\/v1\/keys$/, 'session', async (c) => ({ keys: (await c.env.DB.prepare('SELECT id, label, signer_pub, revoked, created_at, last_used FROM api_keys WHERE account_id = ? ORDER BY created_at DESC').bind(c.s.accountId).all()).results })],
+  ['GET', /^\/v1\/keys$/, 'session', async (c) => ({ keys: (await c.env.DB.prepare('SELECT id, label, signer_pub, revoked, created_at, last_used, expires_at FROM api_keys WHERE account_id = ? ORDER BY created_at DESC LIMIT 200').bind(c.s.accountId).all()).results })],
   ['POST', /^\/v1\/keys\/signer\/begin$/, 'write', async (c) => {
     const signer = await signerPub(c, c.body.signerPublicKey);
     const { id, challenge } = await A.newChallenge(c.env, 'signer', c.s.accountId, signer);
@@ -338,14 +339,15 @@ export const LEDGER_ROUTES = [
       if (ch.account_id !== c.s.accountId || ch.name !== signer) throw new HttpError(400, 'challenge_expired', 'Start again.');
       await checkSignerProof(signer, ch.challenge, c.body.signerProof, c.key.name, c.s.accountId);
     }
-    const live = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM api_keys WHERE account_id = ? AND revoked = 0').bind(c.s.accountId).first();
+    const live = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM api_keys WHERE account_id = ? AND revoked = 0 AND (expires_at IS NULL OR expires_at > ?)').bind(c.s.accountId, now()).first();
     if (live.n >= MAX_RECEIPTS_KEYS) throw new HttpError(409, 'too_many_keys', `Up to ${MAX_RECEIPTS_KEYS} receipts keys. Revoke one first.`);
     const key = 'lsr_' + b64u(rand(32)); const id = randomId();
-    // made by a CLI session: revoking that session revokes this key too
+    // made by a CLI session: it ends when that session ends, and revoking the session revokes it
     const cli = c.s.kind === 'cli' ? await A.sessionId(c.s.hash) : null;
-    await c.env.DB.prepare('INSERT INTO api_keys (id, account_id, hash, label, signer_pub, created_at, session_id) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, c.s.accountId, await sha256hex(key), label, signer, now(), cli).run();
-    await audit(c.env, c.s.accountId, c.s.kind, 'receipts_key_created', { id, label, signed: !!signer, ...(cli ? { session: cli } : {}) });
-    return { id, key, label, note: 'Shown once. Only a hash is kept.' };
+    const expiresAt = cli ? c.s.expiresAt : null;
+    await c.env.DB.prepare('INSERT INTO api_keys (id, account_id, hash, label, signer_pub, created_at, session_id, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id, c.s.accountId, await sha256hex(key), label, signer, now(), cli, expiresAt).run();
+    await audit(c.env, c.s.accountId, c.s.kind, 'receipts_key_created', { id, label, signed: !!signer, ...(cli ? { session: cli, expires_at: expiresAt } : {}) });
+    return { id, key, label, ...(expiresAt ? { expiresAt } : {}), note: `Shown once. Only a hash is kept.${expiresAt ? ' It ends with this command line sign-in; make lasting keys in the app.' : ''}` };
   }],
   ['DELETE', /^\/v1\/keys\/([0-9a-f]{24})$/, 'write', async (c) => {
     const r = await c.env.DB.prepare('UPDATE api_keys SET revoked = 1 WHERE id = ? AND account_id = ? AND revoked = 0').bind(c.m[1], c.s.accountId).run();

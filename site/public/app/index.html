@@ -81,7 +81,7 @@
           <dt>You are</dt><dd id="devHere"></dd>
         </dl>
         <p class="alert" id="devMismatch" hidden></p>
-        <p>For <b id="devDays">7 days</b> it can see your vault's key names, held requests and audit log; create agent tokens that use your vaulted keys for any call that is not held; add keys to your vault; and make agent keys and receipts keys.</p>
+        <p>For <b id="devDays">7 days</b> it can see your vault's key names, held requests and audit log; create agent tokens that use your vaulted keys for any call that is not held; add keys to your vault; make agent keys and receipts keys; deny held calls; and revoke tokens and receipts keys.</p>
         <p class="dim">It can never approve a held call, pre-approve irreversible calls, read a key, delete a vaulted key, revoke an agent key, turn receipts off or delete your account.</p>
         <p><b>Did you just run <span class="mono">leashcli login</span> yourself, on a computer you control?</b> If someone sent you this code or a link to this page, deny it: approving gives them your account.</p>
         <label class="lbl"><input type="checkbox" id="devMine"> Yes. I ran it myself just now, and this code is in my own terminal.</label>
@@ -204,9 +204,9 @@
       </div>
       <div class="panel form">
         <h3>Command line sign-ins</h3>
-        <p class="dim small">Each <span class="mono">leashcli login</span> you approved, where it started and when it ends (7 days at most). Revoking one signs that command line out and revokes every token, agent key and receipts key it made.</p>
+        <p class="dim small">Each <span class="mono">leashcli login</span> of the last 7 days, where it started, and whether it is still signed in (7 days at most). Revoking one signs that command line out and revokes every token, agent key and receipts key it made, even after it signed out.</p>
         <div id="cliSessions" class="list"></div>
-        <p class="empty-row dim" id="noCliSessions">No command line is signed in.</p>
+        <p class="empty-row dim" id="noCliSessions">No command line sign-ins in the last 7 days.</p>
       </div>
       <div class="panel form danger">
         <h3>Delete account</h3>

@@ -301,35 +301,53 @@ export async function devicePoll(env, body) {
   return { access_token: token, token_type: 'Bearer', expires_in: CLI_TTL / 1000 };
 }
 
-// ---- CLI sessions: list them, and revoke one with everything it made
+// ---- CLI sessions: list them, and revoke one with everything it made.
+// The list comes from the audit log (every sign-in of the last 7 days), not only from live session rows: a phished
+// command line that signs itself out at once (or a session that has expired) leaves its tokens, agent keys and receipts
+// keys behind, and its owner must still be able to find it and revoke what it made.
+const signinsSince = async (env, accountId, since, limit) => (await env.DB.prepare("SELECT at, detail FROM audit WHERE account_id = ? AND action = 'cli_signed_in' AND at > ? ORDER BY seq DESC LIMIT ?").bind(accountId, since, limit).all()).results
+  .map((r) => { const d = JSON.parse(r.detail); return { id: String(d.session || ''), created_at: r.at, country: d.country || null, network: d.network || null }; })
+  .filter((s) => /^[0-9a-f]{24}$/.test(s.id));
+
 export async function listCliSessions(env, sess) {
-  const rows = (await env.DB.prepare("SELECT hash, created_at, expires_at, country, network FROM sessions WHERE account_id = ? AND kind = 'cli' AND expires_at > ? ORDER BY created_at DESC LIMIT 100").bind(sess.accountId, now()).all()).results;
-  return { sessions: await Promise.all(rows.map(async (r) => ({ id: await sessionId(r.hash), created_at: r.created_at, expires_at: r.expires_at, country: r.country || null, network: r.network || null, current: r.hash === sess.hash }))) };
+  const t = now(), a = sess.accountId;
+  const rows = (await env.DB.prepare("SELECT hash, created_at, expires_at, country, network FROM sessions WHERE account_id = ? AND kind = 'cli' AND expires_at > ? ORDER BY created_at DESC LIMIT 100").bind(a, t).all()).results;
+  const live = new Map();
+  for (const r of rows) live.set(await sessionId(r.hash), r);
+  const revoked = new Set((await env.DB.prepare("SELECT detail FROM audit WHERE account_id = ? AND action = 'cli_session_revoked' AND at > ?").bind(a, t - CLI_TTL).all()).results.map((r) => JSON.parse(r.detail).session));
+  const out = [];
+  for (const s of await signinsSince(env, a, t - CLI_TTL, 100)) {
+    const r = live.get(s.id);
+    live.delete(s.id);
+    out.push({ ...s, expires_at: r ? r.expires_at : null, status: r ? 'live' : revoked.has(s.id) ? 'revoked' : 'ended', current: !!r && r.hash === sess.hash });
+  }
+  // live sessions with no sign-in entry (made before migration 0005)
+  for (const [id, r] of live) out.push({ id, created_at: r.created_at, expires_at: r.expires_at, country: r.country || null, network: r.network || null, status: 'live', current: r.hash === sess.hash });
+  return { sessions: out };
 }
 
-/** the CLI sign-ins of the last 15 minutes, for the alert a phone shows after a push */
-export async function recentCliSignins(env, accountId) {
-  const rows = (await env.DB.prepare("SELECT hash, created_at, country, network FROM sessions WHERE account_id = ? AND kind = 'cli' AND created_at > ? ORDER BY created_at DESC LIMIT 5").bind(accountId, now() - 15 * 60_000).all()).results;
-  return Promise.all(rows.map(async (r) => ({ id: await sessionId(r.hash), created_at: r.created_at, country: r.country || null, network: r.network || null })));
-}
+/** the CLI sign-ins of the last 15 minutes, for the alert a phone shows after a push (from the audit log, so a sign-in
+ *  that already signed itself out is still shown) */
+export const recentCliSignins = (env, accountId) => signinsSince(env, accountId, now() - 15 * 60_000, 5);
 
-/** web session only (a stolen CLI session must not sign out its owner's other machines). Revokes the session and every
- *  token, agent key and receipts key it made, in one batch. */
+/** web session only (a stolen CLI session must not sign out its owner's other machines). Ends the session if it is
+ *  still live and revokes every token, agent key and receipts key it made, in one batch; this works after the session
+ *  signed out or expired too. */
 export async function revokeCliSession(env, sess, sid) {
   const rows = (await env.DB.prepare("SELECT hash FROM sessions WHERE account_id = ? AND kind = 'cli'").bind(sess.accountId).all()).results;
   let target = null;
   for (const r of rows) if ((await sessionId(r.hash)) === sid) { target = r.hash; break; }
-  if (!target) throw new HttpError(404, 'not_found');
+  if (!target && !(await env.DB.prepare("SELECT 1 AS x FROM audit WHERE account_id = ? AND action = 'cli_signed_in' AND detail LIKE ? LIMIT 1").bind(sess.accountId, `%"session":"${sid}"%`).first())) throw new HttpError(404, 'not_found');
   const t = now(), a = sess.accountId;
   const [, tk, ak, rk] = await env.DB.batch([
-    env.DB.prepare('DELETE FROM sessions WHERE hash = ? AND account_id = ?').bind(target, a),
+    env.DB.prepare('DELETE FROM sessions WHERE hash = ? AND account_id = ?').bind(target || '', a),
     env.DB.prepare('UPDATE tokens SET revoked = 1 WHERE account_id = ? AND session_id = ? AND revoked = 0').bind(a, sid),
     env.DB.prepare('UPDATE agent_keys SET revoked_at = ? WHERE account_id = ? AND session_id = ? AND revoked_at IS NULL').bind(t, a, sid),
     env.DB.prepare('UPDATE api_keys SET revoked = 1 WHERE account_id = ? AND session_id = ? AND revoked = 0').bind(a, sid),
   ]);
   const n = (r) => r?.meta?.changes || 0;
-  await audit(env, a, 'web', 'cli_session_revoked', { session: sid, tokens: n(tk), agent_keys: n(ak), receipts_keys: n(rk) });
-  return { ok: true, revoked: { tokens: n(tk), agentKeys: n(ak), receiptsKeys: n(rk) } };
+  await audit(env, a, 'web', 'cli_session_revoked', { session: sid, ended: !!target, tokens: n(tk), agent_keys: n(ak), receipts_keys: n(rk) });
+  return { ok: true, ended: !!target, revoked: { tokens: n(tk), agentKeys: n(ak), receiptsKeys: n(rk) } };
 }
 
 export { newChallenge, takeChallenge };

@@ -179,9 +179,46 @@ test('an approved sign-in: 7 days, on the record, every device alerted, listed w
   assert.equal((await w.req('GET', '/p/github/user', { bearer: web.token, ...cliReq })).status, 200, 'what the web session made is untouched');
   assert.equal((await w.req('POST', '/v1/receipts', { bearer: rk.key, ...cliReq, body: { receipt: { agent: 'a', action: 'b' } } })).body.error, 'api_key_invalid');
   assert.ok(w.env.DB.raw.prepare('SELECT revoked_at FROM agent_keys').get().revoked_at);
-  assert.equal((await w.req('GET', '/v1/sessions', { cookie: u.cookie })).body.sessions.length, 0);
+  assert.deepEqual((await w.req('GET', '/v1/sessions', { cookie: u.cookie })).body.sessions.map((s) => [s.id, s.status]), [[sid, 'revoked']]);
   assert.ok(w.env.DB.raw.prepare("SELECT 1 FROM audit WHERE action = 'cli_session_revoked' AND account_id = ?").get(id));
   assert.equal((await w.req('GET', '/v1/audit/verify', { cookie: u.cookie })).body.ok, true);
+});
+
+test('a phished command line that signs itself out cannot hide: the alert and the list still show it, and revoking it revokes what it made', async () => {
+  const w = new World();
+  await withVapid(w);
+  const u = await w.user();
+  await w.req('POST', '/v1/push/subscribe', { cookie: u.cookie, body: { endpoint: 'https://fcm.googleapis.com/fcm/send/phone' } });
+  const cli = await signIn(w, u, DE);
+  const cred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'github', secret: 'ghp_' + 'H'.repeat(36) } })).body.id;
+  const tok = (await w.req('POST', '/v1/tokens', { bearer: cli, ...cliReq, body: { credentialId: cred } })).body.token;
+  const rk = (await w.req('POST', '/v1/keys', { bearer: cli, ...cliReq, body: { label: 'quiet' } })).body;
+  assert.ok(rk.expiresAt <= Date.now() + 7 * 86400_000 + 60_000, 'a receipts key made by a CLI session ends with it');
+  // it signs itself out at once
+  assert.equal((await w.req('POST', '/v1/auth/logout', { bearer: cli, ...cliReq, body: {} })).status, 200);
+  assert.equal((await w.req('GET', '/v1/tokens', { bearer: cli, ...cliReq })).body.error, 'signed_out');
+  // the phone still says so, and the list still has it, as ended
+  const al = (await w.req('GET', '/v1/alerts', { cookie: u.cookie })).body.signins;
+  assert.equal(al.length, 1); assert.equal(al[0].country, 'DE');
+  const s = (await w.req('GET', '/v1/sessions', { cookie: u.cookie })).body.sessions;
+  assert.deepEqual(s.map((x) => [x.id, x.status]), [[al[0].id, 'ended']]);
+  assert.equal((await w.req('GET', '/p/github/user', { bearer: tok, ...cliReq })).status, 200, 'what it made still works until revoked');
+  const rv = await w.req('DELETE', `/v1/sessions/${al[0].id}`, { cookie: u.cookie });
+  assert.equal(rv.status, 200, JSON.stringify(rv.body));
+  assert.equal(rv.body.ended, false); assert.deepEqual(rv.body.revoked, { tokens: 1, agentKeys: 0, receiptsKeys: 1 });
+  assert.equal((await w.req('GET', '/p/github/user', { bearer: tok, ...cliReq })).body.error, 'token_invalid');
+  assert.equal((await w.req('POST', '/v1/receipts', { bearer: rk.key, ...cliReq, body: { receipt: { agent: 'a', action: 'b' } } })).body.error, 'api_key_invalid');
+  assert.equal((await w.req('GET', '/v1/sessions', { cookie: u.cookie })).body.sessions[0].status, 'revoked');
+  // an id that never signed in to this account is not found
+  assert.equal((await w.req('DELETE', `/v1/sessions/${'0'.repeat(24)}`, { cookie: u.cookie })).status, 404);
+  const eve = await w.user('Eve', '192.0.2.88');
+  assert.equal((await w.req('DELETE', `/v1/sessions/${al[0].id}`, { cookie: eve.cookie })).status, 404);
+  // and a receipts key made by a CLI session stops when the session's 7 days end, even if nobody revokes anything
+  const cli2 = await signIn(w, u, DE);
+  const rk2 = (await w.req('POST', '/v1/keys', { bearer: cli2, ...cliReq, body: { label: 'later' } })).body;
+  await timeShift(7 * 86400_000 + 60_000, async () => {
+    assert.equal((await w.req('POST', '/v1/receipts', { bearer: rk2.key, ...cliReq, body: { receipt: { agent: 'a', action: 'b' } } })).body.error, 'api_key_invalid');
+  });
 });
 
 test('rate limits: 10 sign-in starts an hour per network, 10 lookups per 10 minutes and 10 approvals an hour per account', async () => {
