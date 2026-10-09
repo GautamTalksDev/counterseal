@@ -26,7 +26,7 @@ export const KINDS = { shell: 'RUN', tool: 'CALL' };
 // waiting holds: 20 per guard key, like a token; the account's 100 is shared with brokered calls (broker.js)
 export const HOLD_TTL = 30 * 60_000, MAX_KEYS = 20, CREATES_PER_HOUR = 60, PENDING_PER_KEY = 20;
 export const POLLS_PER_MINUTE = 30, USES_PER_MINUTE = 30, WAIT_MAX = 20, WAIT_STEP = 2000, WAIT_READS = 10;
-export const MAX_DETAIL = 4096, MAX_SUMMARY = 200, MAX_WHY = 300;
+export const MAX_DETAIL = 4096, MAX_SUMMARY = 200, MAX_WHY = 300, MAX_PREVIEW = 3 * MAX_DETAIL;
 const KEY = /^Bearer (lsg_[A-Za-z0-9_-]{43})$/;
 const LABEL = /^[\p{L}\p{N} ._:/()-]+$/u;
 const RULE = /^[a-z0-9._:-]{1,64}$/;
@@ -137,6 +137,11 @@ function readRequest(b) {
 export async function create(c) {
   const k = c.g, env = c.env, t = now();
   const r = readRequest(c.body);
+  // the approver sees the exact command, never truncated: preview() makes invisible and direction characters visible.
+  // Each hidden character becomes 8 visible ones, so a command made mostly of them is refused (before anything is
+  // written) rather than shown at up to 32 KB on every phone and dashboard refresh; no real command needs that many.
+  const pv = preview('', shown(r.detail), 64 * 1024);
+  if (pv.length > MAX_PREVIEW) throw new HttpError(400, 'bad_detail', 'detail has too many invisible or control characters to show.');
   const tokenId = guardTokenId(k.id);
   const hash = await approvalHash(r.kind, r.agent, r.detail, r.cwd);
   const url = async (id) => `${await appOrigin(env, k.account_id)}/app#hold=${id}`;
@@ -154,8 +159,6 @@ export async function create(c) {
     throw new HttpError(429, 'too_many_holds', `${n.mine >= PENDING_PER_KEY ? `${n.mine} approvals from this guard key are` : `${n.acct} requests are`} already waiting, so this one was not held or sent. Stop and ask your human to review the waiting ones first.`);
   }
   const id = randomId(), expiresAt = t + HOLD_TTL, method = KINDS[r.kind];
-  // the approver sees the exact command, never truncated: preview() makes invisible and direction characters visible
-  const pv = preview('', shown(r.detail), 64 * 1024);
   const context = JSON.stringify({ ...(r.cwd ? { cwd: r.cwd } : {}), ...(r.session ? { session: r.session } : {}), ...(r.map ? { map: r.map } : {}) });
   // one statement: two hooks asking for the same command at the same moment make one hold, not two
   const ins = await env.DB.prepare(`INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview, kind, agent, context)

@@ -213,6 +213,7 @@ test('input validation: fixed vocabularies, sizes, no unknown fields, a folder n
     [{ why: 'x'.repeat(301) }, 'bad_why'], [{ why: '​\n' }, 'bad_why'],
     [{ summary: 'x'.repeat(201) }, 'bad_summary'], [{ summary: 7 }, 'bad_summary'],
     [{ detail: 'x'.repeat(4097) }, 'bad_detail'], [{ detail: '' }, 'bad_detail'], [{ detail: 'rm -rf /\u0000' }, 'bad_detail'], [{ detail: 'echo \ud800' }, 'bad_detail'],
+    [{ detail: 'ls ' + '​'.repeat(2000) }, 'bad_detail'], [{ detail: 'ls ' + '\u001b'.repeat(2000) }, 'bad_detail'],
     [{ context: { cwd: '/home/me/app' } }, 'bad_context'], [{ context: { cwd: 'a\\b' } }, 'bad_context'], [{ context: { cwd: '..' } }, 'bad_context'],
     [{ context: { cwd: 'x'.repeat(81) } }, 'bad_context'], [{ context: { session: 'has space' } }, 'bad_context'], [{ context: { path: 'x' } }, 'bad_context'], [{ context: 'infra' }, 'bad_context'],
     [{ map: 'latest' }, 'bad_map'], [{ extra: 1 }, 'bad_field'], [{ token_id: 'x' }, 'bad_field'],
@@ -225,6 +226,11 @@ test('input validation: fixed vocabularies, sizes, no unknown fields, a folder n
   assert.equal((await create(w, k.key, undefined, { raw: '{"kind":', headers: { 'content-type': 'application/json' } })).body.error, 'bad_json');
   assert.equal((await create(w, k.key, undefined, { raw: JSON.stringify(ask({ detail: 'x'.repeat(4096), why: 'y'.repeat(300) })) + ' '.repeat(16384), headers: { 'content-type': 'application/json' } })).status, 413);
   assert.equal(w.env.DB.raw.prepare('SELECT COUNT(*) n FROM holds').get().n, 0, 'nothing was held');
+  assert.equal(w.env.DB.raw.prepare("SELECT COUNT(*) n FROM ratelimits WHERE bucket LIKE 'gcreate:%'").get().n, 0, 'a refused request spends nothing');
+  // a long command with a few hidden characters is still shown in full
+  const fine = await create(w, k.key, ask({ detail: 'x'.repeat(3000) + '​'.repeat(100) }));
+  assert.equal(fine.status, 202, JSON.stringify(fine.body));
+  await w.req('POST', `/v1/holds/${fine.body.id}/deny`, { cookie: u.cookie, body: {} });
   // accepted: a tool call (MCP), no context, no map; the summary and why are cleaned for display
   const t = await create(w, k.key, { kind: 'tool', agent: 'mcp', rule: 'mcp.execute_sql', why: 'Runs SQL that is not\na plain read.', summary: 'execute_sql‮', detail: '{"arguments":{"query":"DROP TABLE users"},"tool":"execute_sql"}' });
   assert.equal(t.status, 202, JSON.stringify(t.body));

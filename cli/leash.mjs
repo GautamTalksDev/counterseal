@@ -174,7 +174,8 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli
       const seen = new Set();
       process.stderr.write('Watching for held requests. Ctrl+C to stop.\n');
       for (;;) {
-        for (const h of (await api('GET', '/v1/holds')).holds) if (!seen.has(h.id)) { seen.add(h.id); console.log(`\nHELD  ${h.method} ${h.host}${h.path}\n      ${h.why}\n      approve: ${server()}/app#hold=${h.id}`); process.stdout.write('\u0007'); }
+        // a coding agent's command or tool call (kind shell or tool) reads "RUN claude-code: <summary>"
+        for (const h of (await api('GET', '/v1/holds')).holds) if (!seen.has(h.id)) { seen.add(h.id); console.log(`\nHELD  ${h.method} ${h.host}${h.kind && h.kind !== 'proxy' ? ': ' : ''}${h.path}\n      ${h.why}\n      approve: ${server()}/app#hold=${h.id}`); process.stdout.write('\u0007'); }
         await new Promise((r) => setTimeout(r, 4000));
       }
     }

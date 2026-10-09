@@ -149,18 +149,18 @@ Workers). Medians, with the 95th percentile in brackets:
 | Receipts API, 12 signed (the cap) | 3.3 ms (5.6) | 1.6 ms |
 | `/v1/stats` | 0.1 ms (0.5) | |
 
-The Approvals API (branch `feat/approvals`), measured later the same day on a busier machine, with the same run's
-baseline for comparison (that run measured a proxied GET, unbound, at 1.6 ms (3.8) and a held DELETE, bound, sealed at
-3.3 ms (6.7), so these numbers read about twice the table above):
+The Approvals API (branch `feat/approvals`), measured later the same day after rebasing on the second pass; the same
+run measured a proxied GET, unbound, at 0.85 ms (2.0) and a held DELETE, bound, sealed at 1.5 ms (2.7), in line with the
+table above:
 
 | Path | Worker CPU | Durable Object CPU |
 |---|---|---|
-| `POST /v1/approvals`, 3 KB command, held, sealed | 2.2 ms (4.1) | 1.3 ms |
-| `GET /v1/approvals/<id>` (no wait) | 0.6 ms (5.0) | |
-| `GET /v1/approvals/<id>?wait=20` (11 reads; waiting itself is not CPU) | 1.0 ms (6.0) | |
-| Approve a guard hold (passkey verify), sealed | 2.5 ms (6.9) | 1.3 ms |
-| `POST /v1/approvals/<id>/use`, sealed | 1.4 ms (4.0) | 1.3 ms |
-| `POST /v1/holds/<id>/deny` with a reason, sealed | 0.9 ms (1.8) | 0.9 ms |
+| `POST /v1/approvals`, 3 KB command, held, sealed | 1.0 ms (2.4) | 0.5 ms |
+| `GET /v1/approvals/<id>` (no wait) | 0.3 ms (1.5) | |
+| `GET /v1/approvals/<id>?wait=20` (11 reads; waiting itself is not CPU) | 0.4 ms (5.3) | |
+| Approve a guard hold (passkey verify), sealed | 1.5 ms (3.4) | 0.8 ms |
+| `POST /v1/approvals/<id>/use`, sealed | 0.7 ms (4.4) | 0.7 ms |
+| `POST /v1/holds/<id>/deny` with a reason, sealed | 0.7 ms (2.5) | 0.6 ms |
 
 These are Node numbers, not a load test on Workers. Run one before raising the batch caps in `server/src/receipts.js`.
 
