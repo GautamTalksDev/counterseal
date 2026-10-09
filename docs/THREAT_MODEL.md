@@ -128,15 +128,18 @@ before the key is read; redirects are never followed. Public receipts carry `mys
 **S17. Moving more money than the caps allow.** The cap is only as good as the reading of the amount. The amount comes
 from the map's strict form parser (`strictForm`, built on the same copies-of-every-parameter reading that holds
 `confirm=true` tricks), and anything it cannot read one way is held: a repeated amount (also under a `;` split), an
-escaped, bracketed, spaced or other-case name, a copy in the query string, a JSON or multipart body, a body over 4 KB,
+escaped, bracketed, spaced or other-case name, an escape in a watched value, a raw `;`, space or control character anywhere in the
+body (a refund whose amount sits after a `;` has no amount to a server that does not split there, and then refunds everything), a copy in the query string, a JSON or multipart body, a body over 4 KB,
 a content type that is not a plain form. An amount is accepted only as `[1-9][0-9]{0,11}`: no sign, zeros in front,
 fraction, exponent, space, other digits or empty value; a currency only as three lower case letters. A refund must name
 exactly one charge or payment intent in the usual id form and must not come from a customer balance. Only the two calls
 are ever let through, spelled exactly (`/v1/Refunds`, `.json`, `/v1/charges/<id>/refund`, application fee refunds,
 transfers, charges, top-ups, confirms and captures stay held by the map). A refund's currency and what is left come from
 Stripe, looked up with the vaulted key (a failed, redirected, oversized or oddly shaped answer is held); a refund without
-an amount counts as everything left. Caps are in one currency, so another currency is held, never compared. Tests:
-*amount tricks*, *a lookup that fails*, *currency mismatch*, *every other money call stays held* (`test/brakes-money.test.js`).
+an amount counts as everything left. Caps are in one currency, so another currency is held, never compared. A differential fuzz of 60,000 generated bodies checks that
+every other way of reading a body (first or last copy, `;` splits, folded case, brackets, trimming, no decoding) agrees with the
+reader whenever it reads one. Tests:
+*amount tricks*, *the fuzz*, *a lookup that fails*, *currency mismatch*, *every other money call stays held* (`test/brakes-money.test.js`).
 Residual: the day is the UTC calendar day, so a total can reach twice the daily cap across midnight; a retry of the same
 call counts again; a payment intent's lookup is an upper bound (what it received); a leaked capped token can still move
 money up to its caps until it is revoked (a bound token is not usable without its agent).

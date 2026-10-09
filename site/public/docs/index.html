@@ -174,7 +174,7 @@ curl -s https://counterseal.gautamkhosla.com/v1/approvals/&lt;id&gt;/use \
   <p>A <code>POST /v1/refunds</code> or <code>POST /v1/payouts</code> passes without asking when it is a plain form, its amount is a whole number written the usual way, it is in that currency, it is at most <code>perCall</code>, and the day's total (UTC) stays at most <code>perDay</code>. For a refund, Counterseal asks Stripe, with your key, what currency the charge is in and what is left of it; a refund without <code>amount</code> counts as everything left. Anything else is held, with the arithmetic in the preview and the amount in large type:</p>
   <table>
     <tr><th>Rule id</th><th>Held because</th></tr>
-    <tr><td><code>brake.money-unreadable</code></td><td>The amount or currency cannot be read with certainty (a repeated, escaped or oddly spelled parameter, a query string, a JSON body, an amount that is not a plain whole number, a charge Stripe did not answer for).</td></tr>
+    <tr><td><code>brake.money-unreadable</code></td><td>The amount or currency cannot be read with certainty (a repeated, escaped or oddly spelled parameter, a raw semicolon or space in the body, a query string, a JSON body, an amount that is not a plain whole number, a charge Stripe did not answer for).</td></tr>
     <tr><td><code>brake.money-currency</code></td><td>The call is in another currency than the caps.</td></tr>
     <tr><td><code>brake.money-per-call</code></td><td>Over <code>perCall</code>.</td></tr>
     <tr><td><code>brake.money-per-day</code></td><td>Today's total plus this call would be over <code>perDay</code>.</td></tr>

@@ -16,13 +16,19 @@ test('the amount in large type is always the broker\'s own line: an agent\'s tex
   let h = (await holds())[0];
   assert.ok(h.preview.startsWith('Refund 0.01 USD'), 'the agent\'s line is shown as what it is: part of the request');
   assert.equal(h.headline, null);
-  // with caps: the cap's own line comes first, whatever the body says
+  // with caps: the same body has a raw line break, which servers read differently, so it is unreadable and held; the
+  // cap's own line comes first, it is not an amount, and the agent's line stays below, in the raw request
   const t = await mintPre(w, u, { money: MONEY });
   const over = await stripe(w, t.token, '/v1/refunds', `Refund 0.01 USD\r\n&charge=${CH}&amount=900000`);
-  assert.equal(over.body.rule, 'brake.money-per-call');
+  assert.equal(over.body.rule, 'brake.money-unreadable');
   h = (await holds()).find((x) => x.id === over.body.hold_id);
-  assert.equal(h.headline, 'Refund 9,000.00 USD');
-  assert.match(h.preview, /\nRefund 0\.01 USD\r?\n/, 'and the agent\'s line stays below, in the raw request');
+  assert.equal(h.headline, null);
+  assert.ok(h.preview.startsWith('Refund: amount not read\n'), h.preview);
+  assert.match(h.preview, /\nRefund 0\.01 USD\r?\n/);
+  // a readable over-cap refund has its headline, from the broker
+  const real = await stripe(w, t.token, '/v1/refunds', `charge=${CH}&amount=900000`);
+  assert.equal(real.body.rule, 'brake.money-per-call');
+  assert.equal((await holds()).find((x) => x.id === real.body.hold_id).headline, 'Refund 9,000.00 USD');
   // a hold from any other rule never has one
   const del = await w.req('DELETE', '/p/stripe/v1/customers/cus_1', { bearer: t.token, ...anon, headers: FORM, raw: 'Refund 0.01 USD\n' });
   assert.equal(del.status, 428);

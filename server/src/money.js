@@ -82,6 +82,10 @@ export function readMoneyCall(kind, contentType, bodyText, search) {
   if (!/^application\/x-www-form-urlencoded\s*(;|$)/i.test(contentType || '')) return bad('the body is not a plain form (application/x-www-form-urlencoded)');
   if (search) return bad('the request has a query string');
   if (bodyText.length > 4096) return bad('the body is unusually large');
+  // A raw ";" splits parameters for some servers and not others, so a refund whose amount sits after one reads as having
+  // no amount (everything is refunded) to a server that does not split there. Raw spaces and control characters get read
+  // as part of a name or a value by some parsers and dropped by others. Real clients escape all of these.
+  if (/[;\u0000- \u007f]/.test(bodyText)) return bad('the body has a ";", a space or a control character that servers read differently');
   const f = strictForm(bodyText, search, kind === 'refund' ? ['amount', 'charge', 'payment_intent', 'origin'] : ['amount', 'currency']);
   if (!f) return bad('the parameters could not be read one way (repeated, oddly spelled or not a plain form)');
   let amount;

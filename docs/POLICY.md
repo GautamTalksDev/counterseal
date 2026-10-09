@@ -75,7 +75,7 @@ lower case letters. A call passes only if all of this holds, and anything else i
 
 | Rule id | Held because |
 |---|---|
-| `brake.money-unreadable` | The amount or currency could not be read with certainty: not a plain form body, a query string, a repeated, escaped or oddly spelled parameter, an amount that is not a whole number from 1 to 12 digits written the one canonical way, a refund that names both or neither of `charge` and `payment_intent` (or comes from a customer balance), a charge Stripe did not answer for or answered oddly, nothing left to refund |
+| `brake.money-unreadable` | The amount or currency could not be read with certainty: not a plain form body, a query string, a repeated or oddly spelled parameter, an escape (`%61mount`, `1%300`) in a watched name or value, a raw `;`, space or control character anywhere in the body, an amount that is not a whole number from 1 to 12 digits written the one canonical way, a refund that names both or neither of `charge` and `payment_intent` (or comes from a customer balance), a charge Stripe did not answer for or answered oddly, nothing left to refund |
 | `brake.money-currency` | The call is in another currency than the caps (a refund takes the charge's currency) |
 | `brake.money-per-call` | The amount is over `perCall` |
 | `brake.money-per-day` | The day's total (UTC) plus this call would be over `perDay` |

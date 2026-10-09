@@ -135,6 +135,13 @@ const outsideJson = (c) => c.form.some((l) => l.length) || c.query.some((l) => l
 export function strictForm(body, search, names) {
   const c = paramCopies(body, search, names);
   if (!c || c.j !== undefined || c.json.length || c.query.some((l) => l.length)) return undefined;
+  // A watched name or value written with escapes ("%61mount", "1%300") reads as itself for a server that decodes and as
+  // something else for one that does not. Nothing legitimate writes an amount, a currency or an id that way, so it is
+  // unreadable.
+  for (const part of String(body || '').split(/[&;]/)) {
+    const eq = part.indexOf('='), rawName = eq < 0 ? part : part.slice(0, eq), rawValue = eq < 0 ? '' : part.slice(eq + 1);
+    if ((/[%+]/.test(rawName) || /[%+]/.test(rawValue)) && names.includes(formDecode(rawName).replace(/^[\s[\]]+/, '').split(/[[\]]/)[0].trim().toLowerCase())) return undefined;
+  }
   const out = {};
   for (const n of names) {
     const { all, n: k } = copiesOf(c, n);

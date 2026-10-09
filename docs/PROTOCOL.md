@@ -31,6 +31,11 @@ is true), `executed` (the approved call went through), `denied` (a policy denial
 (GET, HEAD) are not recorded; a read that is held or denied is. `parent` is the account's own audit entry hash (`/v1/audit` returns it as `hash`, with the entry's
 `receipt` index); the audit detail names the path, the token, the agent key and the approving passkey's fingerprint.
 
+The brakes add rule ids and nothing else: `st.money:capped` (a Stripe refund or payout allowed under a token's money caps),
+`brake.money-per-call`, `brake.money-per-day`, `brake.money-currency` and `brake.money-unreadable` (held by a money cap), and
+`brake.tripped` (held because the token's breaker tripped). A receipt never carries an amount, a currency or a charge id,
+and a freeze, an unfreeze or a breaker reset is not a receipt: those are in the account's private audit log only.
+
 `submitter` is a per-entry salted commitment, so entries cannot be grouped by account:
 
 ```

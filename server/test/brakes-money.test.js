@@ -85,19 +85,26 @@ test('amount tricks: a refund or payout is read only when every reading of the r
     `charge=${C}&amount=100;x=1`, `charge=${C}&amount=100%3Bamount=9000&amount=100`, `charge=${C}&amount[]=100`, `charge=${C}&amount[x]=100`, `charge=${C}&[amount]=100`, `charge=${C}& amount=100`,
     `charge=${C}&Amount=100`, `charge=${C}&AMOUNT=100`, `charge=${C}&%61mount=100&amount=100`, `charge=${C}&am%6Funt=100&%61mount=9000`, `charge=${C}&amount=+100`])
     unreadable('refund', body);
-  // an escaped letter or digit is the same character to Stripe and to the broker, so it reads as what it is
-  assert.equal(read('refund', `charge=${C}&amount=1%300`).amount, 100);
-  assert.equal(read('refund', `charge=${C}&%61mount=100`).amount, 100);
+  // an escape in a watched name or value is refused: a server that does not decode would read something else
+  // (Stripe decodes, but nothing legitimate writes an amount or an id that way)
+  for (const b of [`charge=${C}&amount=1%300`, `charge=ch_3Nabcdef%47HIJ&amount=100`,`charge=${C}&%61mount=100`, `%63harge=${C}&amount=100`, `charge=${C}&am%6Funt=100`, `charge=${C}&%41mount=100`, `payment_intent%5B%5D=${PI}`]) unreadable('refund', b);
+  unreadable('payout', 'amount=5000&%63urrency=usd');
   // the amount itself: one canonical spelling, a whole number from 1 up to twelve digits
   for (const a of ['0', '', '00', '0100', '+100', '-100', '100.0', '100.', '.5', '1e3', '1E3', '0x10', '100 ', ' 100', '100abc', '1,000', '١٢٣', '１２３', '1'.repeat(13), '9007199254740993', 'NaN', 'Infinity', 'null', 'true'])
-    unreadable('refund', `charge=${C}&amount=${encodeURIComponent(a)}`, {}, /amount/);
-  unreadable('refund', `charge=${C}&amount=100%20`, {}, /amount/);
+    unreadable('refund', `charge=${C}&amount=${encodeURIComponent(a)}`, {}, /amount|differently|one way/);
+  for (const a of ['0', '00', '0100', '100.0', '100.', '.5', '1e3', '100abc', 'NaN', 'null', '1'.repeat(13), '9007199254740993']) unreadable('refund', `charge=${C}&amount=${a}`, {}, /amount is not a plain whole number/);
+  unreadable('refund', `charge=${C}&amount=`, {}, /amount is not a plain whole number/);
+  unreadable('refund', `charge=${C}&amount=100%20`, {}, /amount|differently|one way/);
+  // raw spaces, control characters and ";" are read differently by different servers (a refund whose amount sits after a
+  // ";" has no amount to a server that does not split there: it refunds everything)
+  for (const b of [`charge=${C};amount=100`, `charge=${C}&amount=100;`, `charge=${C}&amount=100 `, `charge=${C}\n&amount=100`, `charge=${C}&amount=100\r\n`, `charge=${C}&amount=1\u00000`, `charge=${C}&reason=a b&amount=100`, ` charge=${C}&amount=100`])
+    unreadable('refund', b, {}, /differently/);
   // a query string copy, a JSON body, multipart, a bigger body, another content type
   unreadable('refund', `charge=${C}&amount=100`, { search: '?amount=9000' }, /query string/);
   unreadable('refund', `charge=${C}&amount=100`, { search: '?x=1' }, /query string/);
   unreadable('refund', JSON.stringify({ charge: C, amount: 100 }), {}, /one way/);
   unreadable('refund', JSON.stringify({ charge: C, amount: 100, Amount: 9000 }), {}, /one way/);
-  unreadable('refund', `--x\r\nContent-Disposition: form-data; name="amount"\r\n\r\n100\r\n--x--`, {}, /one way/);
+  unreadable('refund', `--x\r\nContent-Disposition: form-data; name="amount"\r\n\r\n100\r\n--x--`, {}, /one way|differently/);
   unreadable('refund', `charge=${C}&amount=100&pad=${'x'.repeat(5000)}`, {}, /large/);
   for (const ct of ['application/json', 'multipart/form-data; boundary=x', 'text/plain', '', 'application/x-www-form-urlencoded, application/json', 'application/x-www-form-urlencodedx'])
     unreadable('refund', `charge=${C}&amount=100`, { ct }, /plain form/);
@@ -108,7 +115,7 @@ test('amount tricks: a refund or payout is read only when every reading of the r
   unreadable('refund', `charge=${C}&origin=customer_balance&amount=100`, {}, /customer balance/);
   unreadable('refund', 'amount=100&origin=customer_balance', {}, /customer balance/);
   for (const id of ['ch_short', 'ch_', 'ch_abc defgh123', 'ch_../v1/payouts12', 'ch_abc%2Fdef12345', 'xx_3Nabcdef123', PI, 'ch_3Nabcdef123/', `ch_${'a'.repeat(65)}`, 'ch_ünicodeabcde'])
-    unreadable('refund', `charge=${encodeURIComponent(id)}&amount=100`, {}, /charge id/);
+    unreadable('refund', `charge=${encodeURIComponent(id)}&amount=100`, {}, /charge id|differently|one way/);
   unreadable('refund', `payment_intent=${C}&amount=100`, {}, /payment intent id/);
   // a payout needs an amount and a currency in lower case letters, once
   unreadable('payout', 'currency=usd', {}, /no amount/);
