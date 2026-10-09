@@ -468,10 +468,10 @@ function renderMap() {
   if (!META) return;
   $('mapV').textContent = META.mapVersion;
   const tabs = $('mapTabs'), rows = $('mapRows');
-  const groups = [...META.providers.map((p) => ({ id: p.id, name: p.name, host: p.host, rules: p.irreversible })), { id: 'all', name: 'Every provider', host: '', rules: META.common || [] }];
+  const groups = [...META.providers.map((p) => ({ id: p.id, name: p.name, host: p.host, note: p.note, rules: p.irreversible })), { id: 'all', name: 'Every provider', host: '', rules: META.common || [] }];
   const showG = (g, btn) => {
     tabs.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', String(t === btn)));
-    rows.replaceChildren(...g.rules.map((r) => el('div', { class: 'mrow' }, el('span', { class: 'id', text: r.id }), el('span', { class: 'mp' }, el('b', { text: r.method === '*' ? 'ANY' : r.method }), r.path), el('span', { class: 'wy', text: r.why }))));
+    rows.replaceChildren(...(g.note ? [el('div', { class: 'mnote', text: g.note })] : []), ...g.rules.map((r) => el('div', { class: 'mrow' }, el('span', { class: 'id', text: r.id }), el('span', { class: 'mp' }, el('b', { text: r.method === '*' ? 'ANY' : r.method }), r.path), el('span', { class: 'wy', text: r.why }))));
   };
   tabs.replaceChildren();
   groups.forEach((g, i) => {

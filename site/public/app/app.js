@@ -61,7 +61,7 @@ async function load() {
   for (const x of c.credentials) {
     const del = el('button', { className: 'btn sm dan', textContent: 'Delete' });
     del.onclick = async () => { if (!confirm(`Delete ${x.label}? Tokens using it stop working.`)) return; await api('DELETE', `/v1/credentials/${x.id}`); load(); };
-    C.append(el('div', {}, el('span', {}, el('b', { textContent: x.label }), el('span', { className: 'dim', textContent: `  ${x.provider}  ...${x.hint}` })), del));
+    C.append(el('div', {}, el('span', {}, el('b', { textContent: x.label }), el('span', { className: 'dim', textContent: `  ${x.provider}${x.host ? ' ' + x.host : ''}  ...${x.hint}` })), del));
     tc.append(el('option', { value: x.id, textContent: `${x.label} (${x.provider})` }));
   }
   $('noCreds').hidden = c.credentials.length > 0;
@@ -164,9 +164,13 @@ async function mint(pre) {
 }
 $('mint').onclick = () => mint(false);
 $('mintPre').onclick = () => mint(true);
+// a provider whose key goes to the merchant's own address (Shopify) asks for it
+let PROV = {};
+const showHost = () => { const h = PROV[$('prov').value]?.perCredentialHost; $('hostBox').hidden = !h; if (h) { $('credHostLbl').textContent = h.label; $('credHost').placeholder = h.example; } };
+$('prov').onchange = showHost;
 $('addCred').onclick = async () => {
   try {
-    await api('POST', '/v1/credentials', { provider: $('prov').value, label: $('credLabel').value.trim() || undefined, secret: $('secret').value.trim() });
+    await api('POST', '/v1/credentials', { provider: $('prov').value, label: $('credLabel').value.trim() || undefined, secret: $('secret').value.trim(), ...(PROV[$('prov').value]?.perCredentialHost ? { host: $('credHost').value.trim() } : {}) });
     $('secret').value = ''; toast('Stored in the vault.'); load();
   } catch (e) { toast(e.message); }
 };
@@ -447,6 +451,7 @@ async function boot() {
     $('avatar').textContent = (me.account.name.trim()[0] || '?').toUpperCase();
     meta = meta || (await api('GET', '/v1/meta'));
     const p = $('prov'); p.replaceChildren(...meta.providers.map((x) => el('option', { value: x.id, textContent: x.name })));
+    PROV = Object.fromEntries(meta.providers.map((x) => [x.id, x])); showHost();
     route(); await load(); pushState().catch(() => {});
     clearInterval(boot.poll); boot.poll = setInterval(() => load().catch(() => {}), 5000);
   } catch {

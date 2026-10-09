@@ -30,7 +30,7 @@
       <p class="fine">No password, no email. Your passkey never leaves your device. New accounts start with public receipts on: each decision on a write is sealed in the public log as the method, the provider host, the decision and hashes, never a path, body, key, name or IP. You can turn it off in Receipts. <a class="ul" href="/privacy/#public">What is public</a></p>
       </div>
     </div>
-    <p class="fine foot">Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</p>
+    <p class="fine foot">Not affiliated with GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend or Shopify.</p>
   </div>
   <div class="auth-r" aria-hidden="true">
     <div class="auth-art">
@@ -113,6 +113,7 @@
           <div><label for="prov" class="lbl">Provider</label><select id="prov"></select></div>
           <div><label for="credLabel" class="lbl">Label</label><input id="credLabel" maxlength="60" placeholder="prod"></div>
         </div>
+        <div id="hostBox" hidden><label for="credHost" class="lbl" id="credHostLbl">Store address</label><input id="credHost" maxlength="80" autocomplete="off" spellcheck="false" placeholder="your-store.myshopify.com"></div>
         <label for="secret" class="lbl">Key</label>
         <input id="secret" type="password" autocomplete="off" spellcheck="false" placeholder="Paste once. You will never see it again.">
         <div class="actions"><button id="addCred" class="btn pri" type="button">Store in vault</button></div>

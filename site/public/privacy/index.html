@@ -65,6 +65,7 @@
     <tr><td>Your passkeys' public keys, a usage counter, and the host each was made on</td><td>To verify sign-ins and approvals, and to detect cloned authenticators. A passkey works only on the host it was made on (counterseal.gautamkhosla.com, or leash.gautamkhosla.com for older ones).</td></tr>
     <tr><td>Move links (only if you move from the old host)</td><td>A hash of the one-time link, your account, and when it was made, used and expires (10 minutes). Deleted a day after it expires.</td></tr>
     <tr><td>API keys you add to the vault, <strong>encrypted</strong></td><td>To call the provider on your agent's behalf. Each key has its own AES-256-GCM key, wrapped by a master key held outside the database. We keep the last four characters in clear so you can tell keys apart.</td></tr>
+    <tr><td>For a Shopify key, the store address you give (<code>your-store.myshopify.com</code>)</td><td>So the key is sent only to that store. It is stored next to the encrypted key, shown to you in the app and in your private audit log, and never in a public receipt.</td></tr>
     <tr><td>Agent tokens and receipts API keys, as hashes</td><td>To recognise your agents. The token or key itself is shown to you once and never stored.</td></tr>
     <tr><td>Agent public keys (optional)</td><td>The public half of each agent key you register, its label and when it was last used, to check your agents' signatures. Never a private key: we refuse any key that contains one.</td></tr>
     <tr><td>Signature nonces</td><td>A random value from each signed agent request, with the key's fingerprint, so a signed request cannot be replayed. Deleted once the signature has expired (minutes).</td></tr>
@@ -84,7 +85,7 @@
   <h2 id="public">What is public</h2>
   <p>If receipts are on for your account, each decision the broker makes on a write (an allowed write, a hold, an approval, a denial, an approved call going through) is published in the public log, <strong>permanently</strong>: anyone can read it, and it cannot be removed, because that is what makes the log trustworthy. A broker entry contains only:</p>
   <ul>
-    <li>the method and the provider's API host (for example <code>DELETE api.github.com</code>), or for a coding agent's held command only <code>RUN</code> or <code>CALL</code> and the agent's name from a fixed list (for example <code>RUN claude-code</code>, never the command, its folder or your key's label), the decision, the rule id and the map version;</li>
+    <li>the method and the provider's API host (for example <code>DELETE api.github.com</code>), or for a coding agent's held command only <code>RUN</code> or <code>CALL</code> and the agent's name from a fixed list (for example <code>RUN claude-code</code>, never the command, its folder or your key's label), the decision, the rule id and the map version. For Shopify, which sends calls to your own store, the host word is only <code>myshopify.com</code>: your store address is never public;</li>
     <li>whether a registered agent key signed the request, and whether a passkey approved it (yes or no, never which one);</li>
     <li>the time, and the SHA-256 hash of your own audit entry for that decision;</li>
     <li>a salted commitment to your account, different for every entry, so entries cannot be linked to you or to each other.</li>
@@ -128,7 +129,7 @@
   <div class="foot-in">
     <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
     <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/leash" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
-    <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</span>
+    <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend or Shopify.</span>
   </div>
 </footer>
 <script src="/doc.js" type="module"></script>

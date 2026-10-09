@@ -135,7 +135,7 @@
     <li><strong>Approving a command line sign-in someone sent you.</strong> The screen shows where it started and asks whether you ran it; the alert and one-tap revoke limit the damage, and the session cannot approve holds, but a person who approves anyway has signed that command line in. Country and network checks can be fooled by a VPN.</li>
     <li><strong>An agent getting around its guard.</strong> The coding-agent guard runs on the agent's machine and matches a map of commands. It does not stop an agent that edits its hook settings, wraps a command in a script, or runs something the map does not know.</li>
     <li><strong>An over-scoped key used outside the broker.</strong> Rotate the keys you give the vault and keep them only there.</li>
-    <li><strong>Calls the map doesn't know are irreversible.</strong> The map is conservative: every DELETE is held on GitHub, Cloudflare, Stripe and Supabase, every Railway mutation except redeploy and restart, and SQL unless it is plainly read-only. Add <code>hold</code> rules to your policy for anything else you care about.</li>
+    <li><strong>Calls the map doesn't know are irreversible.</strong> The map is conservative: every DELETE is held on GitHub, Cloudflare, Stripe, Supabase, Vercel, Neon, Fly.io and Resend, every Railway mutation except redeploy and restart, and SQL unless it is plainly read-only. Management APIs only: SQL sent straight over a database connection string never passes through Counterseal. Add <code>hold</code> rules to your policy for anything else you care about.</li>
     <li><strong>A compromised agent machine.</strong> An agent key on a machine an attacker controls signs for the attacker. Revoke the key; the bound tokens stop at once.</li>
     <li><strong>Claims in reported receipts.</strong> A receipt an agent sends proves it was recorded, when, and (if signed) by which key; not that what it says is true. Broker receipts are the broker's own record.</li>
     <li><strong>The log operator.</strong> One key signs the checkpoints. A log that showed two different histories would be caught by anyone comparing checkpoints, but nothing yet prevents it; independent witness cosigning is on the roadmap.</li>
@@ -150,7 +150,7 @@
   <div class="foot-in">
     <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
     <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/leash" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
-    <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</span>
+    <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend or Shopify.</span>
   </div>
 </footer>
 <script src="/doc.js" type="module"></script>

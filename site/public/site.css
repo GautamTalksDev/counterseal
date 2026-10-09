@@ -309,6 +309,7 @@ h1 em,.h1 em{font-size:1.08em;letter-spacing:-.02em;padding-right:.04em}
 .map-rows{max-height:460px;overflow:auto}
 .mrow{display:grid;grid-template-columns:150px minmax(0,1.1fr) minmax(0,2fr);gap:16px;padding:12px 18px;border-bottom:1px solid var(--line);font-size:13.5px}
 .mrow:last-child{border-bottom:0}
+.mnote{padding:12px 18px;border-bottom:1px solid var(--line);font-size:13px;color:var(--mute)}
 .mrow .id{font:12px var(--mono);color:var(--mute)}
 .mrow .mp{font:12.5px var(--mono);overflow-wrap:anywhere}
 .mrow .mp b{color:var(--warn);font-weight:600;margin-right:8px}
