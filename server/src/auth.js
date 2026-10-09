@@ -225,8 +225,11 @@ export async function deviceStart(env, request, from = whereFrom(null)) {
   const user = newUserCode();
   await env.DB.prepare('INSERT INTO device_codes (device_hash, user_code, expires_at, created_at, country, network, asn) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .bind(await sha256hex(device), user, now() + DEVICE_TTL, now(), from.country, from.network, from.asn).run();
-  // verification_uri is the plain page: the code is typed there, never carried in a link (no verification_uri_complete)
-  return { device_code: device, user_code: user, verification_uri: `${rp(env).origin}/app#device`, interval: DEVICE_INTERVAL, expires_in: DEVICE_TTL / 1000 };
+  // verification_uri is the plain page: the code is typed there, never carried in a link (no verification_uri_complete).
+  // Always the product's host, where accounts are made (the published leashcli 0.1.1 calls the old host by default, and
+  // an account made on counterseal cannot sign in there); a code works on either host, and the page on the product's
+  // host tells people whose account is still on the old host to type it there.
+  return { device_code: device, user_code: user, verification_uri: `${hosts(env)[0].origin}/app#device`, interval: DEVICE_INTERVAL, expires_in: DEVICE_TTL / 1000 };
 }
 async function pendingCode(env, code) {
   const row = await env.DB.prepare('SELECT * FROM device_codes WHERE user_code = ?').bind(code).first();

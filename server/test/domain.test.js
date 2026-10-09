@@ -59,10 +59,17 @@ test('origin to RP ID: each of the two hosts uses its own RP ID, chosen by the O
     assert.equal(r.status, 403, `${origin} -> ${url}`); assert.equal(r.body.error, 'csrf');
   }
   // the CLI and agents (no Origin) get the host they called
-  assert.equal((await w.req('POST', OLD + '/v1/device/start', { origin: null, xleash: false, body: {} })).body.verification_uri, 'https://leash.test/app#device');
+  // the sign-in page is always the product's host, where accounts are made (leashcli 0.1.1 calls the old host)
+  assert.equal((await w.req('POST', OLD + '/v1/device/start', { origin: null, xleash: false, body: {} })).body.verification_uri, 'https://counterseal.test/app#device');
   assert.equal((await w.req('POST', NEW + '/v1/device/start', { origin: null, xleash: false, body: {} })).body.verification_uri, 'https://counterseal.test/app#device');
   const meta = await w.req('GET', OLD + '/v1/meta', { origin: null, xleash: false });
-  assert.equal(meta.body.app, NEW);
+  assert.equal(meta.body.app, NEW); assert.equal(meta.body.legacyApp, OLD);
+  // a code started on the old host (leashcli 0.1.1's default) is approved by a new account on the new host
+  const n = await newUser(w, 'Fresh');
+  const d = (await w.req('POST', OLD + '/v1/device/start', { origin: null, xleash: false, ip: '192.0.2.40', body: {} })).body;
+  const ab = await w.req('POST', ...at(NEW, '/v1/device/approve/begin', { cookie: n.cookie, body: { user_code: d.user_code } }));
+  assert.equal((await w.req('POST', ...at(NEW, '/v1/device/approve/finish', { cookie: n.cookie, body: { user_code: d.user_code, challengeId: ab.body.challengeId, credential: await n.auth.get(ab.body.options) } }))).status, 200);
+  assert.match((await w.req('POST', OLD + '/v1/device/poll', { origin: null, xleash: false, body: { device_code: d.device_code } })).body.access_token, /^lsc_/);
 });
 
 test('cross-origin rejection: a passkey only signs in on its own host, a challenge only finishes on the host that issued it', async () => {

@@ -384,6 +384,9 @@ async function boot() {
     try {
       meta = meta || (await api('GET', '/v1/meta'));
       if (meta.app && meta.app !== location.origin) { $('signupBox').hidden = true; $('signupMoved').hidden = false; $('signupLink').href = meta.app + '/app'; }
+      // a sign-in code works on both hosts: point people whose account is on the other host there
+      const other = meta.app && meta.app !== location.origin ? meta.app : meta.legacyApp;
+      if (/^#device/.test(location.hash) && /^https?:\/\/[a-z0-9.:-]+$/.test(other || '')) { $('devOtherHost').hidden = false; $('devOtherLink').href = other + '/app#device'; $('devOtherLink').textContent = new URL(other).host + '/app#device'; }
     } catch { /* offline: the form still works or explains itself */ }
   }
 }
