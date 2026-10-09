@@ -12,13 +12,24 @@ import { MAP_VERSION } from './providers.js';
 
 /** opts.receipts: whether the account has receipts on, when the caller already knows (saves a query) */
 export async function audit(env, accountId, actor, action, detail, opts = {}) {
-  const prev = await env.DB.prepare('SELECT hash FROM audit WHERE account_id = ? ORDER BY seq DESC LIMIT 1').bind(accountId).first();
-  const prevHash = prev ? prev.hash : '0'.repeat(64);
-  const at = now();
   const d = JSON.stringify(detail || {});
-  const hash = await sha256hex(`${prevHash}|${accountId}|${at}|${actor}|${action}|${d}`);
-  await env.DB.prepare('INSERT INTO audit (account_id, at, actor, action, detail, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(accountId, at, actor, action, d, prevHash, hash).run();
+  const ZERO = '0'.repeat(64);
+  // Two requests for one account (an agent making parallel writes) could both read the same head and both append after
+  // it, forking the chain so /v1/audit/verify reports it broken. So the insert happens only if the head is still the one
+  // this entry commits to, checked in the same statement; if another entry got there first, read the new head and retry.
+  // At most 10 tries (20 D1 queries; Workers Free allows 50 per invocation): each try loses only to an entry that landed.
+  let at, hash, prevHash;
+  for (let attempt = 0; ; attempt++) {
+    const prev = await env.DB.prepare('SELECT hash FROM audit WHERE account_id = ? ORDER BY seq DESC LIMIT 1').bind(accountId).first();
+    prevHash = prev ? prev.hash : ZERO;
+    at = now();
+    hash = await sha256hex(`${prevHash}|${accountId}|${at}|${actor}|${action}|${d}`);
+    const r = await env.DB.prepare(`INSERT INTO audit (account_id, at, actor, action, detail, prev_hash, hash) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
+      WHERE COALESCE((SELECT hash FROM audit WHERE account_id = ?1 ORDER BY seq DESC LIMIT 1), ?8) = ?6`)
+      .bind(accountId, at, actor, action, d, prevHash, hash, ZERO).run();
+    if (r.meta.changes) break;
+    if (attempt >= 9) throw new Error('audit: the chain head kept moving');
+  }
   if (DECISION[action]) {
     const p = (async () => {
       const on = opts.receipts ?? (await env.DB.prepare('SELECT receipts FROM accounts WHERE id = ?').bind(accountId).first())?.receipts;

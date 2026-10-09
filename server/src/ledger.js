@@ -15,6 +15,7 @@ import { HttpError, json, API_HEADERS, b64u, rand, randomId, sha256hex, now, str
 import { validate, canonical, checkSignature, checkSignerProof, signerProofText, signerKeyBytes, importSigner, LIMITS, SIGNED_KEEP_MS } from './receipts.js';
 import { logKey, b64std } from './note.js';
 import * as A from './auth.js';
+import { audit } from './audit.js';
 
 // a non-negative integer from a default (number) or a query parameter (plain decimal only: no "", "0x1", "1e3", " 1", "01");
 // a missing required parameter (null) is refused, never read as 0
@@ -340,11 +341,13 @@ export const LEDGER_ROUTES = [
     // made by a CLI session: revoking that session revokes this key too
     const cli = c.s.kind === 'cli' ? await A.sessionId(c.s.hash) : null;
     await c.env.DB.prepare('INSERT INTO api_keys (id, account_id, hash, label, signer_pub, created_at, session_id) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, c.s.accountId, await sha256hex(key), label, signer, now(), cli).run();
+    await audit(c.env, c.s.accountId, c.s.kind, 'receipts_key_created', { id, label, signed: !!signer, ...(cli ? { session: cli } : {}) });
     return { id, key, label, note: 'Shown once. Only a hash is kept.' };
   }],
   ['DELETE', /^\/v1\/keys\/([0-9a-f]{24})$/, 'write', async (c) => {
-    const r = await c.env.DB.prepare('UPDATE api_keys SET revoked = 1 WHERE id = ? AND account_id = ?').bind(c.m[1], c.s.accountId).run();
+    const r = await c.env.DB.prepare('UPDATE api_keys SET revoked = 1 WHERE id = ? AND account_id = ? AND revoked = 0').bind(c.m[1], c.s.accountId).run();
     if (!r.meta.changes) throw new HttpError(404, 'not_found');
+    await audit(c.env, c.s.accountId, c.s.kind, 'receipts_key_revoked', { id: c.m[1] });
     return { ok: true };
   }],
   ['GET', /^\/v1\/my\/receipts$/, 'session', async (c) => {

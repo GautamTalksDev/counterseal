@@ -17,6 +17,7 @@ import { HttpError, fromB64u, b64u, randomId, now, str, sha256 } from './util.js
 import { parseDictionary, signatureBase, jwkThumbprint } from '../../sdk/websig.mjs';
 import { signerKeyBytes } from './receipts.js';
 import { newChallenge, takeChallenge, rp, sessionId } from './auth.js';
+import { audit } from './audit.js';
 
 export const POP_TAG = 'leash-pop';
 export const POP_WINDOW = 300; // seconds
@@ -81,6 +82,8 @@ export async function registerFinish(env, sess, body) {
     if (/UNIQUE|constraint/i.test(String(e && e.message))) throw new HttpError(409, 'key_exists', 'That key is already registered.');
     throw e;
   }
+  // a new key that can sign for this account is on the record (who made it: web or a CLI session)
+  await audit(env, sess.accountId, sess.kind, 'agent_key_registered', { id, keyid, label, ...(cli ? { session: cli } : {}) });
   return { id, keyid, label };
 }
 
@@ -90,8 +93,9 @@ export async function list(env, sess) {
 }
 
 export async function revoke(env, sess, id) {
-  const r = await env.DB.prepare('UPDATE agent_keys SET revoked_at = ? WHERE id = ? AND account_id = ? AND revoked_at IS NULL').bind(now(), id, sess.accountId).run();
-  if (!r.meta.changes) throw new HttpError(404, 'not_found');
+  const r = await env.DB.prepare('UPDATE agent_keys SET revoked_at = ? WHERE id = ? AND account_id = ? AND revoked_at IS NULL RETURNING keyid').bind(now(), id, sess.accountId).first();
+  if (!r) throw new HttpError(404, 'not_found');
+  await audit(env, sess.accountId, sess.kind, 'agent_key_revoked', { id, keyid: r.keyid });
   return { ok: true, note: 'Tokens bound to this key stop working at once.' };
 }
 

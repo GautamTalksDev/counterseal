@@ -59,6 +59,44 @@ test('approval fatigue: at most 20 waiting requests per token and 100 per accoun
   assert.equal((await del(tok, 'after-deny')).status, 428);
 });
 
+test('the audit chain does not fork when one account writes in parallel', async () => {
+  const w = new World();
+  const u = await w.user();
+  const id = await w.accountId(u.cookie);
+  // straight at the function, as several isolates would: eight appends that all start from the same head
+  await Promise.all(Array.from({ length: 8 }, (_, i) => audit(w.env, id, 'web', 'parallel', { i })));
+  // and through the API: parallel writes by an agent
+  const cred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'github', secret: GH } })).body.id;
+  const tok = await tokenFor(w, u, cred);
+  const rs = await Promise.all(Array.from({ length: 6 }, (_, i) => w.req('POST', '/p/github/repos/acme/app/issues', { bearer: tok, ...bare, body: { title: 't' + i } })));
+  assert.ok(rs.every((r) => r.status === 200));
+  const v = await w.req('GET', '/v1/audit/verify', { cookie: u.cookie });
+  assert.equal(v.body.ok, true, JSON.stringify(v.body));
+  const rows = w.env.DB.raw.prepare('SELECT prev_hash FROM audit WHERE account_id = ?').all(id);
+  assert.equal(new Set(rows.map((r) => r.prev_hash)).size, rows.length, 'no two entries follow the same entry');
+  assert.equal(w.env.DB.raw.prepare("SELECT COUNT(*) n FROM audit WHERE action = 'parallel'").get().n, 8);
+});
+
+test('who can sign and record for the account is on the record: agent keys and receipts keys, made and revoked', async () => {
+  const w = new World();
+  const u = await w.user();
+  const jwk = await generateAgentKey(); const key = await importAgentKey(jwk);
+  const kb = (await w.req('POST', '/v1/agent-keys/begin', { cookie: u.cookie, body: { publicKey: jwk.x } })).body;
+  const ak = (await w.req('POST', '/v1/agent-keys', { cookie: u.cookie, body: { publicKey: jwk.x, label: 'laptop', challengeId: kb.challengeId, proof: await proveAgentKey(key, kb.sign) } })).body;
+  assert.equal((await w.req('DELETE', `/v1/agent-keys/${ak.id}`, { cookie: u.cookie })).status, 200);
+  const rk = (await w.req('POST', '/v1/keys', { cookie: u.cookie, body: { label: 'deploy' } })).body;
+  assert.equal((await w.req('DELETE', `/v1/keys/${rk.id}`, { cookie: u.cookie })).status, 200);
+  assert.equal((await w.req('DELETE', `/v1/keys/${rk.id}`, { cookie: u.cookie })).status, 404, 'a revoked key is not revoked twice');
+  const actions = (await w.req('GET', '/v1/audit', { cookie: u.cookie })).body.entries.map((e) => [e.action, e.detail]);
+  const find = (a) => actions.find(([x]) => x === a)?.[1];
+  assert.deepEqual(find('agent_key_registered'), { id: ak.id, keyid: ak.keyid, label: 'laptop' });
+  assert.deepEqual(find('agent_key_revoked'), { id: ak.id, keyid: ak.keyid });
+  assert.deepEqual(find('receipts_key_created'), { id: rk.id, label: 'deploy', signed: false });
+  assert.deepEqual(find('receipts_key_revoked'), { id: rk.id });
+  assert.ok(!JSON.stringify(actions).includes(rk.key), 'never the key itself');
+  assert.equal((await w.req('GET', '/v1/audit/verify', { cookie: u.cookie })).body.ok, true);
+});
+
 test('phone alerts belong to the browser: a CLI session cannot add, remove or test a device; a moved browser counts toward its new account', async () => {
   const w = new World();
   await withVapid(w);
