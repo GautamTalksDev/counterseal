@@ -134,26 +134,97 @@ function show(view) {
   const changed = current !== view;
   current = view;
   if (changed && view === 'receipts') load().catch(() => {});
-  if (changed && view === 'account') passkeysView().catch(() => {});
+  if (changed && view === 'account') { passkeysView().catch(() => {}); cliSessionsView().catch(() => {}); }
   for (const s of document.querySelectorAll('.view')) s.hidden = s.dataset.view !== view;
   for (const a of document.querySelectorAll('#snav a')) a.classList.toggle('on', a.dataset.view === view);
 }
 for (const a of document.querySelectorAll('#snav a')) a.onclick = (e) => { e.preventDefault(); show(a.dataset.view); };
 
-// ---- deep links: #hold=<id>, #device=<code>
+// ---- deep links: #hold=<id>, #device (command line sign-in), #cli=<id> (the alert after one)
 function route() {
   const hm = location.hash.match(/^#hold=([0-9a-f]{24})$/);
   if (hm) show('holds');
   if (hm) setTimeout(() => { const n = $('hold-' + hm[1]); if (n) n.scrollIntoView({ behavior: 'smooth' }); }, 300);
-  const dm = location.hash.match(/^#device=([A-Z0-9]{4}-[A-Z0-9]{4})$/);
-  $('devicePanel').hidden = !dm;
-  if (dm) {
-    $('deviceCode').textContent = dm[1];
-    $('deviceOk').onclick = async () => { try { await ceremony('/v1/device/approve/begin', '/v1/device/approve/finish', { user_code: dm[1] }); toast('CLI signed in. You can close this.'); history.replaceState(null, '', '/app'); route(); load(); } catch (e) { toast(e.message); } };
-    $('deviceNo').onclick = () => { history.replaceState(null, '', '/app'); route(); };
-  }
+  const dm = /^#device(=.*)?$/.exec(location.hash);
+  if (dm && $('devicePanel').hidden) deviceOpen(!!dm[1]);
+  if (!dm) $('devicePanel').hidden = true;
+  const cm = /^#cli=([0-9a-f]{24})$/.exec(location.hash);
+  $('cliPanel').hidden = !cm;
+  if (cm) cliAlert(cm[1]).catch((e) => toast(e.message));
 }
 window.addEventListener('hashchange', route);
+
+// ---- command line sign-in (#device). Device-code phishing: someone starts leashcli login on their own machine and
+// sends you the code. So this page never takes a code from a link (a link that carries one is shown as a warning), you
+// type the code from your own terminal, you see when and where the sign-in started next to where you are, and "No,
+// deny it" comes first. Approving needs your passkey.
+const regionName = (() => { try { const d = new Intl.DisplayNames(undefined, { type: 'region' }); return (c) => { try { return d.of(c) || c; } catch { return c; } }; } catch { return (c) => c; } })();
+const place = (x) => [x && x.country ? (x.country === 'T1' ? 'the Tor network' : regionName(x.country)) : null, x && x.network ? `network ${x.network}` : null].filter(Boolean).join(', ') || 'unknown';
+const ago = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s} seconds ago` : `${Math.round(s / 60)} minute${Math.round(s / 60) === 1 ? '' : 's'} ago`; };
+let deviceCode = null;
+function deviceOpen(fromLink) {
+  // a code in the address bar came from a link, never from our CLI: drop it and say so
+  if (fromLink) history.replaceState(null, '', '/app#device');
+  deviceCode = null;
+  $('devicePanel').hidden = false; $('devEnter').hidden = false; $('devReview').hidden = true;
+  $('devLinkWarn').hidden = !fromLink; $('devCode').value = ''; $('devMine').checked = false; $('devApprove').disabled = true;
+  $('devCode').focus();
+}
+function deviceClose() { history.replaceState(null, '', '/app'); $('devicePanel').hidden = true; route(); }
+$('devCancel').onclick = deviceClose;
+$('devCode').onkeydown = (e) => { if (e.key === 'Enter') $('devNext').click(); };
+$('devNext').onclick = async () => {
+  try {
+    const r = await api('POST', '/v1/device/lookup', { user_code: $('devCode').value });
+    deviceCode = r.user_code;
+    $('devRCode').textContent = r.user_code;
+    $('devStarted').textContent = r.started_at ? `${ago(r.now - r.started_at)} (${new Date(r.started_at).toLocaleTimeString()})` : 'in the last few minutes';
+    $('devFrom').textContent = place(r.from);
+    $('devHere').textContent = place(r.here);
+    $('devDays').textContent = `${r.session_days} days`;
+    const warn = r.same.country === false
+      ? `This sign-in started in ${place({ country: r.from.country })}, but you are in ${place({ country: r.here.country })}. A different country is a strong sign that someone else is asking for your approval. Deny it unless you ran it on a computer there.`
+      : r.same.network === false
+        ? `This sign-in started on a different network from the one you are on now. That is normal if you ran it on another computer or a server; if you did not, deny it.`
+        : !r.from.country && !r.from.network ? 'Counterseal could not tell where this sign-in started. Approve only if you ran it yourself.' : '';
+    $('devMismatch').textContent = warn; $('devMismatch').hidden = !warn;
+    $('devMine').checked = false; $('devApprove').disabled = true;
+    $('devEnter').hidden = true; $('devReview').hidden = false;
+    $('devDeny').focus();
+  } catch (e) { toast(e.message); }
+};
+$('devMine').onchange = () => { $('devApprove').disabled = !$('devMine').checked; };
+$('devDeny').onclick = async () => {
+  try { await api('POST', '/v1/device/deny', { user_code: deviceCode }); toast('Denied. That command line is not signed in.'); deviceClose(); load(); } catch (e) { toast(e.message); }
+};
+$('devApprove').onclick = async () => {
+  if (!$('devMine').checked || !deviceCode) return;
+  try { await ceremony('/v1/device/approve/begin', '/v1/device/approve/finish', { user_code: deviceCode }); toast('Approved. The command line is signed in; you can revoke it under Account.'); deviceClose(); load(); } catch (e) { toast(e.message); }
+};
+
+// ---- the alert after a command line sign-in (#cli=<id>): one tap revokes it and everything it made
+async function cliAlert(id) {
+  const { sessions } = await api('GET', '/v1/sessions');
+  const s = sessions.find((x) => x.id === id);
+  $('cliRevoke').hidden = !s; $('cliMine').textContent = s ? 'It was me' : 'Close';
+  $('cliWhat').textContent = s ? `Signed in ${new Date(s.created_at).toLocaleString()} from ${place(s)}.` : 'That sign-in has already ended or was revoked.';
+  $('cliMine').onclick = () => { history.replaceState(null, '', '/app'); route(); };
+  $('cliRevoke').onclick = async () => {
+    try { const r = await api('DELETE', `/v1/sessions/${id}`); toast(`Revoked, with ${r.revoked.tokens} token(s), ${r.revoked.agentKeys} agent key(s) and ${r.revoked.receiptsKeys} receipts key(s) it made.`); history.replaceState(null, '', '/app'); route(); load(); } catch (e) { toast(e.message); }
+  };
+}
+async function cliSessionsView() {
+  const { sessions } = await api('GET', '/v1/sessions');
+  const L = $('cliSessions'); L.replaceChildren();
+  for (const s of sessions) {
+    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke' });
+    rv.onclick = async () => {
+      if (!confirm('Revoke this command line sign-in? It is signed out, and every token, agent key and receipts key it made is revoked.')) return;
+      try { await api('DELETE', `/v1/sessions/${s.id}`); cliSessionsView(); load(); } catch (e) { toast(e.message); }
+    };
+    L.append(el('div', {}, el('span', {}, el('b', { textContent: new Date(s.created_at).toLocaleString() }), el('span', { className: 'dim', textContent: `  from ${place(s)}, ends ${new Date(s.expires_at).toLocaleDateString()}` })), rv));
+  }
+}
 
 // ---- alerts (Web Push). The push itself carries nothing; sw.js fetches the held request after it wakes.
 const swPolicy = window.trustedTypes ? trustedTypes.createPolicy('leash-sw', { createScriptURL: (u) => { if (u !== '/sw.js') throw new Error('blocked'); return u; } }) : null;
@@ -298,6 +369,8 @@ async function boot() {
     clearInterval(boot.poll); boot.poll = setInterval(() => load().catch(() => {}), 5000);
   } catch {
     $('signedOut').hidden = false; $('signedIn').hidden = true;
+    // a command line sign-in waits for you here; the code is typed after you sign in, never taken from the link
+    $('devSignedOut').hidden = !/^#device/.test(location.hash);
     // on the old host, sign-in stays and sign-up moves to the product's host
     try {
       meta = meta || (await api('GET', '/v1/meta'));

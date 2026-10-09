@@ -18,6 +18,9 @@ if (process.env.DEV_SEED) {
   console.log(`DEV_SEED account ${id}: document.cookie = "__Host-leash=${token}; Path=/; Secure"`);
 }
 const log = { append: (i, n) => core.append(i, n), head: () => core.head(), inclusion: (a, b) => core.inclusion(a, b), consistency: (a, b) => core.consistency(a, b), entry: (i) => core.entry(i), entries: (s, c) => core.entries(s, c), tenantEntries: (t, b, c) => core.tenantEntries(t, b, c), forgetTenant: (t) => core.forgetTenant(t) };
+// DEV_CF='{"country":"DE","asOrganization":"Example Net","asn":64500}': pretend Cloudflare's request.cf, to see the
+// CLI sign-in approval screen with a place (every request gets the same one)
+const devCf = process.env.DEV_CF ? JSON.parse(process.env.DEV_CF) : null;
 const SITE = new URL('../../site/public/', import.meta.url);
 const TYPES = { html: 'text/html; charset=utf-8', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', woff2: 'font/woff2', png: 'image/png', webp: 'image/webp', json: 'application/json', webmanifest: 'application/manifest+json', webm: 'video/webm', mp4: 'video/mp4', txt: 'text/plain; charset=utf-8' };
 const headers = {};
@@ -44,7 +47,7 @@ http.createServer(async (req, res) => {
   for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') h.set(k, v);
   h.set('cf-connecting-ip', '127.0.0.1');
   const pending = [];
-  const r = await handle(new Request(`http://localhost:${port}${req.url}`, { method: req.method, headers: h, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks) }), env, { log, ctx: { waitUntil: (p) => pending.push(p) } });
+  const r = await handle(new Request(`http://localhost:${port}${req.url}`, { method: req.method, headers: h, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks) }), env, { log, ctx: { waitUntil: (p) => pending.push(p) }, cf: devCf });
   const out = {};
   r.headers.forEach((v, k) => { out[k] = v; });
   res.writeHead(r.status, out);

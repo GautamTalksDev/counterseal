@@ -337,7 +337,9 @@ export const LEDGER_ROUTES = [
       await checkSignerProof(signer, ch.challenge, c.body.signerProof, c.key.name, c.s.accountId);
     }
     const key = 'lsr_' + b64u(rand(32)); const id = randomId();
-    await c.env.DB.prepare('INSERT INTO api_keys (id, account_id, hash, label, signer_pub, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, c.s.accountId, await sha256hex(key), label, signer, now()).run();
+    // made by a CLI session: revoking that session revokes this key too
+    const cli = c.s.kind === 'cli' ? await A.sessionId(c.s.hash) : null;
+    await c.env.DB.prepare('INSERT INTO api_keys (id, account_id, hash, label, signer_pub, created_at, session_id) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, c.s.accountId, await sha256hex(key), label, signer, now(), cli).run();
     return { id, key, label, note: 'Shown once. Only a hash is kept.' };
   }],
   ['DELETE', /^\/v1\/keys\/([0-9a-f]{24})$/, 'write', async (c) => {

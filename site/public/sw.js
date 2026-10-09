@@ -9,11 +9,18 @@ self.addEventListener('push', (e) => {
     let body = 'Open Counterseal to check. (Could not load the details on this device.)';
     let tag = 'leash-hold', url = '/app';
     try {
-      const r = await fetch('/v1/holds', { credentials: 'same-origin', cache: 'no-store' });
+      // held requests, and command line sign-ins of the last 15 minutes (the alert that lets you revoke one)
+      const r = await fetch('/v1/alerts', { credentials: 'same-origin', cache: 'no-store' });
       if (r.ok) {
-        const { holds } = await r.json();
-        if (holds && !holds.length) { title = 'Counterseal alerts are working'; body = 'Nothing is waiting for you right now.'; }
-        if (holds && holds.length) {
+        const { holds, signins } = await r.json();
+        const s = Array.isArray(signins) && signins[0];
+        if (s && typeof s.id === 'string' && /^[0-9a-f]{24}$/.test(s.id) && (!holds || !holds.length || s.created_at > holds[0].created_at)) {
+          const where = [s.country, s.network].filter((x) => typeof x === 'string' && x).join(', ');
+          title = 'A command line was signed in to your Counterseal account';
+          body = `${where ? 'From ' + where + '. ' : ''}Not you? Tap to revoke it and everything it made.`;
+          tag = 'leash-cli-' + s.id; url = '/app#cli=' + s.id;
+        } else if (holds && !holds.length) { title = 'Counterseal alerts are working'; body = 'Nothing is waiting for you right now.'; }
+        else if (holds && holds.length) {
           const h = holds[0];
           title = `${h.token_label || 'Your agent'} wants to ${h.method} ${h.host}`;
           body = `${h.path}\n${h.why}${holds.length > 1 ? `\n+${holds.length - 1} more waiting` : ''}`;

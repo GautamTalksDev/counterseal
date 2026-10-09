@@ -41,10 +41,19 @@ const ROUTES = [
   ['POST', /^\/v1\/auth\/login\/begin$/, 'publicw', (c) => A.loginBegin(c.env)],
   ['POST', /^\/v1\/auth\/login\/finish$/, 'publicw', async (c) => { const out = await A.loginFinish(c.env, c.body); maybeSweep(c); return out; }],
   ['POST', /^\/v1\/auth\/logout$/, 'write', (c) => A.logout(c.env, c.s)],
-  ['POST', /^\/v1\/device\/start$/, 'public', (c) => A.deviceStart(c.env)],
+  // CLI sign-in (device code). The browser side is web session only: type the code, review where it started, then deny
+  // or approve with a passkey (src/auth.js explains the phishing defences).
+  ['POST', /^\/v1\/device\/start$/, 'public', (c) => A.deviceStart(c.env, c.request, A.whereFrom(c.cf))],
   ['POST', /^\/v1\/device\/poll$/, 'public', (c) => A.devicePoll(c.env, c.body)],
+  ['POST', /^\/v1\/device\/lookup$/, 'webw', (c) => A.deviceLookup(c.env, c.s, c.body, A.whereFrom(c.cf))],
+  ['POST', /^\/v1\/device\/deny$/, 'webw', (c) => A.deviceDeny(c.env, c.s, c.body)],
   ['POST', /^\/v1\/device\/approve\/begin$/, 'webw', (c) => A.deviceApproveBegin(c.env, c.s, c.body)],
   ['POST', /^\/v1\/device\/approve\/finish$/, 'webw', (c) => A.deviceApproveFinish(c.env, c.s, c.body)],
+  // command line sessions: list (any session), revoke one and everything it made (web session only)
+  ['GET', /^\/v1\/sessions$/, 'session', (c) => A.listCliSessions(c.env, c.s)],
+  ['DELETE', /^\/v1\/sessions\/([0-9a-f]{24})$/, 'webw', (c) => A.revokeCliSession(c.env, c.s, c.m[1])],
+  // what a phone shows after a payload-free push: held requests, and command line sign-ins of the last 15 minutes
+  ['GET', /^\/v1\/alerts$/, 'session', async (c) => ({ holds: (await B.listHolds(c.env, c.s, 'pending')).holds, signins: await A.recentCliSignins(c.env, c.s.accountId) })],
   ['GET', /^\/v1\/me$/, 'session', async (c) => {
     const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan FROM accounts WHERE id = ?').bind(c.s.accountId).first();
     const u = await usageOf(c.env, c.s.accountId);
@@ -151,7 +160,7 @@ const SECURITY_EVENTS = new Set(['api_key_required', 'api_key_invalid', 'csrf', 
   'bad_signerProof', 'bad_signerPublicKey', 'signer_taken', 'sig_requires_signer_key', 'signature_required', 'stale_ts',
   'challenge_expired', 'bad_challenge', 'bad_origin', 'bad_rp', 'user_verification_required', 'too_large', 'quota', 'daily_quota', 'log_at_capacity',
   'not_configured', 'log_key_invalid', 'log_key_changed', 'token_invalid', 'agent_signature_required', 'bad_agent_signature', 'agent_signature_replayed',
-  'agent_key_revoked', 'passkey_required', 'bad_proof', 'key_taken']);
+  'agent_key_revoked', 'passkey_required', 'bad_proof', 'key_taken', 'code_not_found', 'bad_user_code', 'too_many_holds']);
 const logPath = (url) => url.pathname.startsWith('/p/') ? url.pathname.split('/').slice(0, 3).join('/') + '/...' : url.pathname.replace(/\/[0-9a-f]{24}(?=\/|$)/g, '/:id');
 function securityLog(e, request, url) {
   if (!(e instanceof HttpError) || !SECURITY_EVENTS.has(e.code)) return;
@@ -208,7 +217,8 @@ export async function handle(request, rawEnv, opts = {}) {
       const m = url.pathname.match(re);
       if (!m) continue;
       const t = now();
-      const c = { env, request, url, m, body: {}, waitUntil, get log() { return logOf(env); } };
+      // request.cf: Cloudflare's data about the caller's network (country, network name); tests and local dev pass opts.cf
+      const c = { env, request, url, m, body: {}, waitUntil, cf: request.cf || opts.cf || null, get log() { return logOf(env); } };
       // the log's name and key, for the routes that sign or name the log (the broker's own routes work without it)
       if (guard === 'pub' || guard === 'key' || isPublic || /^\/v1\/(keys|my)(\/|$)/.test(url.pathname)) c.key = await logKey(env);
       if (guard === 'public' || guard === 'publicw') await limit(env.DB, await ipBucket(env, request, guard === 'public' ? 'pub' : 'pubw'), 60, 60_000, t);

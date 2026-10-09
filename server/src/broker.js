@@ -4,7 +4,7 @@ import { seal, open } from './vault.js';
 import { summarize, PROVIDERS, MAP_VERSION } from './providers.js';
 import { normalisePolicy, decide } from './policy.js';
 import { audit } from './audit.js';
-import { newChallenge, takeChallenge, checkAssertion, rp, hosts, appOrigin } from './auth.js';
+import { newChallenge, takeChallenge, checkAssertion, rp, hosts, appOrigin, sessionId } from './auth.js';
 import { limit } from './ratelimit.js';
 import { notify } from './push.js';
 import { verifyAgentSignature, d1Seen, ownActive } from './agentkeys.js';
@@ -53,10 +53,15 @@ export async function mintToken(env, sess, body, byPasskey = false) {
   const ak = body.agentKeyId !== undefined && body.agentKeyId !== null ? await ownActive(env, sess.accountId, body.agentKeyId) : null;
   const token = 'lsh_' + b64u(rand(32));
   const id = randomId();
-  await env.DB.prepare('INSERT INTO tokens (id, account_id, credential_id, hash, label, policy, minted_by, expires_at, created_at, agent_key_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, sess.accountId, cred.id, await sha256hex(token), label, JSON.stringify(policy), byPasskey ? 'passkey' : sess.kind, now() + hours * 3600_000, now(), ak ? ak.id : null).run();
-  await audit(env, sess.accountId, sess.kind, 'mint', { id, credential: cred.id, provider: cred.provider, label, hours, preapproved: policy.unattendedIrreversible.length, ...(ak ? { agent_key: ak.keyid } : {}) });
-  return { id, token, provider: cred.provider, baseUrl: `${rp(env).origin}/p/${cred.provider}`, expiresAt: now() + hours * 3600_000, ...(ak ? { agentKey: ak.keyid } : {}), note: `Shown once. ${BRAND.name} keeps only a hash.` };
+  // a token minted by a CLI session never outlives that session, and revoking the session revokes it (a sign-in phished
+  // out of someone cannot leave 90-day tokens behind)
+  const cli = sess.kind === 'cli' ? await sessionId(sess.hash) : null;
+  let expiresAt = now() + hours * 3600_000;
+  if (cli && sess.expiresAt && expiresAt > sess.expiresAt) expiresAt = sess.expiresAt;
+  await env.DB.prepare('INSERT INTO tokens (id, account_id, credential_id, hash, label, policy, minted_by, expires_at, created_at, agent_key_id, session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, sess.accountId, cred.id, await sha256hex(token), label, JSON.stringify(policy), byPasskey ? 'passkey' : sess.kind, expiresAt, now(), ak ? ak.id : null, cli).run();
+  await audit(env, sess.accountId, sess.kind, 'mint', { id, credential: cred.id, provider: cred.provider, label, hours, preapproved: policy.unattendedIrreversible.length, ...(ak ? { agent_key: ak.keyid } : {}), ...(cli ? { session: cli, expires_at: expiresAt } : {}) });
+  return { id, token, provider: cred.provider, baseUrl: `${rp(env).origin}/p/${cred.provider}`, expiresAt, ...(ak ? { agentKey: ak.keyid } : {}), note: `Shown once. ${BRAND.name} keeps only a hash.${cli && expiresAt === sess.expiresAt ? ' It ends with this command line sign-in; make longer-lived tokens in the app.' : ''}` };
 }
 
 /** the dangerous variant: pre-approving irreversible operations requires a fresh passkey assertion */

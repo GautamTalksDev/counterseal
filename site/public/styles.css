@@ -151,3 +151,14 @@ a.ul{text-decoration:underline;text-underline-offset:3px}
 .btn.dan:disabled{opacity:.4;cursor:not-allowed}
 
 .lbl input[type=checkbox]{width:auto;height:auto;margin:0 8px 0 0;vertical-align:middle}
+
+/* command line sign-in: type the code, review where it started, deny or approve */
+.banner.stack{flex-direction:column;align-items:stretch}
+.banner.stack>div>p{margin-top:10px}
+.banner.stack .row{margin-top:14px;flex-wrap:wrap}
+.code-row input{max-width:220px;letter-spacing:.12em;text-transform:uppercase}
+.alert{border:1px solid rgba(240,98,114,.4);background:rgba(240,98,114,.08);color:var(--ink);border-radius:10px;padding:10px 12px;font-size:13.5px}
+.auth-box .alert{margin:14px 0}
+.facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin-top:12px;font-size:14px}
+.facts dt{color:var(--dim)}
+.btn.pri:disabled{opacity:.45;cursor:not-allowed}

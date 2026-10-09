@@ -11,14 +11,19 @@ import { handle as liveHandle } from './fixtures/live-src/index.js';
 const GH = 'ghp_' + 'L'.repeat(36);
 const MIG = new URL('../migrations/', import.meta.url);
 
+// every migration after the live schema (0001 to 0003), in the order wrangler applies them
+const AFTER_LIVE = readdirSync(MIG).sort().filter((f) => f >= '0004');
+
 test('migrations are additive only: no DROP, no RENAME, no rewrite of existing rows', () => {
   const files = readdirSync(MIG).sort();
-  assert.deepEqual(files.slice(0, 4), ['0001_init.sql', '0002_hold_preview.sql', '0003_push.sql', '0004_record_and_prove.sql']);
-  const sql = readFileSync(new URL('0004_record_and_prove.sql', MIG), 'utf8').replace(/--.*$/gm, '').replace(/ON DELETE CASCADE/g, '');
-  assert.ok(!/\b(DROP|RENAME|DELETE|UPDATE|REPLACE)\b/i.test(sql), '0004 only adds');
-  for (const stmt of sql.split(';').map((s) => s.trim()).filter(Boolean)) {
-    assert.match(stmt, /^(CREATE TABLE|CREATE INDEX|ALTER TABLE \w+ ADD COLUMN)/, stmt.slice(0, 60));
-    if (/^ALTER/.test(stmt)) assert.ok(!/NOT NULL/.test(stmt) || /DEFAULT/.test(stmt), 'a NOT NULL column needs a default: ' + stmt);
+  assert.deepEqual(files.slice(0, 5), ['0001_init.sql', '0002_hold_preview.sql', '0003_push.sql', '0004_record_and_prove.sql', '0005_cli_signin.sql']);
+  for (const f of AFTER_LIVE) {
+    const sql = readFileSync(new URL(f, MIG), 'utf8').replace(/--.*$/gm, '').replace(/ON DELETE CASCADE/g, '');
+    assert.ok(!/\b(DROP|RENAME|DELETE|UPDATE|REPLACE)\b/i.test(sql), f + ' only adds');
+    for (const stmt of sql.split(';').map((s) => s.trim()).filter(Boolean)) {
+      assert.match(stmt, /^(CREATE TABLE|CREATE INDEX|ALTER TABLE \w+ ADD COLUMN)/, stmt.slice(0, 60));
+      if (/^ALTER/.test(stmt)) assert.ok(!/NOT NULL/.test(stmt) || /DEFAULT/.test(stmt), 'a NOT NULL column needs a default: ' + stmt);
+    }
   }
 });
 
@@ -63,8 +68,8 @@ test('live-shaped data written by the deployed code keeps working after 0004 and
   const auditBefore = db.raw.prepare('SELECT seq, hash FROM audit ORDER BY seq').all();
   const counts = Object.fromEntries(['accounts', 'passkeys', 'sessions', 'credentials', 'tokens', 'holds', 'audit', 'push_subs'].map((t) => [t, db.raw.prepare(`SELECT COUNT(*) n FROM ${t}`).get().n]));
 
-  // ---- the deploy: apply 0004 to the same database
-  db.raw.exec(readFileSync(new URL('0004_record_and_prove.sql', MIG), 'utf8'));
+  // ---- the deploy: apply 0004 and every later migration to the same database
+  for (const f of AFTER_LIVE) db.raw.exec(readFileSync(new URL(f, MIG), 'utf8'));
   for (const [t, n] of Object.entries(counts)) assert.equal(db.raw.prepare(`SELECT COUNT(*) n FROM ${t}`).get().n, n, t + ' rows unchanged');
   assert.deepEqual(db.raw.prepare('SELECT seq, hash FROM audit ORDER BY seq').all(), auditBefore, 'audit rows untouched');
   assert.equal(db.raw.prepare('SELECT receipts FROM accounts').get().receipts, 0, 'an existing account has receipts off');

@@ -59,8 +59,8 @@ test('origin to RP ID: each of the two hosts uses its own RP ID, chosen by the O
     assert.equal(r.status, 403, `${origin} -> ${url}`); assert.equal(r.body.error, 'csrf');
   }
   // the CLI and agents (no Origin) get the host they called
-  assert.match((await w.req('POST', OLD + '/v1/device/start', { origin: null, xleash: false, body: {} })).body.verification_uri, /^https:\/\/leash\.test\/app#device=/);
-  assert.match((await w.req('POST', NEW + '/v1/device/start', { origin: null, xleash: false, body: {} })).body.verification_uri, /^https:\/\/counterseal\.test\/app#device=/);
+  assert.equal((await w.req('POST', OLD + '/v1/device/start', { origin: null, xleash: false, body: {} })).body.verification_uri, 'https://leash.test/app#device');
+  assert.equal((await w.req('POST', NEW + '/v1/device/start', { origin: null, xleash: false, body: {} })).body.verification_uri, 'https://counterseal.test/app#device');
   const meta = await w.req('GET', OLD + '/v1/meta', { origin: null, xleash: false });
   assert.equal(meta.body.app, NEW);
 });

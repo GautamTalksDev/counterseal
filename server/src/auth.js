@@ -14,8 +14,12 @@ import { HttpError, b64u, rand, randomId, sha256hex, now, str } from './util.js'
 import { verifyRegistration, verifyAssertion } from './webauthn.js';
 import { audit } from './audit.js';
 import { BRAND } from './brand.js';
+import { limit, callerKey } from './ratelimit.js';
+import { notify } from './push.js';
 
-const WEB_TTL = 12 * 3600_000, CLI_TTL = 30 * 86400_000, CH_TTL = 5 * 60_000;
+// CLI sessions last 7 days (30 before 10 Oct 2026): a sign-in phished out of someone is a smaller prize, and nothing a
+// CLI session makes outlives it (see broker.js mintToken). Device codes last 5 minutes (RFC 8628 says "short").
+export const WEB_TTL = 12 * 3600_000, CLI_TTL = 7 * 86400_000, CH_TTL = 5 * 60_000, DEVICE_TTL = 5 * 60_000, DEVICE_INTERVAL = 5;
 
 /** the allow list: the product's host first, then the old host if one is configured. Exactly these, nothing else. */
 export function hosts(env) {
@@ -168,37 +172,112 @@ export async function session(env, request, write) {
   const hash = await sha256hex(token);
   const s = await env.DB.prepare('SELECT * FROM sessions WHERE hash = ? AND kind = ?').bind(hash, kind).first();
   if (!s || s.expires_at < now()) throw new HttpError(401, 'signed_out');
-  return { accountId: s.account_id, kind, hash };
+  return { accountId: s.account_id, kind, hash, expiresAt: s.expires_at };
 }
+
+/** a session's public id: derived from its stored hash, so it can be listed and revoked without exposing the hash, and
+ *  sessions made before this id existed have one too */
+export const sessionId = async (hash) => (await sha256hex('session|' + hash)).slice(0, 24);
 
 // ---- CLI sign-in: device code (RFC 8628 shape). The CLI never sees a passkey; the human approves in the browser.
-const UC = 'BCDFGHJKLMNPQRSTVWXZ23456789';
-export async function deviceStart(env) {
-  const device = 'lsd_' + b64u(rand(32));
-  const r = rand(8); let user = '';
-  for (let i = 0; i < 8; i++) user += UC[r[i] % UC.length] + (i === 3 ? '-' : '');
-  await env.DB.prepare('INSERT INTO device_codes (device_hash, user_code, expires_at) VALUES (?, ?, ?)').bind(await sha256hex(device), user, now() + 10 * 60_000).run();
-  return { device_code: device, user_code: user, verification_uri: `${rp(env).origin}/app#device=${user}`, interval: 3, expires_in: 600 };
+//
+// Device-code phishing (used at scale against other platforms in 2025): an attacker starts a sign-in, sends someone the
+// code ("verify your account"), and if that person approves, the attacker's command line is in their account. So:
+//  - the code is never put in a link: verification_uri is the plain page, and the page ignores a code in its address
+//    (a link that carries one is shown as a warning). The person types the code from their own terminal;
+//  - before the passkey, the page shows what is granted, when the sign-in started and from where (country and network,
+//    from Cloudflare's request data, never an IP), next to where the person is now, and asks whether they ran it;
+//  - the code lives 5 minutes, is used once, and starts, lookups and approvals are rate limited (RFC 8628 section 5.1);
+//  - the session lasts 7 days, everything it makes ends with it, and the owner's devices are alerted at once
+//    ("A command line was signed in") with a one-tap revoke that also revokes what it made.
+const UC = 'BCDFGHJKLMNPQRSTVWXZ23456789'; // no vowels (no words), no 0/O or 1/I (RFC 8628 section 6.1)
+export const DEVICE_STARTS_PER_HOUR = 10, DEVICE_LOOKUPS = 10, DEVICE_LOOKUP_WINDOW = 10 * 60_000, DEVICE_APPROVALS_PER_HOUR = 10;
+
+/** the user code as typed: any case, spaces or dashes; always stored and shown as XXXX-XXXX */
+function userCode(v) {
+  const s = typeof v === 'string' && v.length <= 32 ? v.toUpperCase().replace(/[\s-]/g, '') : '';
+  if (!/^[BCDFGHJKLMNPQRSTVWXZ2-9]{8}$/.test(s)) throw new HttpError(400, 'bad_user_code', 'Type the 8 characters shown in your terminal, like ABCD-2345.');
+  return s.slice(0, 4) + '-' + s.slice(4);
 }
 
-/** the browser approves a device code with a fresh passkey ceremony bound to that code */
-export async function deviceApproveBegin(env, sess, body) {
-  const code = str(body.user_code, 'user_code', { max: 9, re: /^[A-Z0-9]{4}-[A-Z0-9]{4}$/ });
+/** 8 characters without modulo bias (a byte is used only below 252 = 9 x 28) */
+function newUserCode() {
+  let s = '';
+  while (s.length < 8) for (const b of rand(16)) if (b < 252 && s.length < 8) s += UC[b % UC.length];
+  return s.slice(0, 4) + '-' + s.slice(4);
+}
+
+const UNSAFE_TEXT = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/gu;
+/** where a request came from, coarse, from Cloudflare's request.cf: country code, network name, network number. Never an
+ *  IP. Missing outside Cloudflare (local dev). The network name is Cloudflare's, but it is still treated as untrusted text. */
+export function whereFrom(cf) {
+  if (!cf || typeof cf !== 'object') return { country: null, network: null, asn: null };
+  const country = typeof cf.country === 'string' && /^[A-Z][A-Z0-9]$/.test(cf.country) && cf.country !== 'XX' ? cf.country : null;
+  const network = typeof cf.asOrganization === 'string' ? cf.asOrganization.replace(UNSAFE_TEXT, '').trim().slice(0, 60) || null : null;
+  const asn = Number.isSafeInteger(cf.asn) && cf.asn > 0 ? cf.asn : null;
+  return { country, network, asn };
+}
+
+export async function deviceStart(env, request, from = whereFrom(null)) {
+  // a phishing kit needs a fresh code for every person it targets: at most 10 starts an hour per network
+  await limit(env.DB, 'devstart:' + (await callerKey(env, request)), DEVICE_STARTS_PER_HOUR, 3600_000, now());
+  const device = 'lsd_' + b64u(rand(32));
+  const user = newUserCode();
+  await env.DB.prepare('INSERT INTO device_codes (device_hash, user_code, expires_at, created_at, country, network, asn) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(await sha256hex(device), user, now() + DEVICE_TTL, now(), from.country, from.network, from.asn).run();
+  // verification_uri is the plain page: the code is typed there, never carried in a link (no verification_uri_complete)
+  return { device_code: device, user_code: user, verification_uri: `${rp(env).origin}/app#device`, interval: DEVICE_INTERVAL, expires_in: DEVICE_TTL / 1000 };
+}
+async function pendingCode(env, code) {
   const row = await env.DB.prepare('SELECT * FROM device_codes WHERE user_code = ?').bind(code).first();
-  if (!row || row.status !== 'pending' || row.expires_at < now()) throw new HttpError(404, 'code_not_found', 'That code is wrong or expired.');
+  if (!row || row.status !== 'pending' || row.expires_at < now()) throw new HttpError(404, 'code_not_found', 'That code is wrong or expired. Run leashcli login again and type the new code.');
+  return row;
+}
+
+/** step 1 in the browser: what is this sign-in? When it started, where from, compared with where this browser is.
+ *  Rate limited per account (with deny), so codes cannot be guessed or used to learn where other people sign in. */
+export async function deviceLookup(env, sess, body, here = whereFrom(null)) {
+  const code = userCode(body.user_code);
+  await limit(env.DB, 'devlook:' + sess.accountId, DEVICE_LOOKUPS, DEVICE_LOOKUP_WINDOW, now());
+  const row = await pendingCode(env, code);
+  const same = (a, b) => (a && b ? a === b : null);
+  return {
+    user_code: code, started_at: row.created_at || null, expires_at: row.expires_at, now: now(),
+    from: { country: row.country || null, network: row.network || null },
+    here: { country: here.country, network: here.network },
+    same: { country: same(row.country, here.country), network: same(row.asn, here.asn) },
+    session_days: CLI_TTL / 86400_000,
+  };
+}
+
+/** step 2: "No, I did not run it". The code is spent and the command line is told access_denied. */
+export async function deviceDeny(env, sess, body) {
+  const code = userCode(body.user_code);
+  await limit(env.DB, 'devlook:' + sess.accountId, DEVICE_LOOKUPS, DEVICE_LOOKUP_WINDOW, now());
+  const r = await env.DB.prepare("UPDATE device_codes SET status = 'denied' WHERE user_code = ? AND status = 'pending' AND expires_at > ? RETURNING country, network").bind(code, now()).first();
+  if (!r) throw new HttpError(404, 'code_not_found', 'That code is wrong or expired.');
+  await audit(env, sess.accountId, 'web', 'cli_signin_denied', { user_code: code, country: r.country || null, network: r.network || null });
+  return { ok: true };
+}
+
+/** step 3: the browser approves a device code with a fresh passkey ceremony bound to that code */
+export async function deviceApproveBegin(env, sess, body) {
+  const code = userCode(body.user_code);
+  await limit(env.DB, 'devappr:' + sess.accountId, DEVICE_APPROVALS_PER_HOUR, 3600_000, now());
+  await pendingCode(env, code);
   const { id, challenge } = await newChallenge(env, 'device:' + code, sess.accountId);
   return { challengeId: id, options: { challenge, rpId: rp(env).rpId, userVerification: 'required', timeout: 300000 } };
 }
 
 export async function deviceApproveFinish(env, sess, body) {
-  const code = str(body.user_code, 'user_code', { max: 9, re: /^[A-Z0-9]{4}-[A-Z0-9]{4}$/ });
+  const code = userCode(body.user_code);
   const ch = await takeChallenge(env, body.challengeId, 'device:' + code);
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
   await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
-  const r = await env.DB.prepare("UPDATE device_codes SET account_id = ?, status = 'approved' WHERE user_code = ? AND status = 'pending' AND expires_at > ?")
-    .bind(sess.accountId, code, now()).run();
-  if (!r.meta.changes) throw new HttpError(404, 'code_not_found');
-  await audit(env, sess.accountId, 'web', 'cli_signin_approved', { user_code: code });
+  const r = await env.DB.prepare("UPDATE device_codes SET account_id = ?, status = 'approved' WHERE user_code = ? AND status = 'pending' AND expires_at > ? RETURNING country, network")
+    .bind(sess.accountId, code, now()).first();
+  if (!r) throw new HttpError(404, 'code_not_found', 'That code is wrong or expired.');
+  await audit(env, sess.accountId, 'web', 'cli_signin_approved', { user_code: code, country: r.country || null, network: r.network || null });
   return { ok: true };
 }
 
@@ -208,12 +287,49 @@ export async function devicePoll(env, body) {
   const row = await env.DB.prepare('SELECT * FROM device_codes WHERE device_hash = ?').bind(h).first();
   if (!row || row.expires_at < now()) throw new HttpError(400, 'expired_token');
   if (row.status === 'pending') throw new HttpError(400, 'authorization_pending');
+  if (row.status === 'denied') throw new HttpError(400, 'access_denied', 'This sign-in was denied in the browser.');
   const used = await env.DB.prepare("UPDATE device_codes SET status = 'used' WHERE device_hash = ? AND status = 'approved'").bind(h).run();
   if (!used.meta.changes) throw new HttpError(400, 'expired_token');
-  const token = 'lsc_' + b64u(rand(32));
-  await env.DB.prepare('INSERT INTO sessions (hash, account_id, kind, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(await sha256hex(token), row.account_id, 'cli', now(), now() + CLI_TTL).run();
-  return { access_token: token, expires_in: CLI_TTL / 1000 };
+  const token = 'lsc_' + b64u(rand(32)), hash = await sha256hex(token);
+  await env.DB.prepare('INSERT INTO sessions (hash, account_id, kind, created_at, expires_at, country, network) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(hash, row.account_id, 'cli', now(), now() + CLI_TTL, row.country || null, row.network || null).run();
+  // on the record, and every device with alerts on is told at once: "A command line was signed in", one tap to revoke
+  const sid = await sessionId(hash);
+  await audit(env, row.account_id, 'cli', 'cli_signed_in', { session: sid, country: row.country || null, network: row.network || null });
+  const p = notify(env, row.account_id, env.__pushFetch || fetch).catch(() => {});
+  if (env.__ctx && env.__ctx.waitUntil) env.__ctx.waitUntil(p); else await p;
+  return { access_token: token, token_type: 'Bearer', expires_in: CLI_TTL / 1000 };
+}
+
+// ---- CLI sessions: list them, and revoke one with everything it made
+export async function listCliSessions(env, sess) {
+  const rows = (await env.DB.prepare("SELECT hash, created_at, expires_at, country, network FROM sessions WHERE account_id = ? AND kind = 'cli' AND expires_at > ? ORDER BY created_at DESC LIMIT 100").bind(sess.accountId, now()).all()).results;
+  return { sessions: await Promise.all(rows.map(async (r) => ({ id: await sessionId(r.hash), created_at: r.created_at, expires_at: r.expires_at, country: r.country || null, network: r.network || null, current: r.hash === sess.hash }))) };
+}
+
+/** the CLI sign-ins of the last 15 minutes, for the alert a phone shows after a push */
+export async function recentCliSignins(env, accountId) {
+  const rows = (await env.DB.prepare("SELECT hash, created_at, country, network FROM sessions WHERE account_id = ? AND kind = 'cli' AND created_at > ? ORDER BY created_at DESC LIMIT 5").bind(accountId, now() - 15 * 60_000).all()).results;
+  return Promise.all(rows.map(async (r) => ({ id: await sessionId(r.hash), created_at: r.created_at, country: r.country || null, network: r.network || null })));
+}
+
+/** web session only (a stolen CLI session must not sign out its owner's other machines). Revokes the session and every
+ *  token, agent key and receipts key it made, in one batch. */
+export async function revokeCliSession(env, sess, sid) {
+  const rows = (await env.DB.prepare("SELECT hash FROM sessions WHERE account_id = ? AND kind = 'cli'").bind(sess.accountId).all()).results;
+  let target = null;
+  for (const r of rows) if ((await sessionId(r.hash)) === sid) { target = r.hash; break; }
+  if (!target) throw new HttpError(404, 'not_found');
+  const t = now(), a = sess.accountId;
+  const [, tk, ak, rk] = await env.DB.batch([
+    env.DB.prepare('DELETE FROM sessions WHERE hash = ? AND account_id = ?').bind(target, a),
+    env.DB.prepare('UPDATE tokens SET revoked = 1 WHERE account_id = ? AND session_id = ? AND revoked = 0').bind(a, sid),
+    env.DB.prepare('UPDATE agent_keys SET revoked_at = ? WHERE account_id = ? AND session_id = ? AND revoked_at IS NULL').bind(t, a, sid),
+    env.DB.prepare('UPDATE api_keys SET revoked = 1 WHERE account_id = ? AND session_id = ? AND revoked = 0').bind(a, sid),
+  ]);
+  const n = (r) => r?.meta?.changes || 0;
+  await audit(env, a, 'web', 'cli_session_revoked', { session: sid, tokens: n(tk), agent_keys: n(ak), receipts_keys: n(rk) });
+  return { ok: true, revoked: { tokens: n(tk), agentKeys: n(ak), receiptsKeys: n(rk) } };
 }
 
 export { newChallenge, takeChallenge };

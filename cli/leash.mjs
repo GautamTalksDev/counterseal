@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 const CFG_DIR = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'leash');
 const CFG = join(CFG_DIR, 'config.json');
 const cfg = () => (existsSync(CFG) ? JSON.parse(readFileSync(CFG, 'utf8')) : {});
@@ -122,17 +122,34 @@ try {
     case 'login': {
       const s = flag(args, '--server'); if (s) save({ ...cfg(), server: s.replace(/\/+$/, '') });
       const d = await api('POST', '/v1/device/start', {}, false);
-      process.stderr.write(`\nOpen ${d.verification_uri}\nand confirm the code ${d.user_code} with your passkey.\n\n`);
+      // the code is typed in the browser, never sent as a link: nobody else should ever see it or ask you for it
+      process.stderr.write(`\nTo sign in this computer:\n  1. Open ${d.verification_uri} in your browser and sign in.\n  2. Type this code: ${d.user_code}\n  3. Check where the sign-in started, then approve with your passkey.\n\nThe code works once, for ${Math.round(d.expires_in / 60)} minutes. Never send it to anyone, and never type a code\nsomeone sent you: whoever approves a code gives that command line their account.\n\n`);
       const until = Date.now() + d.expires_in * 1000;
+      let interval = d.interval;
       while (Date.now() < until) {
-        await new Promise((r) => setTimeout(r, d.interval * 1000));
-        try { const t = await api('POST', '/v1/device/poll', { device_code: d.device_code }, false); save({ ...cfg(), token: t.access_token }); console.log('Signed in.'); process.exit(0); }
-        catch (e) { if (e.code !== 'authorization_pending') throw e; }
+        await new Promise((r) => setTimeout(r, interval * 1000));
+        try {
+          const t = await api('POST', '/v1/device/poll', { device_code: d.device_code }, false);
+          save({ ...cfg(), token: t.access_token });
+          // say whose account this is, so a code approved by someone else (their account, not yours) is noticed at once
+          const me = await api('GET', '/v1/me').catch(() => null);
+          console.log(`Signed in${me?.account?.name ? ` to the account of ${me.account.name}` : ''}, for ${Math.round(t.expires_in / 86400)} days.${me?.account?.name ? ' If that is not your account, run leash logout now.' : ''}`);
+          process.exit(0);
+        } catch (e) {
+          if (e.code === 'slow_down') { interval += 5; continue; } // RFC 8628 section 3.5
+          if (e.code === 'access_denied') die('The sign-in was denied in the browser. Nothing was signed in.');
+          if (e.code === 'expired_token') die('The code expired or was used. Run leash login again.');
+          if (e.code !== 'authorization_pending') throw e;
+        }
       }
       die('The code expired. Run leash login again.');
       break;
     }
-    case 'logout': save({ server: cfg().server }); console.log('Signed out on this machine.'); break;
+    case 'logout': {
+      // end the session on the server too, not only on this machine
+      if (cfg().token) await api('POST', '/v1/auth/logout', {}).catch(() => {});
+      save({ server: cfg().server }); console.log('Signed out on this machine.'); break;
+    }
     case 'add': {
       const provider = args[0]; if (!provider) die('usage: leash add <github|cloudflare|railway|stripe|supabase> [label]');
       const secret = await hidden(`Paste your ${provider} key (hidden): `);

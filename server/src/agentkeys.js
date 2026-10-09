@@ -16,7 +16,7 @@
 import { HttpError, fromB64u, b64u, randomId, now, str, sha256 } from './util.js';
 import { parseDictionary, signatureBase, jwkThumbprint } from '../../sdk/websig.mjs';
 import { signerKeyBytes } from './receipts.js';
-import { newChallenge, takeChallenge, rp } from './auth.js';
+import { newChallenge, takeChallenge, rp, sessionId } from './auth.js';
 
 export const POP_TAG = 'leash-pop';
 export const POP_WINDOW = 300; // seconds
@@ -73,8 +73,10 @@ export async function registerFinish(env, sess, body) {
   if (n.n >= MAX_KEYS) throw new HttpError(409, 'too_many_agent_keys', `Up to ${MAX_KEYS} active agent keys. Revoke one first.`);
   const keyid = await jwkThumbprint({ kty: 'OKP', crv: 'Ed25519', x });
   const id = randomId();
+  // registered by a CLI session: revoking that session revokes this key too
+  const cli = sess.kind === 'cli' ? await sessionId(sess.hash) : null;
   try {
-    await env.DB.prepare('INSERT INTO agent_keys (id, account_id, label, keyid, x, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, sess.accountId, label, keyid, x, now()).run();
+    await env.DB.prepare('INSERT INTO agent_keys (id, account_id, label, keyid, x, created_at, session_id) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, sess.accountId, label, keyid, x, now(), cli).run();
   } catch (e) {
     if (/UNIQUE|constraint/i.test(String(e && e.message))) throw new HttpError(409, 'key_exists', 'That key is already registered.');
     throw e;

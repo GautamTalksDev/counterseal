@@ -1,0 +1,1 @@
+{"name":"leashcli","version":"0.1.1","description":"LEASH: your AI agent never holds a real API key","type":"module","bin":{"leash":"leash.mjs"},"files":["leash.mjs"],"engines":{"node":">=20"},"license":"Apache-2.0"}

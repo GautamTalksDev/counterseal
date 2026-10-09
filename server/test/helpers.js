@@ -129,7 +129,7 @@ export class World {
   /** one request. Work passed to ctx.waitUntil (receipts, push) finishes before this returns, and its D1 queries are
    *  counted with the request's (w.env.DB.queries), as Workers counts them per invocation. xw is the receipts tests'
    *  name for the x-leash CSRF header. */
-  async req(method, path, { body, cookie, bearer, origin = ORIGIN, xleash, xw, ip = '203.0.113.7', raw, headers = {} } = {}) {
+  async req(method, path, { body, cookie, bearer, origin = ORIGIN, xleash, xw, ip = '203.0.113.7', raw, headers = {}, cf } = {}) {
     const h = { 'cf-connecting-ip': ip, ...headers };
     if (body !== undefined && !h['content-type']) h['content-type'] = 'application/json';
     if (cookie) h.cookie = cookie;
@@ -139,7 +139,7 @@ export class World {
     const pending = [];
     this.env.DB.queries = 0; this.env.DB.writes = 0;
     const url = path.startsWith('http') ? path : 'https://leash.test' + path;
-    const r = await handle(new Request(url, { method, headers: h, body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined) }), this.env, { fetcher: this.fetcher, log: this.log, ctx: { waitUntil: (p) => pending.push(p) } });
+    const r = await handle(new Request(url, { method, headers: h, body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined) }), this.env, { fetcher: this.fetcher, log: this.log, ctx: { waitUntil: (p) => pending.push(p) }, cf });
     const text = await r.text();
     let j; try { j = JSON.parse(text); } catch { j = text; }
     for (let i = 0; i < pending.length; i++) await Promise.allSettled([pending[i]]); // waitUntil may queue more work
@@ -156,6 +156,24 @@ export class World {
   }
   /** the account id behind a cookie */
   async accountId(cookie) { return (await this.req('GET', '/v1/me', { cookie })).body.account.id; }
+}
+
+/** serve a World over real HTTP on 127.0.0.1 (as a CLI sees it); sets w.base. Close the returned server when done. */
+export async function serve(w, { cf } = {}) {
+  const http = await import('node:http');
+  const srv = http.createServer(async (req, res) => {
+    const chunks = []; for await (const c of req) chunks.push(c);
+    const h = new Headers();
+    for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') h.set(k, v);
+    h.set('cf-connecting-ip', '127.0.0.1');
+    const pending = [];
+    const r = await handle(new Request(w.base + req.url, { method: req.method, headers: h, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks) }), w.env, { fetcher: w.fetcher, log: w.log, ctx: { waitUntil: (p) => pending.push(p) }, cf });
+    await Promise.allSettled(pending);
+    res.writeHead(r.status, Object.fromEntries(r.headers)); res.end(Buffer.from(await r.arrayBuffer()));
+  });
+  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  w.base = `http://127.0.0.1:${srv.address().port}`;
+  return srv;
 }
 
 /** an Ed25519 signer bound to a new receipts API key of this user (proof of possession over the server's sign text) */
