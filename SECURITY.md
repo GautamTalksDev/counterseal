@@ -76,8 +76,8 @@ other doors (migrations, D1 import, time travel restore).
 
 ## The merge, 9 Oct 2026
 
-The public log (from WITNESS, after its own launch audit) and Ed25519 request signing (from SIGIL) became part of the
-broker. <!-- brand:history --> The adversarial review of the merged system added: signed requests with a body must cover
+The public log (from WITNESS, after its own launch audit) and Ed25519 request signing (from SIGIL) became part of the broker. <!-- brand:history -->
+The adversarial review of the merged system added: signed requests with a body must cover
 the content type; tighter limits on reads that reach the log's Durable Object; the log refuses a changed name or key; a
 log key whose private part does not match its public part is refused; receipt batches halved (25, 12 signed) for a CPU
 margin on Workers Free; proxied paths are never written to log lines. Tests: `server/test/joints.test.js`,

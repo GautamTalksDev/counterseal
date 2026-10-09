@@ -1,5 +1,6 @@
 // Counterseal dashboard. No innerHTML (Trusted Types enforced), no third-party code, no secrets kept in the page.
 // The one exception is an agent key made here: it is generated in this browser, downloaded at once, and dropped.
+import { BRAND } from '/brand.js';
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const n = document.createElement(tag); Object.assign(n, props); for (const k of kids) if (k != null) n.append(k); return n; };
 const b64u = { enc: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''), dec: (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)) };
@@ -158,7 +159,7 @@ async function pushState() {
   if (!k.enabled) { panel.hidden = true; return; }
   panel.hidden = false;
   if (!pushOk()) {
-    $('pushHint').textContent = 'This browser cannot show alerts here. On iPhone: open Counterseal in Safari, tap Share, then Add to Home Screen, and open it from your home screen.';
+    $('pushHint').textContent = `This browser cannot show alerts here. On iPhone: open ${BRAND.name} in Safari, tap Share, then Add to Home Screen, and open it from your home screen.`;
     for (const b of ['pushOn', 'pushTest', 'pushOff']) $(b).hidden = true;
     return;
   }

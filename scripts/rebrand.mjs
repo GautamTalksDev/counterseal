@@ -55,6 +55,9 @@ function main(check) {
     console.log('brand in step'); return 0;
   }
   writeFileSync(mod, want);
+  // the site serves copies of two SDK files; keep them identical to the SDK
+  writeFileSync(join(ROOT, 'site/public/receipts-sdk.js'), readFileSync(join(ROOT, 'sdk/receipts.mjs'), 'utf8').split('\n').slice(1).join('\n'));
+  writeFileSync(join(ROOT, 'site/public/websig.js'), readFileSync(join(ROOT, 'sdk/websig.mjs'), 'utf8'));
   writeFileSync(LOCK, JSON.stringify(Object.fromEntries(KEYS.map((k) => [k, BRAND[k]])), null, 2) + '\n');
   console.log(`rebranded ${touched} files (${changes.join(', ') || 'nothing changed'}); review with git diff`);
   return 0;

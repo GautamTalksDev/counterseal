@@ -253,5 +253,5 @@ if (typeof process !== 'undefined' && process.versions?.node && process.argv?.[1
   if (main) process.exitCode = await cli(process.argv.slice(2));
 }
 
-/** the name this class had in the WITNESS SDK */
-export const Witness = Receipts;
+/** the name this class had before the merge */
+export const Witness = Receipts; // brand:history

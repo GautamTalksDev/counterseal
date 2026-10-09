@@ -29,7 +29,7 @@ the provider's base (for Cloudflare, after `/client/v4`). Globs: `*` matches one
 alternatives (which may contain `*` and `**`; braces cannot nest, and an unbalanced brace is refused with
 `400 bad_policy`).
 
-Paths are matched in one canonical form, and that exact path is what LEASH sends upstream: a path with an empty
+Paths are matched in one canonical form, and that exact path is what the broker sends upstream: a path with an empty
 segment (`//`, including a doubled trailing slash), a `;` path parameter or an encoded NUL is refused with
 `400 bad_path`, one trailing slash is dropped (on requests and on your rules), and on GitHub, where owner and repo names
 are case-insensitive, both the path and your rule are lowercased before matching. A `deny` or `hold` rule written for

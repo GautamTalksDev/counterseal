@@ -1,5 +1,5 @@
 // Signed identity for AI agents: Web Bot Auth (draft-ietf-webbotauth-httpsig-protocol) on RFC 9421 HTTP Message
-// Signatures. From the SIGIL SDK. Also provides the structured-field parser and signature base the broker uses for
+// Signatures. Also provides the structured-field parser and signature base the broker uses for
 // agent keys (server/src/agentkeys.js).
 // Zero dependencies. Runs in Node 22+, Deno, Bun, browsers and Cloudflare Workers.
 //
@@ -156,7 +156,7 @@ export async function signedFetch(url, init = {}, opts) {
  *   opts.fetchDirectory(agentOrigin) -> JWKS object (you control caching and SSRF rules; see verifier.mjs for a safe one)
  *   opts.seenNonce(nonce, expires, keyid) -> true if already used (replay). Must be shared by every instance that verifies
  *     for you (a Map only protects one process); see the nonce store adapters in verifier.mjs.
- *   opts.requireNonce: refuse signatures without a nonce (the SIGIL API sets this).
+ *   opts.requireNonce: refuse signatures without a nonce (a shared verify service should set this).
  *   opts.maxWindow (default 3600 s, never more) and opts.maxWindowNoNonce (default 300 s) cap created..expires.
  *   opts.now (seconds).
  * Signature-Agent members with an unsupported ;type, or whose URL has a path, query or fragment, are ignored (the draft
@@ -227,7 +227,7 @@ export function directoryUrl(agent) {
   return new URL(agent).origin + DIRECTORY_PATH;
 }
 
-/** what an operator must publish on their own origin so sites (and SIGIL) can find their keys */
+/** what an operator must publish on their own origin so sites can find their keys */
 export function directoryInstructions(origin, jwks) {
   const o = new URL(origin).origin;
   return {

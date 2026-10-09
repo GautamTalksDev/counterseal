@@ -1,4 +1,4 @@
-// Network safety helpers shared by the SDK verifier and the SIGIL Worker. Zero dependencies.
+// Network safety helpers shared by the SDK verifier and the Worker's Web Bot Auth checker. Zero dependencies.
 // Fetching a URL that a stranger put in a request header is an SSRF risk; everything here exists to make that safe.
 
 export const MAX_DIRECTORY_BYTES = 65536;
