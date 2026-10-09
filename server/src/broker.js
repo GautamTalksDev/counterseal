@@ -1,5 +1,6 @@
 // Credentials, proxy tokens, the proxy, and holds.
-import { HttpError, json, b64u, rand, randomId, sha256hex, now, str, readBody } from './util.js';
+import { HttpError, json, b64u, rand, randomId, sha256hex, now, str, readBody, cleanText } from './util.js';
+import { mapOf } from './approvals.js';
 import { seal, open } from './vault.js';
 import { summarize, PROVIDERS, MAP_VERSION } from './providers.js';
 import { normalisePolicy, decide } from './policy.js';
@@ -99,9 +100,15 @@ export async function revokeToken(env, sess, id) {
 export async function listHolds(env, sess, status) {
   await env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND status IN ('pending','approved') AND expires_at < ?").bind(sess.accountId, now()).run();
   const st = ['pending', 'approved', 'denied', 'used', 'expired'].includes(status) ? status : 'pending';
-  const r = await env.DB.prepare('SELECT h.*, t.label AS token_label FROM holds h LEFT JOIN tokens t ON t.id = h.token_id WHERE h.account_id = ? AND h.status = ? ORDER BY h.created_at DESC LIMIT 100').bind(sess.accountId, st).all();
+  // the label of what asked: an agent token, or for a coding-agent approval the guard key (token_id "g:<key id>")
+  const r = await env.DB.prepare("SELECT h.*, COALESCE(t.label, g.label) AS token_label FROM holds h LEFT JOIN tokens t ON t.id = h.token_id LEFT JOIN guard_keys g ON h.kind != 'proxy' AND g.id = substr(h.token_id, 3) AND g.account_id = h.account_id WHERE h.account_id = ? AND h.status = ? ORDER BY h.created_at DESC LIMIT 100").bind(sess.accountId, st).all();
   const base = await appOrigin(env, sess.accountId);
-  return { holds: r.results.map(({ req_hash, ...h }) => ({ ...h, approve_url: `${base}/app#hold=${h.id}` })) };
+  return { holds: r.results.map(({ req_hash, context, ...h }) => ({ ...h, context: holdContext(context), approve_url: `${base}/app#hold=${h.id}` })) };
+}
+/** a guard hold's context as the app shows it: the folder name and the agent's session, nothing else */
+function holdContext(raw) {
+  if (!raw) return null;
+  try { const c = JSON.parse(raw); return { cwd: typeof c.cwd === 'string' ? c.cwd : null, session: typeof c.session === 'string' ? c.session : null }; } catch { return null; }
 }
 
 export async function approveBegin(env, sess, holdId) {
@@ -117,19 +124,34 @@ export async function approveFinish(env, sess, holdId, body) {
   const ch = await takeChallenge(env, body.challengeId, 'approve:' + holdId);
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
   await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
-  const h = await env.DB.prepare("UPDATE holds SET status = 'approved', decided_at = ?, expires_at = ? WHERE id = ? AND account_id = ? AND status = 'pending' AND expires_at > ? RETURNING method, host, rule")
+  const h = await env.DB.prepare("UPDATE holds SET status = 'approved', decided_at = ?, expires_at = ? WHERE id = ? AND account_id = ? AND status = 'pending' AND expires_at > ? RETURNING method, host, rule, kind, context")
     .bind(now(), now() + GRANT_TTL, holdId, sess.accountId, now()).first();
   if (!h) throw new HttpError(404, 'not_found');
   // which passkey approved: a short fingerprint of its credential id (the owner can match it to their passkey)
   const passkey = (await sha256hex(String(body.credential.id))).slice(0, 16);
-  await audit(env, sess.accountId, 'web', 'approve', { hold: holdId, method: h.method, host: h.host, rule: h.rule, passkey });
-  return { ok: true, note: 'The agent can now retry the exact same request once, within 10 minutes.' };
+  await audit(env, sess.accountId, 'web', 'approve', { hold: holdId, method: h.method, host: h.host, rule: h.rule, passkey, ...guardDetail(h) });
+  return { ok: true, note: h.kind === 'proxy' || !h.kind ? 'The agent can now retry the exact same request once, within 10 minutes.' : 'The agent can now run that exact command once, within 10 minutes.' };
 }
 
-export async function denyHold(env, sess, holdId) {
-  const h = await env.DB.prepare("UPDATE holds SET status = 'denied', decided_at = ? WHERE id = ? AND account_id = ? AND status = 'pending' RETURNING method, host, rule").bind(now(), holdId, sess.accountId).first();
+/** for a coding-agent approval: its kind, and the shell map version its receipts name */
+function guardDetail(h) {
+  if (!h.kind || h.kind === 'proxy') return {};
+  const map = mapOf(h.context);
+  return { kind: h.kind, ...(map ? { map } : {}) };
+}
+
+/** Deny is always safe, so any signed-in session may. An optional reason goes back to the agent that asked (a
+ *  coding-agent approval reads it); it is cleaned of control, invisible and line-break characters and capped. */
+export const DENY_REASON = 200;
+export async function denyHold(env, sess, holdId, body = {}) {
+  let reason = null;
+  if (body.reason !== undefined && body.reason !== null) {
+    if (typeof body.reason !== 'string' || body.reason.length > DENY_REASON) throw new HttpError(400, 'bad_reason', `A reason is text of ${DENY_REASON} characters at most.`);
+    reason = cleanText(body.reason) || null;
+  }
+  const h = await env.DB.prepare("UPDATE holds SET status = 'denied', decided_at = ?, deny_reason = ? WHERE id = ? AND account_id = ? AND status = 'pending' RETURNING method, host, rule, kind, context").bind(now(), reason, holdId, sess.accountId).first();
   if (!h) throw new HttpError(404, 'not_found');
-  await audit(env, sess.accountId, sess.kind, 'deny', { hold: holdId, method: h.method, host: h.host, rule: h.rule, by: sess.kind });
+  await audit(env, sess.accountId, sess.kind, 'deny', { hold: holdId, method: h.method, host: h.host, rule: h.rule, by: sess.kind, ...(reason ? { reason } : {}), ...guardDetail(h) });
   return { ok: true };
 }
 
@@ -162,15 +184,16 @@ export function canonPath(p) {
 const PREVIEW = 2048;
 const INVISIBLE = /[​-‏‪-‮⁠-⁩﻿­؜]/g;
 const visible = (t) => String(t).replace(INVISIBLE, (c) => `<U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}>`);
-export function preview(search, text) {
+/** max: the window; approvals for commands (approvals.js) pass one big enough that the exact command is never cut */
+export function preview(search, text, max = PREVIEW) {
   const head = summarize(search, text);
   const raw = [search, text].filter(Boolean).join('\n\n');
   if (!raw && !head.length) return null;
-  if (raw.length > PREVIEW) head.push(`Request is ${raw.length} characters; only the first part is shown below. The ${BRAND.name} summary above covers all of it.`);
+  if (raw.length > max) head.push(`Request is ${raw.length} characters; only the first part is shown below. The ${BRAND.name} summary above covers all of it.`);
   if (INVISIBLE.test(raw)) head.push('Contains invisible or direction-changing characters (shown as <U+...>).');
   INVISIBLE.lastIndex = 0;
   const top = head.map((h) => visible(h)).join('\n');
-  const room = Math.max(256, PREVIEW - top.length - 2);
+  const room = Math.max(256, max - top.length - 2);
   let body = visible(raw);
   if (body.length > room) body = body.slice(0, room - 12) + '\n[truncated]';
   return (top ? top + '\n\n' : '') + body;

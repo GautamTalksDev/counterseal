@@ -27,7 +27,9 @@ self.addEventListener('push', (e) => {
         } else if (holds && !holds.length) { title = 'Counterseal alerts are working'; body = 'Nothing is waiting for you right now.'; }
         else if (holds && holds.length) {
           const h = holds[0];
-          title = `${h.token_label || 'Your agent'} wants to ${h.method} ${h.host}`;
+          // a coding agent's command or tool call (asked for by its guard), a deploy, or an API call the broker held
+          const who = h.token_label || h.agent || 'Your agent';
+          title = h.kind === 'shell' ? `${who} wants to run a command` : h.kind === 'tool' ? `${who} wants to call a tool` : h.kind === 'deploy' ? `${who} wants to deploy` : `${who} wants to ${h.method} ${h.host}`;
           body = `${h.path}\n${h.why}${holds.length > 1 ? `\n+${holds.length - 1} more waiting` : ''}`;
           tag = 'leash-' + h.id; url = '/app#hold=' + h.id;
           // after the move, the approve link points at the host where this account has a passkey (the server says which)

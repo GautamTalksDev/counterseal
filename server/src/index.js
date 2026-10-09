@@ -7,6 +7,7 @@ import { HttpError, json, errorResponse, readJson, now } from './util.js';
 import * as A from './auth.js';
 import * as B from './broker.js';
 import * as K from './agentkeys.js';
+import * as G from './approvals.js';
 import { list as auditList, verifyChain, audit } from './audit.js';
 import { limit, readLimit, ipBucket } from './ratelimit.js';
 import { PROVIDERS, MAP_VERSION, COMMON } from './providers.js';
@@ -49,6 +50,7 @@ const REG_PER_DAY = (env) => Number(env.REG_PER_IP_DAY) || 5;
 //   public / publicw (with Origin check): per-IP D1 limit;  pub: public log reads, in-memory limit, CORS open
 //   key: receipts API key (lsr_);  session: read with any session;  write: session + CSRF for web
 //   webw: web (passkey) session only, never a CLI session
+//   guard: a guard key (lsg_) from a coding-agent hook; per-network limit in memory, the routes add their own limits
 const ROUTES = [
   ['GET', /^\/v1\/meta$/, 'public', (c) => ({ app: A.hosts(c.env)[0].origin, legacyApp: A.hosts(c.env)[1]?.origin || null, mapVersion: MAP_VERSION, common: COMMON.map((r) => ({ id: r.id, method: r.m, path: r.p, why: r.why })), providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, name: p.name, host: p.host, irreversible: p.irreversible.map((r) => ({ id: r.id, method: r.m, path: r.p, why: r.why })) })) })],
   ['POST', /^\/v1\/auth\/register\/begin$/, 'publicw', (c) => A.registerBegin(c.env, c.body)],
@@ -135,7 +137,16 @@ const ROUTES = [
   ['GET', /^\/v1\/holds$/, 'session', (c) => B.listHolds(c.env, c.s, c.url.searchParams.get('status'))],
   ['POST', new RegExp(`^/v1/holds/${ID}/approve/begin$`), 'webw', (c) => B.approveBegin(c.env, c.s, c.m[1])],
   ['POST', new RegExp(`^/v1/holds/${ID}/approve/finish$`), 'webw', (c) => B.approveFinish(c.env, c.s, c.m[1], c.body)],
-  ['POST', new RegExp(`^/v1/holds/${ID}/deny$`), 'write', (c) => B.denyHold(c.env, c.s, c.m[1])],
+  ['POST', new RegExp(`^/v1/holds/${ID}/deny$`), 'write', (c) => B.denyHold(c.env, c.s, c.m[1], c.body)],
+  // Guard keys (lsg_): what a coding-agent hook holds to ask for approvals. Making one or revoking one never loosens
+  // anything (a guard key can ask, never approve), so a CLI session may do both.
+  ['GET', /^\/v1\/guard\/keys$/, 'session', (c) => G.listKeys(c.env, c.s)],
+  ['POST', /^\/v1\/guard\/keys$/, 'write', (c) => G.createKey(c.env, c.s, c.body)],
+  ['DELETE', new RegExp(`^/v1/guard/keys/${ID}$`), 'write', (c) => G.revokeKey(c.env, c.s, c.m[1])],
+  // Approvals for what the broker does not proxy (a coding agent's command, an MCP tool call): ask, wait, use once.
+  ['POST', /^\/v1\/approvals$/, 'guard', (c) => G.create(c)],
+  ['GET', new RegExp(`^/v1/approvals/${ID}$`), 'guard', (c) => G.status(c, c.m[1])],
+  ['POST', new RegExp(`^/v1/approvals/${ID}/use$`), 'guard', (c) => G.use(c, c.m[1])],
   ['GET', /^\/v1\/audit$/, 'session', async (c) => { const v = c.url.searchParams.get('before'); return { entries: await auditList(c.env, c.s.accountId, v === null ? 0 : int(v, 'before')) }; }],
   ['GET', /^\/v1\/audit\/verify$/, 'session', (c) => verifyChain(c.env, c.s.accountId)],
   // agent keys (Prove who). Registering needs proof of possession; revoking breaks every token bound to the key, so
@@ -172,7 +183,7 @@ async function deleteAccount(env, s, body) {
   await forgetAccount(env, id);
   await env.DB.batch([
     ...deleteStatements(env.DB, id),
-    ...['push_subs', 'holds', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
+    ...['push_subs', 'holds', 'guard_keys', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
     env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id),
   ]);
   return { body: { deleted: true, note: 'Account deleted. Receipts already in the public log stay there by design; they are no longer linked to you on our side.' }, cookie: '__Host-leash=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0' };
@@ -184,7 +195,8 @@ const SECURITY_EVENTS = new Set(['api_key_required', 'api_key_invalid', 'csrf', 
   'bad_signerProof', 'bad_signerPublicKey', 'signer_taken', 'sig_requires_signer_key', 'signature_required', 'stale_ts',
   'challenge_expired', 'bad_challenge', 'bad_origin', 'bad_rp', 'user_verification_required', 'too_large', 'quota', 'daily_quota', 'log_at_capacity',
   'not_configured', 'log_key_invalid', 'log_key_changed', 'token_invalid', 'agent_signature_required', 'bad_agent_signature', 'agent_signature_replayed',
-  'agent_key_revoked', 'passkey_required', 'bad_proof', 'key_taken', 'code_not_found', 'bad_user_code', 'too_many_holds']);
+  'agent_key_revoked', 'passkey_required', 'bad_proof', 'key_taken', 'code_not_found', 'bad_user_code', 'too_many_holds',
+  'guard_key_required', 'guard_key_invalid', 'hash_mismatch']);
 const logPath = (url) => url.pathname.startsWith('/p/') ? url.pathname.split('/').slice(0, 3).join('/') + '/...' : url.pathname.replace(/\/[0-9a-f]{24}(?=\/|$)/g, '/:id');
 function securityLog(e, request, url) {
   if (!(e instanceof HttpError) || !SECURITY_EVENTS.has(e.code)) return;
@@ -253,6 +265,8 @@ export async function handle(request, rawEnv, opts = {}) {
       if (guard === 'admin') { await readLimit(env, await ipBucket(env, request, 'admin'), 30, t); await checkStatsToken(env, request); }
       // receipts: the hard limits (quotas, daily capacity) are reserved in D1; the per-key rate limit costs no D1 write
       if (guard === 'key') { c.k = await apiKey(env, request); await readLimit(env, 'key:' + c.k.id, 1200, t); }
+      // guard keys: waiting for an approval writes nothing to D1, so this limit lives in memory too
+      if (guard === 'guard') { await readLimit(env, await ipBucket(env, request, 'guard'), Number(env.GUARD_RPM) || 240, t); c.g = await G.guardKey(env, request); }
       if (guard === 'session' || guard === 'write' || guard === 'webw') {
         c.s = await A.session(env, request, guard !== 'session');
         if (guard === 'webw' && c.s.kind !== 'web') throw new HttpError(403, 'passkey_required', `This needs your passkey in the ${BRAND.name} app.`);

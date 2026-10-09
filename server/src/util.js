@@ -118,6 +118,13 @@ export function str(v, name, { min = 1, max = 200, re } = {}) {
   return v;
 }
 
+/** text from an agent or a person that is shown to someone else (a deny reason, an approval's summary): control,
+ *  format (zero-width, direction), surrogate and line-break characters become spaces, runs of spaces become one */
+const UNSAFE_TEXT = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/gu;
+export function cleanText(s) {
+  return String(s).replace(UNSAFE_TEXT, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export function now() {
   return Date.now();
 }

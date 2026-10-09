@@ -161,10 +161,15 @@ test('an approved sign-in: 7 days, on the record, every device alerted, listed w
   assert.equal(ak.status, 200, JSON.stringify(ak.body));
   const rk = (await w.req('POST', '/v1/keys', { bearer: cli, ...cliReq, body: { label: 'cli' } })).body;
   assert.match(rk.key, /^lsr_/);
+  // and a guard key (approvals for a coding agent's commands): it never outlives the session either
+  const gk = await w.req('POST', '/v1/guard/keys', { bearer: cli, ...cliReq, body: { label: 'laptop guard' } });
+  assert.equal(gk.status, 200, JSON.stringify(gk.body));
+  assert.equal(gk.body.expiresAt, list[0].expires_at, 'a CLI-made guard key ends with its session');
   const sid = signedIn.session;
   assert.equal(w.env.DB.raw.prepare('SELECT COUNT(*) n FROM tokens WHERE session_id = ?').get(sid).n, 2);
   assert.equal(w.env.DB.raw.prepare('SELECT session_id FROM agent_keys').get().session_id, sid);
   assert.equal(w.env.DB.raw.prepare('SELECT session_id FROM api_keys').get().session_id, sid);
+  assert.equal(w.env.DB.raw.prepare('SELECT session_id FROM guard_keys').get().session_id, sid);
 
   // revoking: never by a CLI session, never another account's
   assert.equal((await w.req('DELETE', `/v1/sessions/${sid}`, { bearer: cli, ...cliReq })).body.error, 'passkey_required');
@@ -173,7 +178,8 @@ test('an approved sign-in: 7 days, on the record, every device alerted, listed w
   assert.equal((await w.req('DELETE', `/v1/sessions/${sid}`, { cookie: u.cookie, xleash: false })).body.error, 'csrf');
   const rv = await w.req('DELETE', `/v1/sessions/${sid}`, { cookie: u.cookie });
   assert.equal(rv.status, 200, JSON.stringify(rv.body));
-  assert.deepEqual(rv.body.revoked, { tokens: 2, agentKeys: 1, receiptsKeys: 1 });
+  assert.deepEqual(rv.body.revoked, { tokens: 2, agentKeys: 1, receiptsKeys: 1, guardKeys: 1 });
+  assert.equal((await w.req('GET', `/v1/approvals/${'0'.repeat(24)}`, { bearer: gk.body.key, ...cliReq })).body.error, 'guard_key_invalid', 'its guard key is revoked with it');
   assert.equal((await w.req('GET', '/v1/tokens', { bearer: cli, ...cliReq })).body.error, 'signed_out');
   assert.equal((await w.req('GET', '/p/github/user', { bearer: t.body.token, ...cliReq })).body.error, 'token_invalid');
   assert.equal((await w.req('GET', '/p/github/user', { bearer: web.token, ...cliReq })).status, 200, 'what the web session made is untouched');
@@ -194,6 +200,10 @@ test('a phished command line that signs itself out cannot hide: the alert and th
   const tok = (await w.req('POST', '/v1/tokens', { bearer: cli, ...cliReq, body: { credentialId: cred } })).body.token;
   const rk = (await w.req('POST', '/v1/keys', { bearer: cli, ...cliReq, body: { label: 'quiet' } })).body;
   assert.ok(rk.expiresAt <= Date.now() + 7 * 86400_000 + 60_000, 'a receipts key made by a CLI session ends with it');
+  // and a guard key, with an approval waiting (a phisher's guard could keep asking)
+  const gk = (await w.req('POST', '/v1/guard/keys', { bearer: cli, ...cliReq, body: { label: 'quiet guard' } })).body;
+  const ask = await w.req('POST', '/v1/approvals', { bearer: gk.key, ...cliReq, body: { kind: 'shell', agent: 'codex', rule: 'sh.rm', why: 'Deletes the home folder.', summary: 'rm -rf ~', detail: 'rm -rf ~' } });
+  assert.equal(ask.status, 202, JSON.stringify(ask.body));
   // it signs itself out at once
   assert.equal((await w.req('POST', '/v1/auth/logout', { bearer: cli, ...cliReq, body: {} })).status, 200);
   assert.equal((await w.req('GET', '/v1/tokens', { bearer: cli, ...cliReq })).body.error, 'signed_out');
@@ -205,7 +215,9 @@ test('a phished command line that signs itself out cannot hide: the alert and th
   assert.equal((await w.req('GET', '/p/github/user', { bearer: tok, ...cliReq })).status, 200, 'what it made still works until revoked');
   const rv = await w.req('DELETE', `/v1/sessions/${al[0].id}`, { cookie: u.cookie });
   assert.equal(rv.status, 200, JSON.stringify(rv.body));
-  assert.equal(rv.body.ended, false); assert.deepEqual(rv.body.revoked, { tokens: 1, agentKeys: 0, receiptsKeys: 1 });
+  assert.equal(rv.body.ended, false); assert.deepEqual(rv.body.revoked, { tokens: 1, agentKeys: 0, receiptsKeys: 1, guardKeys: 1 });
+  assert.equal((await w.req('GET', `/v1/approvals/${ask.body.id}`, { bearer: gk.key, ...cliReq })).body.error, 'guard_key_invalid');
+  assert.equal(w.env.DB.raw.prepare('SELECT status FROM holds WHERE id = ?').get(ask.body.id).status, 'expired', 'its waiting approval is closed');
   assert.equal((await w.req('GET', '/p/github/user', { bearer: tok, ...cliReq })).body.error, 'token_invalid');
   assert.equal((await w.req('POST', '/v1/receipts', { bearer: rk.key, ...cliReq, body: { receipt: { agent: 'a', action: 'b' } } })).body.error, 'api_key_invalid');
   assert.equal((await w.req('GET', '/v1/sessions', { cookie: u.cookie })).body.sessions[0].status, 'revoked');

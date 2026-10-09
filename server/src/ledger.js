@@ -203,15 +203,18 @@ async function leaveNothingIfDeleted(c, db, acct, signer) {
 
 // ---------------------------------------------------------------- broker receipts
 /** which audit actions are broker decisions, and the public decision word for each */
-export const DECISION = { proxy: 'allowed', hold: 'held', deny: 'denied', approve: 'approved', proxy_approved: 'executed' };
+// run_approved: a coding-agent command (or tool call) approved with a passkey was released to run (approvals.js)
+export const DECISION = { proxy: 'allowed', hold: 'held', deny: 'denied', approve: 'approved', proxy_approved: 'executed', run_approved: 'executed' };
 const RULE = /^[A-Za-z0-9_.:-]{1,80}$/;
+const MAPV = /^\d{4}-\d{2}-\d{2}\.\d{1,3}$/;
 
-/** the public receipt for one broker decision. Only fixed vocabulary goes in: method and provider host, decision, rule
- *  id, map version, a boolean, the time and the audit hash. */
+/** the public receipt for one broker decision. Only fixed vocabulary goes in: method and provider host (for a
+ *  coding-agent approval: RUN or CALL and the agent's name from a fixed list), decision, rule id, map version (the
+ *  guard's shell map version for its decisions), a boolean, the time and the audit hash. */
 export function brokerReceipt({ action, detail, auditHash, at, mapVersion }) {
   const method = /^[A-Z]{3,7}$/.test(detail.method || '') ? detail.method : null;
   const host = /^[a-z0-9.-]{1,100}$/.test(detail.host || '') ? detail.host : null;
-  const meta = { map: mapVersion };
+  const meta = { map: typeof detail.map === 'string' && MAPV.test(detail.map) ? detail.map : mapVersion };
   if (detail.rule && RULE.test(detail.rule)) meta.rule = detail.rule;
   if (detail.agent_key) meta.agent_key = true;
   if (detail.passkey) meta.passkey = true;

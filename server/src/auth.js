@@ -334,23 +334,26 @@ export async function listCliSessions(env, sess) {
 export const recentCliSignins = (env, accountId) => signinsSince(env, accountId, now() - 15 * 60_000, 5);
 
 /** web session only (a stolen CLI session must not sign out its owner's other machines). Ends the session if it is
- *  still live and revokes every token, agent key and receipts key it made, in one batch; this works after the session
- *  signed out or expired too. */
+ *  still live and revokes every token, agent key, receipts key and guard key it made (closing the guard keys' open
+ *  approvals), in one batch; this works after the session signed out or expired too. */
 export async function revokeCliSession(env, sess, sid) {
   const rows = (await env.DB.prepare("SELECT hash FROM sessions WHERE account_id = ? AND kind = 'cli'").bind(sess.accountId).all()).results;
   let target = null;
   for (const r of rows) if ((await sessionId(r.hash)) === sid) { target = r.hash; break; }
   if (!target && !(await env.DB.prepare("SELECT 1 AS x FROM audit WHERE account_id = ? AND action = 'cli_signed_in' AND detail LIKE ? LIMIT 1").bind(sess.accountId, `%"session":"${sid}"%`).first())) throw new HttpError(404, 'not_found');
   const t = now(), a = sess.accountId;
-  const [, tk, ak, rk] = await env.DB.batch([
+  const [, tk, ak, rk, , gk] = await env.DB.batch([
     env.DB.prepare('DELETE FROM sessions WHERE hash = ? AND account_id = ?').bind(target || '', a),
     env.DB.prepare('UPDATE tokens SET revoked = 1 WHERE account_id = ? AND session_id = ? AND revoked = 0').bind(a, sid),
     env.DB.prepare('UPDATE agent_keys SET revoked_at = ? WHERE account_id = ? AND session_id = ? AND revoked_at IS NULL').bind(t, a, sid),
     env.DB.prepare('UPDATE api_keys SET revoked = 1 WHERE account_id = ? AND session_id = ? AND revoked = 0').bind(a, sid),
+    // guard keys it made, and their open approvals (closed first, while the keys still read as the session's)
+    env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND status IN ('pending','approved') AND kind != 'proxy' AND token_id IN (SELECT 'g:' || id FROM guard_keys WHERE account_id = ? AND session_id = ? AND revoked = 0)").bind(a, a, sid),
+    env.DB.prepare('UPDATE guard_keys SET revoked = 1 WHERE account_id = ? AND session_id = ? AND revoked = 0').bind(a, sid),
   ]);
   const n = (r) => r?.meta?.changes || 0;
-  await audit(env, a, 'web', 'cli_session_revoked', { session: sid, ended: !!target, tokens: n(tk), agent_keys: n(ak), receipts_keys: n(rk) });
-  return { ok: true, ended: !!target, revoked: { tokens: n(tk), agentKeys: n(ak), receiptsKeys: n(rk) } };
+  await audit(env, a, 'web', 'cli_session_revoked', { session: sid, ended: !!target, tokens: n(tk), agent_keys: n(ak), receipts_keys: n(rk), guard_keys: n(gk) });
+  return { ok: true, ended: !!target, revoked: { tokens: n(tk), agentKeys: n(ak), receiptsKeys: n(rk), guardKeys: n(gk) } };
 }
 
 export { newChallenge, takeChallenge };

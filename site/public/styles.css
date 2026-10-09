@@ -162,3 +162,12 @@ a.ul{text-decoration:underline;text-underline-offset:3px}
 .facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin-top:12px;font-size:14px}
 .facts dt{color:var(--dim)}
 .btn.pri:disabled{opacity:.45;cursor:not-allowed}
+
+/* hold cards: what kind of action (API call, shell command, tool call, deploy), the exact command, deny with a reason */
+.badges{display:inline-flex;gap:6px;align-items:center}
+.badge.kind{background:rgba(255,255,255,.05);color:var(--dim);border:1px solid var(--line2)}
+.hold .what .agent{color:var(--warn);font-weight:600}
+.hold .preview.exact{max-height:360px;font-size:12.5px}
+.hold .row{flex-wrap:wrap}
+.hold .reason-row{margin-top:10px}
+.hold .reason-row input{min-width:200px}

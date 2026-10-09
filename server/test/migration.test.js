@@ -108,4 +108,18 @@ test('live-shaped data written by the deployed code keeps working after 0004 and
   const t2 = await now('POST', '/v1/tokens', { bearer: cli, origin: null, xleash: false, body: { credentialId: cred.id, label: 'cli' } });
   for (const k of ['id', 'token', 'provider', 'baseUrl', 'expiresAt', 'note']) assert.ok(k in t2.body, k);
   for (const k of ['id', 'method', 'host', 'path', 'rule', 'why']) assert.ok(k in (await now('GET', '/v1/holds?status=used', { bearer: cli, origin: null, xleash: false })).body.holds[0], k);
+
+  // 0006 (approvals): every hold the live code wrote reads as a proxied API call, with no agent and no deny reason
+  assert.deepEqual(db.raw.prepare('SELECT DISTINCT kind FROM holds').all().map((r) => r.kind), ['proxy']);
+  const deniedLive = (await now('GET', '/v1/holds?status=denied', { cookie })).body.holds.find((h) => h.id === denied.hold_id);
+  assert.equal(deniedLive.kind, 'proxy'); assert.equal(deniedLive.agent, null); assert.equal(deniedLive.deny_reason, null); assert.equal(deniedLive.context, null);
+  // and the live CLI session and passkey drive the new approvals end to end
+  const gk = await now('POST', '/v1/guard/keys', { bearer: cli, origin: null, xleash: false, body: { label: 'live laptop' } });
+  assert.equal(gk.status, 200, JSON.stringify(gk.body));
+  const ask = await now('POST', '/v1/approvals', { bearer: gk.body.key, origin: null, xleash: false, body: { kind: 'shell', agent: 'codex', rule: 'sh.git-force', why: 'Rewrites the remote history.', summary: 'git push --force', detail: 'git push --force origin main' } });
+  assert.equal(ask.status, 202, JSON.stringify(ask.body));
+  const gb = await now('POST', `/v1/holds/${ask.body.id}/approve/begin`, { cookie, body: {} });
+  assert.equal((await now('POST', `/v1/holds/${ask.body.id}/approve/finish`, { cookie, body: { challengeId: gb.body.challengeId, credential: await auth.get(gb.body.options) } })).status, 200);
+  assert.equal((await now('POST', `/v1/approvals/${ask.body.id}/use`, { bearer: gk.body.key, origin: null, xleash: false, body: { hash: ask.body.hash } })).status, 200);
+  assert.equal((await now('GET', '/v1/audit/verify', { cookie })).body.ok, true);
 });

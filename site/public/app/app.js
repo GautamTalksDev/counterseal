@@ -48,20 +48,14 @@ let meta;
 async function load() {
   const [c, t, h, a, ak, me] = await Promise.all([api('GET', '/v1/credentials'), api('GET', '/v1/tokens'), api('GET', '/v1/holds'), api('GET', '/v1/audit'), api('GET', '/v1/agent-keys'), api('GET', '/v1/me')]);
   // holds
-  const H = $('holds'); H.replaceChildren();
+  const H = $('holds');
+  // keep the cursor in a deny reason being typed across the refresh
+  const typing = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.hold : null;
+  H.replaceChildren();
   $('holdCount').textContent = String(h.holds.length); $('holdCount').classList.toggle('hot', h.holds.length > 0);
-  for (const x of h.holds) {
-    const ok = el('button', { className: 'btn pri', textContent: 'Approve with passkey' });
-    const no = el('button', { className: 'btn dan', textContent: 'Deny' });
-    ok.onclick = async () => { try { await ceremony(`/v1/holds/${x.id}/approve/begin`, `/v1/holds/${x.id}/approve/finish`); toast('Approved. The agent can retry that exact request once.'); load(); } catch (e) { toast(e.message); } };
-    no.onclick = async () => { try { await api('POST', `/v1/holds/${x.id}/deny`, {}); toast('Denied.'); load(); } catch (e) { toast(e.message); } };
-    H.append(el('div', { className: 'hold', id: 'hold-' + x.id },
-      el('div', { className: 'hold-top' }, el('span', { className: 'badge warn', textContent: 'Held' }), el('span', { className: 'dim mono', textContent: `${x.token_label || 'agent'}  ${new Date(x.created_at).toLocaleTimeString()}` })),
-      el('div', { className: 'what', textContent: `${x.method} ${x.host}${x.path}` }),
-      x.preview ? el('pre', { className: 'preview mono', textContent: x.preview }) : null,
-      el('p', { className: 'dim', textContent: `${x.why} Rule ${x.rule}.` }),
-      el('div', { className: 'row' }, ok, no)));
-  }
+  for (const x of h.holds) H.append(holdCard(x));
+  for (const id of [...drafts.keys()]) if (!h.holds.some((x) => x.id === id)) drafts.delete(id);
+  if (typing && /^[0-9a-f]{24}$/.test(typing)) { const i = H.querySelector(`input[data-hold="${typing}"]`); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
   // creds
   const C = $('creds'); C.replaceChildren(); const tc = $('tokCred'); tc.replaceChildren();
   for (const x of c.credentials) {
@@ -101,6 +95,60 @@ async function load() {
   for (const x of a.entries.slice(0, 40)) A.append(el('div', {}, el('span', { className: 'mono', textContent: `${new Date(x.at).toLocaleString()}  ${x.action}${x.receipt !== null && x.receipt !== undefined ? '  receipt #' + x.receipt : ''}` }), el('span', { className: 'dim mono', textContent: x.detail.path ? `${x.detail.method} ${x.detail.path}` : x.actor })));
 }
 
+// ---- hold cards. Four kinds: an API call the broker holds, and approvals asked for by a coding agent's guard (a shell
+// command or a tool call) or by a deploy gate. For those, the card's headline is what the agent wants, and the exact
+// command or call is shown in full underneath (the server makes invisible and control characters visible); the short
+// summary comes from the guard and is labelled as such.
+const KIND = { proxy: 'API call', shell: 'Shell command', tool: 'Tool call', deploy: 'Deploy' };
+const drafts = new Map(); // hold id -> a deny reason being typed
+const WANTS = { shell: 'wants to run this command', tool: 'wants to make this tool call', deploy: 'wants to deploy' };
+function holdCard(x) {
+  const kind = KIND[x.kind] ? x.kind : 'proxy';
+  const guard = kind !== 'proxy';
+  const ok = el('button', { className: 'btn pri', type: 'button', textContent: 'Approve with passkey' });
+  const no = el('button', { className: 'btn dan', type: 'button', textContent: 'Deny' });
+  ok.onclick = async () => {
+    try { await ceremony(`/v1/holds/${x.id}/approve/begin`, `/v1/holds/${x.id}/approve/finish`); toast(guard ? 'Approved. The agent can run that exact command once, within 10 minutes.' : 'Approved. The agent can retry that exact request once.'); load(); } catch (e) { toast(e.message); }
+  };
+  const deny = async (reason) => { try { await api('POST', `/v1/holds/${x.id}/deny`, reason ? { reason } : {}); drafts.delete(x.id); toast(reason ? 'Denied. The agent gets your reason.' : 'Denied.'); load(); } catch (e) { toast(e.message); } };
+  no.onclick = () => deny(null);
+  // deny with a reason: the guard hands it back to the agent (as data), so "not today, use staging" reaches it. The list
+  // refreshes every few seconds, so a reason being typed is kept as a draft and the card is rebuilt with it.
+  let reasonRow = null, withReason = null;
+  if (guard) {
+    const input = el('input', { maxLength: 200, placeholder: 'Reason, shown to the agent (200 characters)', autocomplete: 'off', spellcheck: true });
+    input.setAttribute('aria-label', 'Reason for denying, shown to the agent');
+    input.dataset.hold = x.id;
+    const send = el('button', { className: 'btn dan', type: 'button', textContent: 'Deny with this reason' });
+    send.onclick = () => deny(input.value.trim() || null);
+    input.onkeydown = (e) => { if (e.key === 'Enter') send.click(); };
+    input.oninput = () => drafts.set(x.id, input.value);
+    reasonRow = el('div', { className: 'row reason-row', hidden: !drafts.has(x.id) }, input, send);
+    if (drafts.has(x.id)) input.value = drafts.get(x.id);
+    withReason = el('button', { className: 'btn', type: 'button', textContent: 'Deny with a reason' });
+    withReason.onclick = () => {
+      reasonRow.hidden = !reasonRow.hidden;
+      if (reasonRow.hidden) drafts.delete(x.id); else { drafts.set(x.id, input.value); input.focus(); }
+    };
+  }
+  const who = x.token_label || x.agent || 'agent';
+  const where = x.context && (x.context.cwd || x.context.session)
+    ? [x.context.cwd ? `in folder ${x.context.cwd}` : null, x.context.session ? `agent session ${x.context.session}` : null].filter(Boolean).join(', ')
+    : null;
+  return el('div', { className: 'hold' + (guard ? ' hold-guard' : ''), id: 'hold-' + x.id },
+    el('div', { className: 'hold-top' },
+      el('span', { className: 'badges' }, el('span', { className: 'badge warn', textContent: 'Held' }), el('span', { className: 'badge kind', textContent: KIND[kind] })),
+      el('span', { className: 'dim mono', textContent: `${who}${guard && x.agent && x.agent !== who ? ' (' + x.agent + ')' : ''}  ${new Date(x.created_at).toLocaleTimeString()}` })),
+    guard
+      ? el('div', { className: 'what' }, el('span', { className: 'agent', textContent: x.agent || 'agent' }), ` ${WANTS[kind]}${where ? ', ' + where : ''}:`)
+      : el('div', { className: 'what', textContent: `${x.method} ${x.host}${x.path}` }),
+    x.preview ? el('pre', { className: 'preview mono' + (guard ? ' exact' : ''), textContent: x.preview }) : null,
+    guard ? el('p', { className: 'dim small', textContent: `Summary from the guard: ${x.path}` }) : null,
+    el('p', { className: 'dim', textContent: `${x.why} Rule ${x.rule}.` }),
+    el('div', { className: 'row' }, ok, no, withReason),
+    reasonRow);
+}
+
 async function mint(pre) {
   try {
     let policy;
@@ -134,7 +182,7 @@ function show(view) {
   const changed = current !== view;
   current = view;
   if (changed && view === 'receipts') load().catch(() => {});
-  if (changed && view === 'account') { passkeysView().catch(() => {}); cliSessionsView().catch(() => {}); }
+  if (changed && view === 'account') { passkeysView().catch(() => {}); cliSessionsView().catch(() => {}); guardKeysView().catch(() => {}); }
   for (const s of document.querySelectorAll('.view')) s.hidden = s.dataset.view !== view;
   for (const a of document.querySelectorAll('#snav a')) a.classList.toggle('on', a.dataset.view === view);
 }
@@ -215,17 +263,42 @@ async function cliAlert(id) {
     : `Signed in ${new Date(s.created_at).toLocaleString()} from ${place(s)}.${s.status === 'ended' ? ' It has signed out or expired, but tokens and keys it made may still work.' : s.status === 'revoked' ? ' It was revoked.' : ''}`;
   $('cliMine').onclick = () => { history.replaceState(null, '', '/app'); route(); };
   $('cliRevoke').onclick = async () => {
-    try { const r = await api('DELETE', `/v1/sessions/${id}`); toast(`Revoked, with ${r.revoked.tokens} token(s), ${r.revoked.agentKeys} agent key(s) and ${r.revoked.receiptsKeys} receipts key(s) it made.`); history.replaceState(null, '', '/app'); route(); load(); } catch (e) { toast(e.message); }
+    try { const r = await api('DELETE', `/v1/sessions/${id}`); toast(revokedText(r.revoked)); history.replaceState(null, '', '/app'); route(); load(); } catch (e) { toast(e.message); }
   };
 }
+const revokedText = (r) => `Revoked, with ${r.tokens} token(s), ${r.agentKeys} agent key(s), ${r.receiptsKeys} receipts key(s) and ${r.guardKeys ?? 0} guard key(s) it made.`;
+
+// ---- guard keys: what a coding agent's hook (leashcli guard) holds. It asks for your approval; it can never give one.
+async function guardKeysView() {
+  const { keys } = await api('GET', '/v1/guard/keys');
+  const live = keys.filter((k) => !k.revoked && (k.expires_at === null || k.expires_at > Date.now()));
+  const L = $('guardKeys'); L.replaceChildren();
+  for (const k of live) {
+    const rv = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Revoke' });
+    rv.onclick = async () => {
+      if (!confirm(`Revoke ${k.label}? Its guard stops asking for approvals, and every command it guards is refused until you install a new key.`)) return;
+      try { const r = await api('DELETE', `/v1/guard/keys/${k.id}`); toast(`Revoked.${r.closed ? ` ${r.closed} open approval(s) closed.` : ''}`); guardKeysView(); load(); } catch (e) { toast(e.message); }
+    };
+    const facts = [`made ${new Date(k.created_at).toLocaleDateString()}${k.made_by === 'cli' ? ' by a command line' : ''}`, k.last_used ? `last used ${new Date(k.last_used).toLocaleString()}` : 'never used', k.expires_at ? `ends ${new Date(k.expires_at).toLocaleDateString()}` : null].filter(Boolean).join(', ');
+    L.append(el('div', {}, el('span', {}, el('b', { textContent: k.label }), el('span', { className: 'dim', textContent: `  ${facts}` })), rv));
+  }
+  $('noGuardKeys').hidden = live.length > 0;
+}
+$('gkNew').onclick = async () => {
+  try {
+    const r = await api('POST', '/v1/guard/keys', { label: $('gkLabel').value.trim() || 'guard' });
+    $('newGk').hidden = false; $('newGkVal').textContent = r.key; $('gkLabel').value = '';
+    guardKeysView();
+  } catch (e) { toast(e.message); }
+};
 async function cliSessionsView() {
   const { sessions } = await api('GET', '/v1/sessions');
   const L = $('cliSessions'); L.replaceChildren();
   for (const s of sessions) {
     const rv = s.status === 'revoked' ? null : el('button', { className: 'btn sm dan', textContent: s.status === 'ended' ? 'Revoke what it made' : 'Revoke' });
     if (rv) rv.onclick = async () => {
-      if (!confirm('Revoke this command line sign-in? It is signed out, and every token, agent key and receipts key it made is revoked.')) return;
-      try { await api('DELETE', `/v1/sessions/${s.id}`); cliSessionsView(); load(); } catch (e) { toast(e.message); }
+      if (!confirm('Revoke this command line sign-in? It is signed out, and every token, agent key, receipts key and guard key it made is revoked.')) return;
+      try { const r = await api('DELETE', `/v1/sessions/${s.id}`); toast(revokedText(r.revoked)); cliSessionsView(); guardKeysView(); load(); } catch (e) { toast(e.message); }
     };
     const state = s.status === 'live' ? `ends ${new Date(s.expires_at).toLocaleDateString()}${s.current ? ' (this one)' : ''}` : s.status === 'ended' ? 'signed out or expired' : 'revoked';
     L.append(el('div', {}, el('span', {}, el('b', { textContent: new Date(s.created_at).toLocaleString() }), el('span', { className: 'dim', textContent: `  from ${place(s)}, ${state}` })), rv));

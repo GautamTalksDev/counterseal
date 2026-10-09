@@ -81,7 +81,7 @@
           <dt>You are</dt><dd id="devHere"></dd>
         </dl>
         <p class="alert" id="devMismatch" hidden></p>
-        <p>For <b id="devDays">7 days</b> it can see your vault's key names, held requests and audit log; create agent tokens that use your vaulted keys for any call that is not held; add keys to your vault; make agent keys and receipts keys; deny held calls; and revoke tokens and receipts keys.</p>
+        <p>For <b id="devDays">7 days</b> it can see your vault's key names, held requests and audit log; create agent tokens that use your vaulted keys for any call that is not held; add keys to your vault; make agent keys and receipts keys; make guard keys that ask you to approve commands; deny held calls; and revoke tokens, receipts keys and guard keys.</p>
         <p class="dim">It can never approve a held call, pre-approve irreversible calls, read a key, delete a vaulted key, revoke an agent key, turn receipts off or delete your account.</p>
         <p><b>Did you just run <span class="mono">leashcli login</span> yourself, on a computer you control?</b> If someone sent you this code or a link to this page, deny it: approving gives them your account.</p>
         <label class="lbl"><input type="checkbox" id="devMine"> Yes. I ran it myself just now, and this code is in my own terminal.</label>
@@ -90,12 +90,12 @@
     </section>
 
     <section class="banner stack" id="cliPanel" hidden>
-      <div><h3>A command line was signed in to your account</h3><p class="dim" id="cliWhat"></p><p class="dim">If this was not you, revoke it now: it is signed out at once, and every token, agent key and receipts key it made is revoked.</p></div>
+      <div><h3>A command line was signed in to your account</h3><p class="dim" id="cliWhat"></p><p class="dim">If this was not you, revoke it now: it is signed out at once, and every token, agent key, receipts key and guard key it made is revoked.</p></div>
       <div class="row"><button id="cliRevoke" class="btn dan" type="button">Revoke it</button><button id="cliMine" class="btn" type="button">It was me</button></div>
     </section>
 
     <section class="view" data-view="holds">
-      <header class="vh"><div><h1>Held</h1><p class="dim">Irreversible calls your agents tried. Nothing happens until you decide.</p></div></header>
+      <header class="vh"><div><h1>Held</h1><p class="dim">Irreversible calls and commands your agents tried. Nothing happens until you decide.</p></div></header>
       <div class="banner" id="pushPanel" hidden><div><h3>Get alerted on this device</h3><p class="dim" id="pushHint">When an agent is stopped, this phone or computer buzzes and the notification opens the request. The alert itself carries nothing: details load from Counterseal only after you tap.</p></div><div class="row"><button id="pushOn" class="btn pri" type="button">Turn on alerts</button><button id="pushTest" class="btn" type="button" hidden>Send a test</button><button id="pushOff" class="btn" type="button" hidden>Turn off</button></div></div>
       <div id="holds" class="holds"></div>
       <div id="noHolds" class="empty"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg><h3>All clear</h3><p class="dim">When an agent tries something it can't take back, it waits here. Turn on alerts to hear about it on your phone.</p></div>
@@ -191,7 +191,7 @@
       <header class="vh"><div><h1>Account</h1><p class="dim">Your data, and how to take it all away.</p></div></header>
       <div class="panel form">
         <h3>What Counterseal keeps about you</h3>
-        <p class="dim small">Your name, your passkey's public key, your encrypted vault, token and receipts key hashes, agent public keys, holds, your audit log, your receipts counters and openings, the country and network name each command line sign-in started from and, if you turn on alerts, each device's push address. Never your face, fingerprint, readable keys or private keys. <a class="ul" href="/privacy/">Privacy policy</a></p>
+        <p class="dim small">Your name, your passkey's public key, your encrypted vault, token, receipts key and guard key hashes, agent public keys, holds (for a coding agent's command: the command, its folder name and your deny reason), your audit log, your receipts counters and openings, the country and network name each command line sign-in started from and, if you turn on alerts, each device's push address. Never your face, fingerprint, readable keys or private keys. <a class="ul" href="/privacy/">Privacy policy</a></p>
       </div>
       <div class="panel form" id="movePanel" hidden>
         <h3>Move to Counterseal</h3>
@@ -204,9 +204,18 @@
       </div>
       <div class="panel form">
         <h3>Command line sign-ins</h3>
-        <p class="dim small">Each <span class="mono">leashcli login</span> of the last 7 days, where it started, and whether it is still signed in (7 days at most). Revoking one signs that command line out and revokes every token, agent key and receipts key it made, even after it signed out.</p>
+        <p class="dim small">Each <span class="mono">leashcli login</span> of the last 7 days, where it started, and whether it is still signed in (7 days at most). Revoking one signs that command line out and revokes every token, agent key, receipts key and guard key it made, even after it signed out.</p>
         <div id="cliSessions" class="list"></div>
         <p class="empty-row dim" id="noCliSessions">No command line sign-ins in the last 7 days.</p>
+      </div>
+      <div class="panel form">
+        <h3>Guard keys</h3>
+        <p class="dim small">For the guard on a coding agent's machine (<span class="mono">leashcli guard</span>): it holds commands such as <span class="mono">terraform destroy</span> until you approve them here with your passkey. A guard key can ask for an approval and read your answer; it can never approve. A key made by <span class="mono">leashcli</span> ends with that command line sign-in; a key made here lasts until you revoke it.</p>
+        <div id="guardKeys" class="list"></div>
+        <p class="empty-row dim" id="noGuardKeys">No guard keys yet.</p>
+        <label for="gkLabel" class="lbl">Label</label>
+        <div class="row"><input id="gkLabel" maxlength="60" placeholder="laptop guard"><button id="gkNew" class="btn pri" type="button">Create guard key</button></div>
+        <div id="newGk" class="reveal-box" hidden><label class="lbl">Your guard key, shown once. Put it in the guard's settings on the agent's machine.</label><div id="newGkVal" class="secret mono"></div></div>
       </div>
       <div class="panel form danger">
         <h3>Delete account</h3>
