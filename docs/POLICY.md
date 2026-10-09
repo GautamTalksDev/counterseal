@@ -54,6 +54,10 @@ Paths for the newer providers are relative to their base, like Cloudflare's: Neo
 (a version such as `2026-07`, or `unstable`); every other path on the store is refused with `404 unsupported_path` before anything is sent. A Shopify key is stored with its store address
 (`your-store.myshopify.com`), and a token goes only to that store. Shopify reads are POSTs too, so a `hold` or `deny` rule for Shopify names the GraphQL path, not a resource.
 
+A GraphQL request to GitHub's `/graphql`, Railway or Shopify is read only up to 128 KB of body, 4 KB of query string, 512
+`&` or `;` pieces and a 32 KB document. A bigger one is held unread (`any.too-large`, or the provider's unreadable rule for a
+document over 32 KB) and cannot be pre-approved with `unattendedIrreversible`; a human can approve that exact request.
+
 ## Order of evaluation
 
 0. The account is frozen: `423 account_frozen` for every call of every token, before anything else is read or written.

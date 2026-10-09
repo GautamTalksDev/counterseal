@@ -164,7 +164,30 @@ function methodOverride(body, search) {
   if (j !== undefined) return isObj(j) && Object.hasOwn(j, '_method');
   return /name\s*=\s*["']?\s*_method/i.test(b); // a multipart part (a clean JSON body cannot carry one)
 }
+// ---------------------------------------------------------------- work limits
+// A request body is read several ways before any rule decides: form readings, strict JSON, the GraphQL lexer, the SQL
+// tokenizer, the preview. That work grows with the size of the request, and Workers Free allows 10 ms of CPU per request
+// (measured in Node on 9 Oct 2026: a 200 KB GraphQL document cost 28 ms). So the GraphQL providers (GitHub's /graphql, Railway and
+// Shopify, the `graphql` path of each provider below) read at most these amounts, and anything bigger waits for a human, unread, and cannot be
+// pre-approved. A typical GraphQL request is under 10 KB. SQL longer than `sql` is not "plainly a read", so it is held.
+// `summary` bounds what the approval screen parses to describe a request on any provider; the preview still shows its start.
+export const LIMITS = Object.freeze({
+  gqlBody: 131_072, // characters in a GraphQL request body
+  gqlQuery: 32_768, // characters in the GraphQL document (the part the lexer reads)
+  gqlSearch: 4_096, // characters in a GraphQL request's query string
+  gqlParts: 512, // pieces a form reading splits a GraphQL request's body or query string into ("&" and ";")
+  sql: 32_768, // characters in one SQL statement list
+  summary: 131_072, // characters of body the approval summary will parse
+});
+/** true when a GraphQL request is bigger than the limits above. Bounded by the limits themselves: split stops at the limit. */
+export function gqlTooBig(body, search) {
+  const b = body == null ? '' : String(body), q = search == null ? '' : String(search);
+  if (b.length > LIMITS.gqlBody || q.length > LIMITS.gqlSearch) return true;
+  return b.split(/[&;]/, LIMITS.gqlParts + 1).length > LIMITS.gqlParts || q.split(/[&;]/, LIMITS.gqlParts + 1).length > LIMITS.gqlParts;
+}
 export const COMMON = [
+  // first, so a request too big to read cheaply is never read (the method override check below is itself a form reading)
+  { id: 'any.too-large', m: '*', p: '/**', always: true, test: (b, q, P, paths) => !!P?.graphql && paths.some((p) => globMatch(P.graphql, p)) && gqlTooBig(b, q), why: `A GraphQL request bigger than ${LIMITS.gqlBody / 1024} KB (or with more than ${LIMITS.gqlParts} "&" or ";" pieces) is too large for ${BRAND.name} to read within its CPU budget, so it waits for a human, unread. It cannot be pre-approved.` },
   { id: 'any.method-override', m: '*', p: '/**', always: true, test: methodOverride, why: `The request asks the API to treat it as a different method (_method). ${BRAND.name} matches its rules on the real method, so these always wait for a human.` },
 ];
 
@@ -174,6 +197,7 @@ export const COMMON = [
 // would shift where a string ends) and any $ that is not a $1 style parameter (dollar quotes, $$ bodies).
 export function sqlTokens(sql) {
   const s = String(sql ?? ''), out = [];
+  if (s.length > LIMITS.sql) return null; // too long to read within the CPU budget: unreadable, so held
   let i = 0;
   while (i < s.length) {
     const c = s[i];
@@ -337,7 +361,7 @@ export function gqlDocument(body, search = '') {
   const c = paramCopies(body, search, GQL_PARAMS);
   if (!c || outsideJson(c)) return null;
   const j = c.j;
-  if (!isObj(j) || typeof j.query !== 'string' || Object.keys(j).some((k) => !GQL_BODY.has(k))) return null;
+  if (!isObj(j) || typeof j.query !== 'string' || j.query.length > LIMITS.gqlQuery || Object.keys(j).some((k) => !GQL_BODY.has(k))) return null;
   if (j.extensions !== undefined && (!isObj(j.extensions) || Object.hasOwn(j.extensions, 'persistedquery'))) return null;
   return j.query;
 }
@@ -352,8 +376,10 @@ function ghGraphqlHold(body, search) {
 /** A short, parsed account of what a request would do, shown above the raw preview so padding can't hide it. */
 export function summarize(search, body) {
   const out = [];
+  // the summary reads the request again; a body too big to read cheaply is shown (its start) but not parsed
+  if (String(body ?? '').length > LIMITS.summary) return [`Request body of ${String(body).length} characters is too large for ${BRAND.name} to read, so it was not summarised.`];
   let j; try { j = JSON.parse(body || ''); } catch { j = undefined; }
-  const gq = (q) => { const f = gqlMutationFields(q); return f === null ? `GraphQL ${BRAND.name} could not read` : f.length ? 'GraphQL mutations: ' + f.join(', ') : 'GraphQL query (read only)'; };
+  const gq = (q) => { if (q.length > LIMITS.gqlQuery) return `GraphQL document of ${q.length} characters is too large for ${BRAND.name} to read`; const f = gqlMutationFields(q); return f === null ? `GraphQL ${BRAND.name} could not read` : f.length ? 'GraphQL mutations: ' + f.join(', ') : 'GraphQL query (read only)'; };
   if (j && typeof j === 'object' && !Array.isArray(j) && typeof j.query === 'string' && !/^\s*(select|with|explain|show|insert|update|delete|drop|create|alter)\b/i.test(j.query)) out.push(gq(j.query));
   const sqls = sqlBodies(body);
   if (sqls) for (const q of sqls) out.push('SQL: ' + sqlSummary(q));
@@ -364,6 +390,7 @@ export function summarize(search, body) {
 }
 /** statement starts plus every write keyword or unknown function, in order */
 export function sqlSummary(sql) {
+  if (String(sql ?? '').length > LIMITS.sql) return `too long to read (${String(sql).length} characters), so it is held`;
   const tk = sqlTokens(sql);
   if (!tk) return 'could not be read (unterminated string or comment, backslash, or $ quoting)';
   const stmts = [[]];
@@ -546,6 +573,7 @@ export const PROVIDERS = {
     name: 'GitHub',
     host: 'api.github.com',
     base: '',
+    graphql: '/graphql', // the GraphQL endpoint (not the REST API): requests to it are read within the work limits (LIMITS)
     // owner and repo names are case-insensitive on GitHub, so rules match a lowercased path (upstream keeps the case)
     ci: true,
     auth: (k) => ({ authorization: `Bearer ${k}`, 'x-github-api-version': '2022-11-28' }),
@@ -582,6 +610,7 @@ export const PROVIDERS = {
     name: 'Railway',
     host: 'backboard.railway.app',
     base: '/graphql/v2',
+    graphql: '/**',
     auth: (k) => ({ authorization: `Bearer ${k}` }),
     irreversible: [
       // PocketOS, 25 Apr 2026: one volumeDelete wiped the production database and its volume backups in 9 seconds.
@@ -805,6 +834,7 @@ export const PROVIDERS = {
     name: 'Shopify',
     host: '*.myshopify.com',
     base: '',
+    graphql: '/admin/api/*/graphql.json',
     auth: (k) => ({ 'x-shopify-access-token': k }),
     keyHint: /^(shpat_|shpca_|shpua_)/,
     perCredentialHost: { suffix: '.myshopify.com', label: 'Store address', example: 'your-store.myshopify.com' },
@@ -897,9 +927,9 @@ export const matchPath = (provider, path) => (PROVIDERS[provider]?.ci ? path.toL
  * - a method override (`_method`) trips COMMON on every provider. */
 export function irreversibleRule(provider, method, path, body, search = '') {
   const P = PROVIDERS[provider];
-  for (const r of COMMON) if (r.test(body, search)) return r;
   const lp = String(path).toLowerCase();
   const paths = [lp, lp.replace(/(\/[^/]+)\.[a-z0-9]{1,8}$/, '$1')];
+  for (const r of COMMON) if (r.test(body, search, P, paths)) return r;
   const methods = method === 'HEAD' ? ['HEAD', 'GET'] : [method];
   for (const r of P.irreversible) {
     if (!r.m.split(',').some((x) => methods.includes(x))) continue;

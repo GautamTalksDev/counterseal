@@ -84,6 +84,8 @@ await measure('proxy DELETE, bound token (held + push check + sealed)', async (i
 const shCred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'shopify', secret: 'shpat_' + 'S'.repeat(32), host: 'bench-store.myshopify.com' } })).body.id;
 const shTok = (await w.req('POST', '/v1/tokens', { cookie: u.cookie, body: { credentialId: shCred, policy: { perMinute: 600 } } })).body.token;
 const shUrl = 'https://leash.test/p/shopify/admin/api/2026-07/graphql.json';
+const rwCred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'railway', secret: 'rw_' + 'R'.repeat(30) } })).body.id;
+const rwTok = (await w.req('POST', '/v1/tokens', { cookie: u.cookie, body: { credentialId: rwCred, policy: { perMinute: 600 } } })).body.token;
 const shQuery = (q) => request('POST', shUrl, { bearer: shTok, body: { query: q } });
 await measure('proxy Shopify GraphQL query (POST, allowed + sealed)', () => shQuery('query { products(first: 10) { edges { node { id title variants(first: 5) { edges { node { id sku } } } } } } }'));
 await measure('proxy Shopify GraphQL mutation, plain (productUpdate)', () => shQuery('mutation { productUpdate(input: {id: "gid://shopify/Product/1", title: "t"}) { product { id } } }'));
@@ -91,6 +93,13 @@ await measure('proxy Shopify GraphQL delete (held + push check + sealed)', async
 await measure('proxy Shopify GraphQL, 200 KB document (worst case, held)', async (i) => { w.env.DB.raw.prepare("UPDATE holds SET status = 'denied' WHERE status = 'pending'").run(); return shQuery('query { shop { name } } '.repeat(8000) + `mutation { refundCreate(input: {orderId: "${i}"}) { refund { id } } }`); }, (s) => s === 428);
 // the same 200 KB document on GitHub (map 2026-10-09, unchanged): a baseline for the Shopify line above
 await measure('proxy GitHub GraphQL, 200 KB document (worst case, held)', async (i) => { w.env.DB.raw.prepare("UPDATE holds SET status = 'denied' WHERE status = 'pending'").run(); return request('POST', url('/graphql'), { bearer: plain, body: { query: 'query { viewer { login } } '.repeat(8000) + `mutation { deleteRepository(input: {repositoryId: "${i}"}) { clientMutationId } }` } }); }, (s) => s === 428);
+// work limits (providers.js LIMITS): the worst a GraphQL request can cost is bounded before anything is parsed
+const heldDoc = (kb) => 'query { viewer { login } } '.repeat(Math.floor(kb * 1024 / 28)) + 'mutation { deleteRepository(input: {repositoryId: "R"}) { clientMutationId } }';
+const closeHolds = () => w.env.DB.raw.prepare("UPDATE holds SET status = 'denied' WHERE status = 'pending'").run();
+await measure('GitHub GraphQL, 30 KB document, just inside the limits (held)', async () => { closeHolds(); return request('POST', url('/graphql'), { bearer: plain, body: { query: heldDoc(30) } }); }, (s) => s === 428);
+await measure('GitHub GraphQL, 120 KB body (5 KB query + 115 KB variable), inside the limits', async () => { closeHolds(); return request('POST', url('/graphql'), { bearer: plain, body: { query: 'mutation($v: String) { updateIssue(input: {body: $v}) { clientMutationId } }', variables: { v: 'x'.repeat(115000) } } }); }, (s) => s === 428);
+await measure('GitHub GraphQL, 1 MB of "a&a&..." (worst case for the form reading)', async () => { closeHolds(); return request('POST', url('/graphql'), { bearer: plain, raw: 'a&'.repeat(500000), headers: { 'content-type': 'application/x-www-form-urlencoded' } }); }, (s) => s === 428);
+await measure('Railway GraphQL, 1 MB body (held unread)', async () => { closeHolds(); return request('POST', 'https://leash.test/p/railway/', { bearer: rwTok, body: { query: heldDoc(1000) } }); }, (s) => s === 428);
 await measure('approve a hold (passkey verify + sealed)', async (i) => {
   const h = await w.req('DELETE', url('/repos/z/q' + i), { bearer: plain, ...anon });
   const bb = await w.req('POST', `/v1/holds/${h.body.hold_id}/approve/begin`, { cookie: u.cookie, body: {} });

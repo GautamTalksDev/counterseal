@@ -101,6 +101,19 @@ or case-folded keys are unreadable and held), Cloudflare purge read from parsed 
 method overrides held everywhere, path variants and HEAD for GET, non-UTF-8 bodies refused, glob compilation, SQL through
 other doors (migrations, D1 import, time travel restore).
 
+## Work limits on GraphQL requests, 10 Oct 2026
+
+The broker reads a request body several ways before a rule decides, and that work grew with its size: a 200 KB GraphQL
+document cost about 28 ms of CPU and a 1 MB body of `a&a&...` about 270 ms (Node, `server/bench/cpu.mjs`), against 10 ms on
+Workers Free. On GitHub's `/graphql`, Railway and Shopify a request is now read only within these limits: a body of at most
+128 KB, a query string of at most 4 KB, at most 512 pieces when split on `&` and `;`, and a GraphQL document of at most 32 KB.
+A bigger request is held, unread and never forwarded unparsed: `any.too-large` (it cannot be pre-approved, because a method
+override could hide in what was not read) or, for a document over 32 KB inside a smaller body, the provider's own unreadable
+rule. A human can still approve the exact request. Cost after the change: about 1.7 ms for a 200 KB document and about 3 ms for
+a 1 MB body. SQL longer than 32 KB is not plainly a read, so it is held (Cloudflare D1, Supabase). The approval summary does not
+parse a body over 128 KB on any provider; the preview still shows its first 2 KB. Other providers' REST bodies are unchanged.
+Tests: `server/test/limits.test.js`.
+
 ## Five more providers, 10 Oct 2026 (map `2026-10-10.1`, migration `0010`)
 
 Vercel, Neon, Fly.io, Resend and Shopify. Each is mapped from the provider's own published reference (Vercel, Neon, Fly.io

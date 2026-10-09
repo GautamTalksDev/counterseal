@@ -3,7 +3,7 @@ import { HttpError, json, b64u, rand, randomId, sha256hex, now, str, readBody, c
 import { mapOf } from './approvals.js';
 import { cardOf, publicRepoOf } from './gatefacts.js';
 import { seal, open } from './vault.js';
-import { summarize, PROVIDERS, MAP_VERSION, storeHost } from './providers.js';
+import { summarize, PROVIDERS, MAP_VERSION, storeHost, LIMITS } from './providers.js';
 import { normalisePolicy, decide } from './policy.js';
 import { audit } from './audit.js';
 import { newChallenge, takeChallenge, checkAssertion, rp, hosts, appOrigin, sessionId } from './auth.js';
@@ -244,13 +244,14 @@ export function preview(search, text, max = PREVIEW, lead = []) {
   const head = [...lead, ...summarize(search, text)];
   const raw = [search, text].filter(Boolean).join('\n\n');
   if (!raw && !head.length) return null;
-  if (raw.length > max) head.push(`Request is ${raw.length} characters; only the first part is shown below. The ${BRAND.name} summary above covers all of it.`);
+  if (raw.length > max) head.push(`Request is ${raw.length} characters; only the first part is shown below.${raw.length > LIMITS.summary ? '' : ` The ${BRAND.name} summary above covers all of it.`}`);
   if (INVISIBLE.test(raw)) head.push('Contains invisible or direction-changing characters (shown as <U+...>).');
   INVISIBLE.lastIndex = 0;
   const top = head.map((h) => visible(h)).join('\n');
   const room = Math.max(256, max - top.length - 2);
-  let body = visible(raw);
-  if (body.length > room) body = body.slice(0, room - 12) + '\n[truncated]';
+  // only the part that is shown is made visible (one character becomes at most 8, so cutting first gives the same text)
+  let body = visible(raw.slice(0, room));
+  if (raw.length > room || body.length > room) body = body.slice(0, room - 12) + '\n[truncated]';
   return (top ? top + '\n\n' : '') + body;
 }
 

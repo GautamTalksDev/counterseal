@@ -115,7 +115,12 @@ device. Test: *removing a passkey*.
 **S15. Unbounded resources and catastrophic backtracking.** Ceilings per account (50 vault keys, 200 live tokens, 20
 receipts keys, 20 agent keys, 10 devices) and bounded lists keep one account from using up the shared D1 budget. Policy
 globs compile to regular expressions; three `**` against a long path backtracked for seconds, so a glob may use `**` at
-most twice and one wildcard per segment. Tests: *ceilings*, *policy globs*.
+most twice and one wildcard per segment. The request itself is also bounded: a body is read several ways before a rule decides
+(form readings, strict JSON, the GraphQL lexer, the SQL tokenizer), and that work grew with its size (measured in Node: a
+200 KB GraphQL document 28 ms, a 1 MB body of `a&a&...` 270 ms, against 10 ms of CPU on Workers Free). On GitHub's `/graphql`,
+Railway and Shopify a body over 128 KB, a query string over 4 KB, more than 512 `&` or `;` pieces, or a GraphQL document over
+32 KB is held unread (rule `any.too-large`, or the provider's unreadable rule for the document), cannot be pre-approved, and
+costs about 2 ms at any size; SQL over 32 KB is not plainly a read, so it is held. Tests: *ceilings*, *policy globs*, `limits.test.js`.
 
 **S16. A vaulted key sent where an attacker chose (Shopify's store address).** Shopify is the one provider whose upstream
 address comes from the user. Someone with a command line session or a script could try to add a Shopify key with an address
