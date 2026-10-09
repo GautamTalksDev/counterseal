@@ -27,7 +27,10 @@ Each `lsh_` token carries a policy. A policy can only **narrow** what the underl
 A **rule** is `{ "method": "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "*", "path": "<glob>" }`. Paths are relative to
 the provider's base (for Cloudflare, after `/client/v4`). Globs: `*` matches one path segment, `**` any depth, `{a,b}`
 alternatives (which may contain `*` and `**`; braces cannot nest, and an unbalanced brace is refused with
-`400 bad_policy`).
+`400 bad_policy`). A path may use `**` at most twice, and each segment (and each `{a,b}` alternative) at most one
+wildcard, so `/repos/*/release-*` and `/**/issues/**` work but `/**/a/**/b/**` and `/*a*b` are refused with
+`400 bad_policy`: globs run as regular expressions, and more wildcards than that can backtrack for seconds on a long
+path.
 
 Paths are matched in one canonical form, and that exact path is what the broker sends upstream: a path with an empty
 segment (`//`, including a doubled trailing slash), a `;` path parameter or an encoded NUL is refused with

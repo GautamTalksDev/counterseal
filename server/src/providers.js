@@ -501,7 +501,7 @@ const esc = (s) => s.replace(/[.+?^$()|[\]\\{}]/g, '\\$&');
 const reCache = new Map();
 export function globMatch(g, path) {
   let r = reCache.get(g);
-  if (!r) { r = globToRe(g); reCache.set(g, r); }
+  if (!r) { r = globToRe(g); if (reCache.size > 2000) reCache.clear(); reCache.set(g, r); } // bounded: policies are user text
   return r.test(path);
 }
 

@@ -5,6 +5,13 @@ import { globMatch, globToRe, irreversibleRule, matchPath, PROVIDERS } from './p
 
 const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
+/** a glob whose regular expression cannot backtrack badly: "**" at most twice, and in each segment (between "/" and
+ *  inside each {a,b} alternative) at most one wildcard, "*" or "**" */
+export function safeGlob(g) {
+  if ((g.match(/\*\*/g) || []).length > 2) return false;
+  return g.split(/[/{},]/).every((seg) => (seg.replace(/\*\*/g, '*').match(/\*/g) || []).length <= 1);
+}
+
 function rules(list, name) {
   if (list === undefined) return [];
   if (!Array.isArray(list) || list.length > 50) throw new HttpError(400, 'bad_policy', `${name} must be a list (max 50)`);
@@ -15,6 +22,9 @@ function rules(list, name) {
     if (typeof r.path !== 'string' || !r.path.startsWith('/') || r.path.length > 300 || /[\s\\]/.test(r.path) || r.path.includes('//')) throw new HttpError(400, 'bad_policy', 'path must be a glob starting with /');
     // an unbalanced or nested brace would otherwise fail on every request this token makes
     try { globToRe(r.path); } catch { throw new HttpError(400, 'bad_policy', 'path has an unbalanced or nested {}'); }
+    // Globs compile to regular expressions, which backtrack: three "**" against a 2,000 character path took seconds of
+    // CPU (catastrophic backtracking). So "**" at most twice per path, and at most one wildcard in a path segment.
+    if (!safeGlob(r.path)) throw new HttpError(400, 'bad_policy', 'path may use ** at most twice, and one wildcard (* or **) per segment');
     // same canonical form as request paths: one trailing slash dropped
     return { method: m, path: r.path.length > 1 && r.path.endsWith('/') ? r.path.slice(0, -1) : r.path };
   });

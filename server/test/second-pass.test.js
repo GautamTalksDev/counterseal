@@ -223,3 +223,19 @@ test('a CLI sign-in and where it came from never reach the public log', async ()
   const dump = JSON.stringify(leaves);
   for (const s of ['DE', 'Hetzner', 'cli_', d.user_code, sid, cli]) assert.ok(!dump.includes(s), s);
 });
+
+test('policy globs that would backtrack for seconds are refused; the worst allowed shape stays fast on the longest path', async () => {
+  const w = new World();
+  const u = await w.user();
+  const cred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'github', secret: GH } })).body.id;
+  const mint = (path) => w.req('POST', '/v1/tokens', { cookie: u.cookie, body: { credentialId: cred, policy: { allow: [{ method: 'GET', path }] } } });
+  // three "**" against a 400 character path took 8.8 s before this check (catastrophic backtracking)
+  for (const p of ['/**/a/**/a/**/b', '/*a*b', '/**a**b', '/x/{**/a,**/b}/**', '/repos/*x*/issues']) assert.equal((await mint(p)).body.error, 'bad_policy', p);
+  for (const p of ['/repos/**', '/**/issues/**', '/repos/*/*/releases/*', '/{repos,orgs}/acme/**', '/repos/acme/release-*']) assert.equal((await mint(p)).status, 200, p);
+  const allow = Array.from({ length: 50 }, (_, i) => ({ method: 'GET', path: `/**/a${i}/**/b` }));
+  const tok = (await w.req('POST', '/v1/tokens', { cookie: u.cookie, body: { credentialId: cred, policy: { allow } } })).body.token;
+  const t0 = performance.now();
+  const r = await w.req('GET', '/p/github/' + 'a/'.repeat(990) + 'c', { bearer: tok, ...bare });
+  assert.equal(r.body.error, 'leash_denied');
+  assert.ok(performance.now() - t0 < 1500, `50 allowed globs against a 1,981 character path took ${Math.round(performance.now() - t0)} ms`);
+});
