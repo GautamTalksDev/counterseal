@@ -11,6 +11,8 @@
 //   leash watch                      print new holds with their approve links as they happen
 //   leash mcp                        MCP server over stdio; set LEASH_TOKENS="github=lsh_...,railway=lsh_..."
 //                                    and, for tokens bound to an agent key, LEASH_AGENT_KEY=<path to the key file>
+//   leash guard install | uninstall | status | check | map | hook   hold a coding agent's irreversible shell commands
+//                                    until you approve them with a passkey (see guard.mjs)
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { signBrokerRequest, generateAgentKey, importAgentKey, keyid, proveAgentKey } from './sign.mjs';
 import { homedir } from 'node:os';
@@ -231,9 +233,10 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli
     }
     case 'agent-keys': table((await api('GET', '/v1/agent-keys')).agentKeys.filter((k) => !k.revoked_at), ['id', 'label', 'keyid', 'tokens']); break;
     case 'mcp': mcp(); break;
+    case 'guard': await (await import('./guard.mjs')).main(args); break;
     case '--version': case '-v': console.log(VERSION); break;
     default:
-      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token <credentialId> [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp');
+      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token <credentialId> [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | guard install|uninstall|status|check|map');
   }
 } catch (e) {
   die(`leash: ${e.message}`);
