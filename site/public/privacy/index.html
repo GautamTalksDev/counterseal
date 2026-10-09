@@ -10,21 +10,23 @@
 <link rel="stylesheet" href="/site.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
-<body>
-<div class="glow" aria-hidden="true"></div>
+<body class="page">
+<a class="skip" href="#main">Skip to content</a>
+<canvas id="wax" class="wax" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
 <header class="nav">
   <div class="nav-in">
-    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
-    <nav class="links"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/#pricing">Pricing</a></nav>
-    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Get started</a></div>
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="links" aria-label="Main"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify</a><a href="/tools/web-bot-auth/">Checker</a><a href="/security/">Security</a><a href="/#pricing">Pricing</a></nav>
+    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Start free</a></div>
   </div>
 </header>
-<main class="doc">
+<main id="main" class="doc">
 <nav class="toc" aria-label="On this page">
   <b>Privacy</b>
   <a href="#short">The short version</a>
   <a href="#faceid">Face ID and passkeys</a>
-  <a href="#demo">The demo on our homepage</a>
+  <a href="#demo">The demos on our homepage</a>
   <a href="#store">What we store</a>
   <a href="#public">What is public</a>
   <a href="#never">What we never store</a>
@@ -53,8 +55,8 @@
   <p>When you sign in or approve a held call, Counterseal uses a <strong>passkey</strong> (the WebAuthn standard). Your phone or laptop asks you for Face ID, Touch ID, Windows Hello, a fingerprint or your device PIN. That check happens <strong>entirely on your device</strong>, inside its secure hardware.</p>
   <p>If it passes, your device signs a one-time challenge from us with a private key that never leaves it. We receive the signature and check it against the <strong>public key</strong> you registered. We never receive, store or have any way to see your face, fingerprint, PIN or private key.</p>
 
-  <h2 id="demo">The demo on our homepage</h2>
-  <p>The "Try it" section and the "nine seconds" replay on our homepage are <strong>simulations that run only in your browser</strong>. Pressing "Approve with Face ID" there does not use Face ID, does not use your camera, sends nothing to us, and stores nothing. The only request the homepage makes is to load the public list of irreversible calls.</p>
+  <h2 id="demo">The demos on our homepage</h2>
+  <p>Every demo on our homepage <strong>runs only in your browser</strong>. The live refund at the top, the signature attempts and the log you can try to rewrite use keys your browser makes for that page and then throws away. Nothing you do there is sent to us or stored. "Approve with passkey" in a demo is a stand-in button: it does not use your passkey, Face ID or camera. The homepage makes two requests to us: it loads the public list of irreversible calls (<code>/v1/meta</code>) and reads the public log's latest signed checkpoint (<code>/v1/stats</code>). Its fonts, images and videos come from this site; nothing loads from anywhere else.</p>
 
   <h2 id="store">What we store</h2>
   <table>
@@ -121,8 +123,8 @@
 </main>
 <footer class="foot">
   <div class="foot-in">
-    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
-    <div class="foot-links"><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="mailto:hello@gautamkhosla.com">Contact</a></div>
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/leash" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
     <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</span>
   </div>
 </footer>

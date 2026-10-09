@@ -19,7 +19,7 @@ if (process.env.DEV_SEED) {
 }
 const log = { append: (i, n) => core.append(i, n), head: () => core.head(), inclusion: (a, b) => core.inclusion(a, b), consistency: (a, b) => core.consistency(a, b), entry: (i) => core.entry(i), entries: (s, c) => core.entries(s, c), tenantEntries: (t, b, c) => core.tenantEntries(t, b, c), forgetTenant: (t) => core.forgetTenant(t) };
 const SITE = new URL('../../site/public/', import.meta.url);
-const TYPES = { html: 'text/html; charset=utf-8', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', woff2: 'font/woff2', png: 'image/png', webp: 'image/webp', json: 'application/json', webmanifest: 'application/manifest+json' };
+const TYPES = { html: 'text/html; charset=utf-8', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', woff2: 'font/woff2', png: 'image/png', webp: 'image/webp', json: 'application/json', webmanifest: 'application/manifest+json', webm: 'video/webm', mp4: 'video/mp4', txt: 'text/plain; charset=utf-8' };
 const headers = {};
 for (const line of readFileSync(new URL('_headers', SITE), 'utf8').split('\n').slice(1)) {
   const i = line.indexOf(':');

@@ -3,6 +3,7 @@
 // or doc it comes from. Rules match on method + path (glob) and, where the danger is in the body, on the body.
 // Body checks fail closed: a body LEASH cannot read on a route that has a body rule is held.
 // Version it; every change must come with a test in test/bypass.test.js, test/hardening.test.js or test/leash.test.js.
+import { BRAND } from './brand.js';
 export const MAP_VERSION = '2026-10-09.1';
 
 // ---------------------------------------------------------------- strict JSON
@@ -138,7 +139,7 @@ function methodOverride(body, search) {
   return /name\s*=\s*["']?\s*_method/i.test(b); // a multipart part (a clean JSON body cannot carry one)
 }
 export const COMMON = [
-  { id: 'any.method-override', m: '*', p: '/**', always: true, test: methodOverride, why: 'The request asks the API to treat it as a different method (_method). LEASH matches its rules on the real method, so these always wait for a human.' },
+  { id: 'any.method-override', m: '*', p: '/**', always: true, test: methodOverride, why: `The request asks the API to treat it as a different method (_method). ${BRAND.name} matches its rules on the real method, so these always wait for a human.` },
 ];
 
 // ---------------------------------------------------------------- SQL
@@ -319,13 +320,13 @@ function ghGraphqlHold(body, search) {
 export function summarize(search, body) {
   const out = [];
   let j; try { j = JSON.parse(body || ''); } catch { j = undefined; }
-  const gq = (q) => { const f = gqlMutationFields(q); return f === null ? 'GraphQL LEASH could not read' : f.length ? 'GraphQL mutations: ' + f.join(', ') : 'GraphQL query (read only)'; };
+  const gq = (q) => { const f = gqlMutationFields(q); return f === null ? `GraphQL ${BRAND.name} could not read` : f.length ? 'GraphQL mutations: ' + f.join(', ') : 'GraphQL query (read only)'; };
   if (j && typeof j === 'object' && !Array.isArray(j) && typeof j.query === 'string' && !/^\s*(select|with|explain|show|insert|update|delete|drop|create|alter)\b/i.test(j.query)) out.push(gq(j.query));
   const sqls = sqlBodies(body);
   if (sqls) for (const q of sqls) out.push('SQL: ' + sqlSummary(q));
   if (Array.isArray(j)) out.push(`Batch of ${j.length} requests`);
   const m = /[?&]query=([^&]*)/.exec(search || '');
-  if (m) { try { out.push(gq(decodeURIComponent(m[1].replace(/\+/g, ' ')))); } catch { out.push('Query string LEASH could not read'); } }
+  if (m) { try { out.push(gq(decodeURIComponent(m[1].replace(/\+/g, ' ')))); } catch { out.push(`Query string ${BRAND.name} could not read`); } }
   return out;
 }
 /** statement starts plus every write keyword or unknown function, in order */
@@ -404,7 +405,7 @@ export const PROVIDERS = {
       { id: 'gh.transfer', m: 'POST', p: '/repos/*/*/transfer', why: 'Transferring a repository hands it to another owner.' },
       { id: 'gh.visibility', m: 'PATCH', p: '/repos/*/*', body: ghVisibility, why: 'Changing visibility can publish private code; archiving freezes a repo.' },
       { id: 'gh.protection', m: 'PUT', p: '/repos/*/*/branches/*/protection', why: 'Rewriting branch protection can remove the rules that guard main.' },
-      { id: 'gh.graphql', m: 'POST', p: '/graphql', body: ghGraphqlHold, why: 'A GitHub GraphQL mutation (deleteRepository, transferRepository, updateRepository and every other write), or a request LEASH cannot read.' },
+      { id: 'gh.graphql', m: 'POST', p: '/graphql', body: ghGraphqlHold, why: `A GitHub GraphQL mutation (deleteRepository, transferRepository, updateRepository and every other write), or a request ${BRAND.name} cannot read.` },
       { id: 'gh.graphql-get', m: 'GET', p: '/graphql', why: 'GitHub GraphQL over GET is not a normal client path.' },
       { id: 'gh.actions-secret', m: 'PUT', p: '/repos/*/*/actions/secrets/*', why: 'Overwriting a CI secret silently changes what production deploys with.' },
     ],
@@ -422,7 +423,7 @@ export const PROVIDERS = {
       { id: 'cf.r2-config', m: 'PUT', p: '/accounts/*/r2/buckets/*/{lifecycle,cors,domains/**}', why: 'Bucket lifecycle rules can delete objects; domain changes expose a bucket.' },
       { id: 'cf.token-roll', m: 'PUT', p: '/user/tokens/*/value', why: 'Rolling an API token breaks everything using it.' },
       { id: 'cf.d1-sql', m: 'POST', p: '/accounts/*/d1/database/*/{query,raw}', body: sqlHold, why: 'SQL against a production D1 database that is not a single plain read.' },
-      { id: 'cf.d1-import', m: 'POST', p: '/accounts/*/d1/database/*/import', body: d1Import, why: 'Importing an SQL file into a production D1 database runs SQL LEASH cannot read.' },
+      { id: 'cf.d1-import', m: 'POST', p: '/accounts/*/d1/database/*/import', body: d1Import, why: `Importing an SQL file into a production D1 database runs SQL ${BRAND.name} cannot read.` },
       { id: 'cf.d1-restore', m: 'POST', p: '/accounts/*/d1/database/*/time_travel/restore', why: 'Restoring a D1 database to an earlier point overwrites everything written since.' },
     ],
   },
@@ -433,7 +434,7 @@ export const PROVIDERS = {
     auth: (k) => ({ authorization: `Bearer ${k}` }),
     irreversible: [
       // PocketOS, 25 Apr 2026: one volumeDelete wiped the production database and its volume backups in 9 seconds.
-      { id: 'rw.mutation', m: 'POST', p: '/**', body: railwayHold, why: 'A Railway mutation other than a redeploy or restart, or a request LEASH cannot read (PocketOS lost production to one volumeDelete).' },
+      { id: 'rw.mutation', m: 'POST', p: '/**', body: railwayHold, why: `A Railway mutation other than a redeploy or restart, or a request ${BRAND.name} cannot read (PocketOS lost production to one volumeDelete).` },
       { id: 'rw.get-mutation', m: 'GET', p: '/**', body: railwayGetHold, why: 'A Railway mutation sent over GET.' },
       { id: 'rw.method', m: 'PUT,PATCH,DELETE', p: '/**', why: 'Railway\'s API is GraphQL over POST; a PUT, PATCH or DELETE is not a normal client path.' },
     ],

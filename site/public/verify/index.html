@@ -10,16 +10,18 @@
 <link rel="stylesheet" href="/site.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
-<body>
-<div class="glow" aria-hidden="true"></div>
+<body class="page">
+<a class="skip" href="#main">Skip to content</a>
+<canvas id="wax" class="wax" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
 <header class="nav">
   <div class="nav-in">
-    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
-    <nav class="links"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/#pricing">Pricing</a></nav>
-    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Get started</a></div>
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="links" aria-label="Main"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/" class="cur" aria-current="page">Verify</a><a href="/tools/web-bot-auth/">Checker</a><a href="/security/">Security</a><a href="/#pricing">Pricing</a></nav>
+    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Start free</a></div>
   </div>
 </header>
-<main class="doc">
+<main id="main" class="doc">
 <nav class="toc" aria-label="On this page">
   <b>Verify</b>
   <a href="#log">This log</a>
@@ -58,8 +60,8 @@
 </main>
 <footer class="foot">
   <div class="foot-in">
-    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
-    <div class="foot-links"><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="mailto:hello@gautamkhosla.com">Contact</a></div>
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/leash" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
     <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</span>
   </div>
 </footer>

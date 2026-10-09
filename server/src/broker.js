@@ -148,7 +148,7 @@ export function preview(search, text) {
   const head = summarize(search, text);
   const raw = [search, text].filter(Boolean).join('\n\n');
   if (!raw && !head.length) return null;
-  if (raw.length > PREVIEW) head.push(`Request is ${raw.length} characters; only the first part is shown below. LEASH's summary above covers all of it.`);
+  if (raw.length > PREVIEW) head.push(`Request is ${raw.length} characters; only the first part is shown below. The ${BRAND.name} summary above covers all of it.`);
   if (INVISIBLE.test(raw)) head.push('Contains invisible or direction-changing characters (shown as <U+...>).');
   INVISIBLE.lastIndex = 0;
   const top = head.map((h) => visible(h)).join('\n');

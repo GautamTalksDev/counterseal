@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Public log: Counterseal</title>
+<meta name="description" content="Read Counterseal's public receipts log and check every proof in your browser: signed checkpoints, inclusion proofs and consistency proofs (RFC 6962).">
+<meta name="theme-color" content="#08090b">
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body class="page">
+<a class="skip" href="#main">Skip to content</a>
+<canvas id="wax" class="wax" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
+<header class="nav">
+  <div class="nav-in">
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="links" aria-label="Main"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/log/" class="cur" aria-current="page">Public log</a><a href="/verify/">Verify</a><a href="/tools/web-bot-auth/">Checker</a><a href="/security/">Security</a><a href="/#pricing">Pricing</a></nav>
+    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Start free</a></div>
+  </div>
+</header>
+<main id="main" class="doc">
+<nav class="toc" aria-label="On this page">
+  <b>Public log</b>
+  <a href="#head">The head</a>
+  <a href="#since">Since your last visit</a>
+  <a href="#entries">Receipts</a>
+  <a href="#how">How to read it</a>
+</nav>
+<article class="prose">
+  <p class="kicker">Record</p>
+  <h1>The public log</h1>
+  <p class="lead">If it was recorded, you can prove it. Every decision the broker makes on a write is sealed here as a receipt. This page reads the log's public API and checks every signature and proof in your browser.</p>
+
+  <h2 id="head">The head</h2>
+  <dl class="lx-head">
+    <div><dt>Entries</dt><dd id="size">&#8230;</dd></div>
+    <div><dt>Root</dt><dd id="root" class="mono">&#8230;</dd></div>
+    <div><dt>Updated</dt><dd id="updated">&#8230;</dd></div>
+    <div><dt>Checkpoint</dt><dd id="sig">&#8230;</dd></div>
+  </dl>
+  <p id="headNote" class="meta">Reading the log head&#8230;</p>
+  <p>Log name: <code id="origin">&#8230;</code></p>
+  <p>Verifier key. Pin this one and keep it with your auditors; a bundle's own <code>log</code> field is only a hint:</p>
+  <pre id="vk">&#8230;</pre>
+  <p><button class="btn btn-ghost sm" type="button" id="copyVk">Copy the verifier key</button></p>
+
+  <h2 id="since">Since your last visit</h2>
+  <p id="since-t">Your browser keeps the last checkpoint it saw here (only in this browser), so next time it can prove the log only grew.</p>
+  <pre id="sinceOut" class="verdict" hidden></pre>
+
+  <h2 id="entries">Receipts</h2>
+  <p class="meta">Newest first. Select a receipt to see the whole entry and prove it is in the log.</p>
+  <div id="list"></div>
+  <div class="lx-more"><button class="btn btn-ghost sm" type="button" id="older" hidden>Older receipts</button><span class="meta" id="range"></span></div>
+
+  <h2 id="how">How to read it</h2>
+  <ul>
+    <li><strong>Decision</strong>: what the broker did with one call: <code>allowed</code> (a write that went through), <code>held</code>, <code>approved</code>, <code>denied</code>, or <code>executed</code> (an approved call going through).</li>
+    <li><strong>Action</strong>: the method and the provider's API host. Never the path, query string or body.</li>
+    <li><strong>Rule</strong>: the irreversible map rule that matched, and the map version. <code>agent_key</code> means a registered agent key signed the request; <code>passkey</code> means a passkey approved it.</li>
+    <li><strong>parent</strong>: the hash of the account's own private audit entry, so its owner can open the receipt later. <strong>submitter</strong> is a salted commitment, different for every entry, so entries cannot be linked to an account or to each other.</li>
+    <li>Entries with <code>source: "broker"</code> were written by the broker itself; nobody else can write one. Others were reported by an agent with a receipts API key.</li>
+  </ul>
+  <p>To check a receipt bundle you downloaded, open <a href="/verify/">Verify a receipt</a>. To check one offline, see <a href="/docs/#verify">the docs</a>.</p>
+</article>
+</main>
+<footer class="foot">
+  <div class="foot-in">
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/leash" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
+    <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</span>
+  </div>
+</footer>
+<script src="/doc.js" type="module"></script>
+<script src="/log/log.js" type="module"></script>
+</body>
+</html>

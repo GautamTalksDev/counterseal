@@ -4,204 +4,313 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Counterseal: every irreversible action gets a second seal</title>
-<meta name="description" content="Counterseal is the credential broker for AI agents. Your agent gets scoped proxy tokens instead of real API keys, anything irreversible waits for your passkey, and every decision becomes a receipt anyone can verify.">
-<meta property="og:title" content="Counterseal: every irreversible action gets a second seal">
-<meta property="og:description" content="A coding agent deleted a production database and every backup in 9 seconds. Counterseal turns that into a notification you can deny.">
+<meta name="description" content="Your AI agents never hold a real key. They sign every request with their own, anything they can't take back waits for your passkey, and every decision becomes a receipt anyone can verify. Free during the public beta.">
 <meta name="theme-color" content="#08090b">
+<meta property="og:title" content="Counterseal">
+<meta property="og:description" content="Every irreversible action gets a second seal.">
+<meta property="og:image" content="/img/og.png">
 <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/img/seal-front.webp" as="image">
 <link rel="stylesheet" href="/site.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
-<body>
-<div class="glow" aria-hidden="true"></div>
+<body class="home">
+<a class="skip" href="#main">Skip to content</a>
+<canvas id="wax" class="wax" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
 
 <header class="nav">
   <div class="nav-in">
-    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
-    <nav class="links"><a href="#how">How it works</a><a href="#demo">Demo</a><a href="#map">Irreversible map</a><a href="/docs/">Docs</a><a href="#security">Security</a><a href="/verify/">Verify</a><a href="#pricing">Pricing</a></nav>
-    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Get started</a></div>
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="links" aria-label="Main"><a href="#how">How it works</a><a href="#approve">Approve</a><a href="#prove">Prove who</a><a href="#record">Record</a><a href="#map">Irreversible map</a><a href="/docs/">Docs</a><a href="#pricing">Pricing</a></nav>
+    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Start free</a></div>
   </div>
 </header>
 
-<main>
-  <section class="hero">
-    <a class="chip" href="#nine"><span class="chip-dot"></span>A coding agent wiped a production database in 9 seconds <span class="arr">&rarr;</span></a>
-    <h1>Your agents get tokens.<br><span class="soft">You keep the <em>keys.</em></span></h1>
-    <p class="lede">Counterseal sits between your AI agents and your APIs. Agents never see a real key, and anything they can't take back waits for one tap of your passkey.</p>
-    <div class="ctas">
+<main id="main">
+<!-- ============================================================ HERO -->
+<section class="hero" aria-labelledby="h1">
+  <div class="hero-copy">
+    <a class="pill" href="#nine"><span class="pulse" aria-hidden="true"></span><span class="pl-l">A coding agent wiped a production database in 9 seconds</span><span class="pl-s">An agent deleted production in 9 seconds</span><span class="arr" aria-hidden="true">&#8594;</span></a>
+    <h1 id="h1"><span class="l1">Every irreversible action</span> <span class="l2">gets a second <em>seal.</em></span></h1>
+    <p class="lede">Agents never see a real key and can sign every request with their own. Anything they can't take back waits for one tap of your passkey, and every decision on a write becomes a receipt anyone can verify.</p>
+    <div class="cta">
       <a class="btn btn-pri" href="/app">Start free</a>
-      <button class="cmd" id="copyCmd" type="button" aria-label="Copy install command"><span class="p">$</span><span id="cmdText">npx leashcli login</span><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="8" rx="2"/><path d="M3 10V4a1 1 0 0 1 1-1h6"/></svg></button>
+      <button class="cmd" type="button" id="copyCmd" aria-label="Copy the command npx leashcli login"><span class="pr" aria-hidden="true">$</span><code>npx leashcli login</code><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button>
     </div>
+  </div>
 
-    <div class="shot" aria-label="The Counterseal console showing calls from agents, with one irreversible call held for approval">
-      <div class="win">
-        <div class="win-bar"><i></i><i></i><i></i><span>counterseal.gautamkhosla.com/app</span></div>
-        <div class="win-body">
-          <aside class="side">
-            <div class="side-brand"><span class="av">A</span>Acme</div>
-            <a class="on"><span class="ico ico-hold"></span>Held<b>1</b></a>
-            <a><span class="ico ico-feed"></span>Activity</a>
-            <a><span class="ico ico-vault"></span>Vault</a>
-            <a><span class="ico ico-tok"></span>Agent tokens</a>
-            <a><span class="ico ico-log"></span>Audit log</a>
-            <div class="side-foot"><span class="live"></span>3 agents connected</div>
-          </aside>
-          <div class="main">
-            <div class="main-h"><h3>Activity</h3><span class="pill-live"><span class="live"></span>Live</span></div>
-            <div class="held-card">
-              <div class="hc-top"><span class="badge warn">Held</span><span class="mono muted">coding-agent &middot; laptop</span><span class="mono muted r">just now</span></div>
-              <div class="hc-call mono"><b>POST</b> backboard.railway.app <span class="muted">volumeDelete("vol_prod")</span></div>
-              <p class="hc-why">Deletes a volume and its backups. This cannot be undone.</p>
-              <div class="hc-act"><span class="b-ok">Approve with passkey</span><span class="b-no">Deny</span></div>
-            </div>
-            <ul class="feed" id="feed"></ul>
+  <div class="stage" id="stage">
+    <div class="window" id="demo" role="region" aria-label="Live demo: one refund, signed, held, approved and recorded">
+      <div class="win-bar"><i></i><i></i><i></i><span>live demo &#183; real Ed25519 and SHA-256, in this tab</span></div>
+      <div class="win-body">
+        <aside class="win-side" aria-hidden="true">
+          <div class="acct"><b>A</b>Acme</div>
+          <span class="si on"><i class="ic ic-held"></i>Held<em id="heldN">0</em></span>
+          <span class="si"><i class="ic ic-act"></i>Activity</span>
+          <span class="si"><i class="ic ic-key"></i>Agent keys</span>
+          <span class="si"><i class="ic ic-rec"></i>Receipts</span>
+          <span class="si"><i class="ic ic-vault"></i>Vault</span>
+          <p class="side-note"><i class="live-dot"></i>billing-agent &#183; laptop</p>
+        </aside>
+        <div class="win-main">
+          <div class="act-head"><h2 class="h3">One refund, three seals</h2><span class="live"><i></i>Live</span></div>
+          <div class="req" aria-label="The agent's request">
+            <div class="req-l"><b class="m-post">POST</b><span class="url">/p/stripe/v1/refunds</span><span class="tok">Bearer lsh_7c1e&#8230;</span></div>
+            <div class="req-b mono">charge=ch_demo_3Pq&amp;amount=4200</div>
+            <div class="req-s mono" id="sigLine">Signing with a key made in this tab&#8230;</div>
           </div>
+          <ol class="steps" id="steps">
+            <li class="step" id="st1"><span class="n">1</span><div class="sb"><span class="tag">Prove who</span><b>Sealed by the agent</b><p id="st1t">Waiting for the agent's signature.</p></div></li>
+            <li class="step" id="st2"><span class="n">2</span><div class="sb"><span class="tag">Approve</span><b id="st2h">Held for your passkey</b><p id="st2t">The broker checks the irreversible map.</p>
+              <div class="acts" id="acts" hidden><button class="btn btn-pri sm" type="button" id="heroOk">Approve with passkey</button><button class="btn btn-ghost sm" type="button" id="heroNo">Deny</button></div></div></li>
+            <li class="step" id="st3"><span class="n">3</span><div class="sb"><span class="tag">Approve</span><b id="st3h">Countersealed by you</b><p id="st3t">Waiting for you.</p></div></li>
+            <li class="step" id="st4"><span class="n">4</span><div class="sb"><span class="tag">Record</span><b>Recorded in the log</b><p id="st4t">Each decision becomes a receipt.</p><svg class="mtree" id="mtree" viewBox="0 0 360 74" aria-hidden="true"></svg></div></li>
+          </ol>
+          <div class="win-foot"><button class="btn btn-ghost sm" type="button" id="again" disabled>Run it again</button><p class="fine">Keys made in this tab, used once, thrown away. Here a button stands in for the passkey; the real app asks for yours. Nothing leaves your browser.</p></div>
         </div>
       </div>
-      <div class="notif">
-        <div class="n-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg></div>
-        <div><div class="n-top"><b>Counterseal</b><span>now</span></div><div class="n-t">Your agent wants to delete vol_prod</div><div class="n-s">Held. Tap to review.</div></div>
-      </div>
     </div>
-  </section>
 
-  <section class="logos">
-    <p>Knows what can't be undone on</p>
-    <div class="row-logos"><span>GitHub</span><span>Cloudflare</span><span>Railway</span><span>Stripe</span><span>Supabase</span></div>
-  </section>
+    <div class="seal" id="seal" aria-hidden="true">
+      <div class="seal-turn" id="sealTurn">
+        <div class="face front"><img src="/img/seal-front.webp" alt="" width="900" height="1350" decoding="async"><canvas id="impF" class="imp"></canvas></div>
+        <div class="face back"><img src="/img/seal-back.webp" alt="" width="900" height="1350" decoding="async"><canvas id="impB" class="imp"></canvas></div>
+      </div>
+      <div class="halo" id="halo"></div>
+    </div>
 
-  <section class="sec" id="how">
+    <div class="toast" id="toast" aria-live="polite">
+      <span class="t-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg></span>
+      <div><div class="t-top"><b>COUNTERSEAL</b><span>now</span></div><b class="t-msg" id="toastMsg">billing-agent wants to POST api.stripe.com</b><span class="t-sub">Held. Tap to review.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="strip" aria-label="Providers">
+  <p>Holds what can't be undone on</p>
+  <ul><li>GitHub</li><li>Cloudflare</li><li>Railway</li><li>Stripe</li><li>Supabase</li></ul>
+</section>
+
+<!-- ============================================================ HOW -->
+<section class="sec" id="how" aria-labelledby="how-h">
+  <div class="wrap">
     <p class="kicker">How it works</p>
-    <h2>Three rules, enforced <em>outside</em> the model.</h2>
-    <p class="sub">Prompts can be ignored. A proxy can't. Counterseal is the only thing holding your real keys, so the rules hold even when the agent goes off script.</p>
-    <div class="bento">
-      <article class="card">
-        <div class="viz" aria-hidden="true">
-          <div class="vrow"><span class="mono">ghp_9f3K&hellip;</span><span class="tagc">AES-256-GCM</span></div>
-          <div class="arrow-d"></div>
-          <div class="vrow tok"><span class="mono">lsh_7c1e&hellip;</span><span class="tagc acc">acme/app &middot; 30d</span></div>
-        </div>
-        <h3>Agents never hold a real key</h3>
-        <p>Your keys live in an envelope-encrypted vault. Agents get <code>lsh_</code> tokens: scoped, expiring, revocable. Leak one and you leaked nothing.</p>
-      </article>
-      <article class="card">
-        <div class="viz" aria-hidden="true">
-          <div class="hrow"><span class="dotc ok"></span><span class="mono">GET /pulls</span><span class="st">allowed</span></div>
-          <div class="hrow"><span class="dotc ok"></span><span class="mono">POST /issues</span><span class="st">allowed</span></div>
-          <div class="hrow hl"><span class="dotc warn"></span><span class="mono">DELETE /repos/acme</span><span class="st">held</span></div>
-        </div>
-        <h3>Irreversible means held</h3>
-        <p>Counterseal knows which calls can't be undone on each API. Those wait for your passkey. One approval covers that exact request, once, for ten minutes.</p>
-      </article>
-      <article class="card">
-        <div class="viz viz-chain" aria-hidden="true">
-          <span class="blk">#4812</span><span class="lnk-l"></span><span class="blk">#4813</span><span class="lnk-l"></span><span class="blk cur">#4814</span>
-        </div>
-        <h3>Everything is on the record</h3>
-        <p>Every write, hold and decision goes into an append-only log where each entry commits to the one before. Edit a row and the chain breaks.</p>
-      </article>
+    <h2 id="how-h" class="h2">Three seals, enforced <em>outside</em> the model.</h2>
+    <p class="sub">Prompts can be ignored. A proxy can't. Counterseal holds your real keys, checks which agent is asking, stops what can't be undone and writes down every decision, so the rules hold even when the agent goes off script.</p>
+    <div class="cards4">
+      <article class="card rv"><div class="viz"><div class="chip-row"><code>ghp_9f3K&#8230;</code><span class="mini">AES-256-GCM</span></div><span class="down" aria-hidden="true">&#8595;</span><div class="chip-row acc"><code>lsh_7c1e&#8230;</code><span class="mini">acme/app &#183; 7d</span></div></div>
+        <h3>The key stays in the vault</h3><p>Each secret is encrypted with its own AES-256-GCM key. Agents get <code>lsh_</code> tokens: scoped, expiring, revocable. Leak one and you leaked nothing.</p></article>
+      <article class="card rv"><div class="viz"><div class="sigrow"><code>sig1=:Kx9q&#8230;:</code><span class="okb">ed25519</span></div><div class="sigrow dim"><span>window 5 min &#183; nonce once</span></div></div>
+        <h3>Prove who</h3><p>Give each agent its own Ed25519 key to sign its requests (RFC 9421). Bind a token to that key and the token alone is useless.</p></article>
+      <article class="card rv"><div class="viz"><div class="rule"><i class="g"></i><code>GET /pulls</code><span>allowed</span></div><div class="rule"><i class="g"></i><code>POST /issues</code><span>allowed</span></div><div class="rule held"><i></i><code>POST /refunds</code><span>held</span></div></div>
+        <h3>Approve</h3><p>Calls that can't be undone wait for your passkey. One approval covers that exact request, once, within ten minutes.</p></article>
+      <article class="card rv"><div class="viz"><div class="chain"><span>#4812</span><i aria-hidden="true"></i><span>#4813</span><i aria-hidden="true"></i><span class="on">#4814</span></div><div class="sigrow dim"><span>inclusion proof &#183; signed checkpoint</span></div></div>
+        <h3>Record</h3><p>Every decision on a write becomes a receipt in a public Merkle log, sealed by a signed checkpoint. Anyone can verify it, offline.</p></article>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="sec" id="nine">
-    <p class="kicker">April 2026 &middot; PocketOS</p>
-    <h2>Nine seconds. <em>Same agent, same token.</em></h2>
-    <p class="sub">A coding agent fixing staging found an unrelated token in the repo. That token could also delete volumes. It did, and took every volume backup with it.</p>
-    <div class="vs" id="vs">
-      <div class="vs-card">
-        <div class="vs-h"><span class="badge danger">Without Counterseal</span><span class="timer mono" id="tBad">0.0s</span></div>
-        <pre class="term mono" id="termBad"></pre>
-      </div>
-      <div class="vs-card good">
-        <div class="vs-h"><span class="badge acc">With Counterseal</span><span class="timer mono" id="tGood">0.0s</span></div>
-        <pre class="term mono" id="termGood"></pre>
-      </div>
+<!-- ============================================================ NINE SECONDS -->
+<section class="sec" id="nine" aria-labelledby="nine-h">
+  <div class="wrap">
+    <p class="kicker">April 2026 &#183; PocketOS</p>
+    <h2 id="nine-h" class="h2">Nine seconds. <em>Same agent, same token.</em></h2>
+    <p class="sub">A coding agent fixing staging found an unrelated Railway token in a repo. It had been made for custom domains, but it could also delete volumes. One <code>volumeDelete</code> took the production database and the backups on the same volume, in nine seconds. <a class="src" href="https://incidentdatabase.ai/reports/7311" rel="noopener noreferrer">Source</a></p>
+    <div class="race rv" id="race">
+      <div class="lane bad"><div class="lane-h"><b>Without Counterseal</b><span class="clock" id="raceA">0.0s</span></div><div class="bar"><i id="barA"></i></div><p id="raceAt" class="mono">mutation volumeDelete(volumeId: "vol_prod")</p></div>
+      <div class="lane good"><div class="lane-h"><b>With Counterseal</b><span class="clock" id="raceB">0.0s</span></div><div class="bar"><i id="barB"></i></div><p id="raceBt" class="mono">mutation volumeDelete(volumeId: "vol_prod")</p></div>
+      <button class="btn btn-ghost sm" type="button" id="replay">Replay</button>
     </div>
-    <button class="btn btn-ghost sm replay" id="replay" type="button">Replay</button>
-  </section>
+  </div>
+</section>
 
-  <section class="sec" id="demo">
-    <p class="kicker">Try it</p>
-    <h2>Your agent asks. <em>You</em> decide.</h2>
-    <p class="sub">Pick what the agent tries. Then approve or deny on the phone, exactly like the real thing.</p>
-    <p class="demo-note">Simulated in your browser. Nothing is sent, stored, or scanned. <a class="ul" href="/privacy/#demo">Privacy</a></p>
-    <div class="demo">
-      <div class="picks" id="picks"></div>
-      <div class="stage">
-        <div class="term-win"><div class="win-bar"><i></i><i></i><i></i><span>agent</span></div><pre class="term mono" id="term"></pre></div>
-        <div class="phone" id="phone" aria-live="polite">
-          <div class="island"></div>
-          <div class="ph-time">9:41</div>
-          <div class="ph-idle" id="phIdle"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg><span>All clear</span><small>No calls waiting</small></div>
-          <div class="ph-hold" id="phHold" hidden>
-            <span class="badge warn">Held for you</span>
-            <div class="ph-what mono" id="phWhat"></div>
-            <p id="phWhy"></p>
-            <button class="ph-ok" id="phOk" type="button">Approve with Face ID</button>
-            <button class="ph-no" id="phNo" type="button">Deny</button>
+<!-- ============================================================ I APPROVE -->
+<section class="sec part" id="approve" aria-labelledby="ap-h">
+  <div class="wrap">
+    <div class="part-head">
+      <div>
+        <p class="kicker"><span class="num">I</span>Approve</p>
+        <h2 id="ap-h" class="h2">Irreversible means <em>held.</em></h2>
+        <p class="sub">Counterseal knows which calls can't be undone on each API, from a versioned map. Those stop with HTTP 428 and wait for your passkey. Turn on alerts and your phone lights up the moment one is held. Pick what the agent tries.</p>
+      </div>
+      <figure class="loop loop-tall rv"><video id="vTurn" muted loop playsinline preload="none" poster="/media/turn-poster.webp" aria-label="The seal turns on its cords: the agent's seal on the front, your counterseal on the back"><source data-src="/media/turn.webm" type="video/webm"><source data-src="/media/turn.mp4" type="video/mp4"></video></figure>
+    </div>
+    <div class="desk rv">
+      <div class="picker" role="group" aria-label="What the agent tries">
+        <p class="desk-h">The agent tries to</p>
+        <div id="tries" class="tries"></div>
+      </div>
+      <div class="phone" aria-live="polite">
+        <div class="ph-notch" aria-hidden="true"></div>
+        <div class="ph-time" aria-hidden="true">9:41</div>
+        <div class="ph-screen" id="phScreen">
+          <div class="ph-idle" id="phIdle"><b>All clear</b><span>No calls waiting</span></div>
+          <div class="ph-card" id="phCard" hidden>
+            <p class="ph-lbl">Held for you</p>
+            <b class="ph-what" id="phWhat"></b>
+            <code class="ph-path" id="phPath"></code>
+            <p class="ph-why" id="phWhy"></p>
+            <p class="ph-rule mono" id="phRule"></p>
+            <div class="ph-acts"><button class="btn btn-pri sm" type="button" id="phOk">Approve with passkey</button><button class="btn btn-ghost sm" type="button" id="phNo">Deny</button></div>
           </div>
+          <div class="ph-res" id="phRes" hidden></div>
         </div>
       </div>
+      <div class="console" aria-live="polite"><p class="desk-h">What the agent gets back</p><pre id="apOut" class="mono">Pick a call.</pre></div>
     </div>
-  </section>
+    <p class="fine center">Simulated in your browser with the published irreversible map. Nothing is sent. A button stands in for your passkey.</p>
+  </div>
+</section>
 
-  <section class="sec" id="map">
-    <p class="kicker">The irreversible map <span class="mono muted" id="mapVer"></span></p>
-    <h2>Every call you can't take back.</h2>
-    <p class="sub">Versioned, per provider, each rule tied to the incident or doc that earned it a place. This is what Counterseal holds by default.</p>
-    <div class="tabs" id="mapTabs" role="tablist"></div>
-    <div class="maptable" id="mapRows"></div>
-  </section>
+<!-- ============================================================ II PROVE WHO -->
+<section class="sec part" id="prove" aria-labelledby="pw-h">
+  <div class="wrap">
+    <div class="part-head rev">
+      <figure class="loop loop-wide rv"><video id="vPress" muted loop playsinline preload="none" poster="/media/press-poster.webp" aria-label="A brass seal matrix presses an impression into green wax"><source data-src="/media/press.webm" type="video/webm"><source data-src="/media/press.mp4" type="video/mp4"></video></figure>
+      <div>
+        <p class="kicker"><span class="num">II</span>Prove who</p>
+        <h2 id="pw-h" class="h2">A stolen token is <em>just paper.</em></h2>
+        <p class="sub">Bind a token to an agent key and every request must carry that agent's own signature: an RFC 9421 HTTP Message Signature over the method, the full URL and the body, valid for five minutes at most, each nonce once. The private key never leaves the agent. Try to get past it.</p>
+      </div>
+    </div>
+    <div class="tamper rv">
+      <div class="who">
+        <canvas id="whoSeal" class="who-seal" aria-hidden="true"></canvas>
+        <div><p class="desk-h">This tab's agent key</p><code class="who-k" id="whoKey">making a key&#8230;</code><p class="fine">The impression on the seal is drawn from this key's bytes.</p></div>
+      </div>
+      <div class="t-btns" role="group" aria-label="Attempts">
+        <button class="tb" type="button" data-t="signed"><b>Send it, signed</b><span>the real agent</span></button>
+        <button class="tb" type="button" data-t="stolen"><b>Steal the token</b><span>send it without a signature</span></button>
+        <button class="tb" type="button" data-t="amount"><b>Change the amount</b><span>after it was signed</span></button>
+        <button class="tb" type="button" data-t="replay"><b>Replay the signature</b><span>send the same one twice</span></button>
+        <button class="tb" type="button" data-t="forge"><b>Sign with your own key</b><span>a key nobody registered</span></button>
+      </div>
+      <div class="console big" aria-live="polite"><p class="desk-h" id="twTitle">The broker's answer</p><pre id="twOut" class="mono">Pick an attempt. Each one runs the broker's own signature checks, here in your browser.</pre></div>
+    </div>
+    <p class="fine center">Run a site? <a href="/tools/web-bot-auth/">Check any agent's Web Bot Auth signature</a> with the free checker. It runs in your browser and stores nothing.</p>
+  </div>
+</section>
 
-  <section class="sec">
+<!-- ============================================================ III RECORD -->
+<section class="sec part" id="record" aria-labelledby="rc-h">
+  <div class="wrap">
+    <p class="kicker"><span class="num">III</span>Record</p>
+    <h2 id="rc-h" class="h2">If it was recorded, <em>you can prove it.</em></h2>
+    <p class="sub">Every allow, hold, approval and denial on a write becomes a receipt in a public, append-only Merkle log (RFC 6962), sealed by a signed checkpoint. Anyone can check a receipt offline against the log's key. Receipts are on by default for new accounts; reads are not recorded.</p>
+    <div class="ledger rv">
+      <div class="tree-wrap">
+        <div class="tree-h"><p class="desk-h">This tab's log</p><span class="mono dim" id="treeInfo"></span></div>
+        <svg id="bigTree" class="bigtree" viewBox="0 0 800 300" role="img" aria-label="The demo log as a Merkle tree"></svg>
+        <div class="r-btns" role="group" aria-label="Checks">
+          <button class="btn btn-pri sm" type="button" id="rProve">Prove the refund is in the log</button>
+          <button class="btn btn-ghost sm" type="button" id="rGrow">Prove the log only grew</button>
+          <button class="btn btn-ghost sm" type="button" id="rRewrite">Rewrite one receipt</button>
+        </div>
+        <p class="fine">Select any leaf to prove it. Every check runs the same verifier as the public verify page.</p>
+      </div>
+      <div class="r-side">
+        <div class="console"><p class="desk-h">Verifier</p><pre id="rOut" class="mono">Run the demo above, or press a button.</pre></div>
+        <div class="receipt"><p class="desk-h">What a public receipt holds</p><pre id="rJson" class="mono"></pre><p class="fine">Never a path, query, body, key, token, name, email or IP address. <code>parent</code> is the hash of your private audit entry, so you can open it later.</p></div>
+      </div>
+    </div>
+    <div class="reallog rv" id="realLog">
+      <div><p class="desk-h">The public log, read just now</p><p id="rlHead" class="rl-head">Reading the log head&#8230;</p></div>
+      <dl class="rl-grid"><div><dt>Entries</dt><dd id="rlSize">&#8230;</dd></div><div><dt>Root</dt><dd id="rlRoot" class="mono">&#8230;</dd></div><div><dt>Checkpoint</dt><dd id="rlSig">&#8230;</dd></div></dl>
+      <div class="rl-links"><a class="btn btn-ghost sm" href="/log/">Open the public log</a><a class="btn btn-ghost sm" href="/verify/">Verify a receipt</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ MAP -->
+<section class="sec" id="map" aria-labelledby="map-h">
+  <div class="wrap">
+    <p class="kicker">The irreversible map</p>
+    <h2 id="map-h" class="h2">Every call you can't <em>take back.</em></h2>
+    <p class="sub">Versioned, per provider, each rule with its reason. This is what Counterseal holds by default. Map <code id="mapV">2026-10-09.1</code>.</p>
+    <div class="map rv">
+      <div class="tabs" role="tablist" aria-label="Providers" id="mapTabs"></div>
+      <div class="map-rows" id="mapRows" role="tabpanel"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ SETUP -->
+<section class="sec" id="setup" aria-labelledby="su-h">
+  <div class="wrap">
     <p class="kicker">Setup</p>
-    <h2>Sixty seconds to put your agent on the record.</h2>
-    <div class="steps">
-      <div class="step"><span class="num">1</span><h4>Sign in</h4><p>Approve the code on your phone with a passkey.</p><pre class="code mono">npx leashcli login</pre></div>
-      <div class="step"><span class="num">2</span><h4>Vault a key</h4><p>Paste it once. It is encrypted and never written to disk.</p><pre class="code mono">npx leashcli add github</pre></div>
-      <div class="step"><span class="num">3</span><h4>Connect your agent</h4><p>Add the MCP server to any MCP client's config. Your agent now calls GitHub through the broker.</p><pre class="code mono">{
-  &quot;mcpServers&quot;: {
-    &quot;leash&quot;: {
-      &quot;command&quot;: &quot;npx&quot;,
-      &quot;args&quot;: [&quot;-y&quot;, &quot;leashcli&quot;, &quot;mcp&quot;],
-      &quot;env&quot;: { &quot;LEASH_TOKENS&quot;: &quot;github=lsh_...&quot; }
+    <h2 id="su-h" class="h2">Sixty seconds to the <em>second seal.</em></h2>
+    <ol class="setup">
+      <li class="rv"><span class="sn">1</span><h3>Sign in</h3><p>Approve the code on your phone with a passkey.</p><pre class="mono">npx leashcli login</pre></li>
+      <li class="rv"><span class="sn">2</span><h3>Vault a key</h3><p>Paste it once. It is encrypted and never written to disk.</p><pre class="mono">npx leashcli add stripe</pre></li>
+      <li class="rv"><span class="sn">3</span><h3>Connect your agent</h3><p>Add the MCP server to any MCP client's config. Your agent now calls through Counterseal.</p><pre class="mono">{
+  "mcpServers": {
+    "leash": {
+      "command": "npx",
+      "args": ["-y", "leashcli", "mcp"],
+      "env": { "LEASH_TOKENS": "stripe=lsh_..." }
     }
   }
-}</pre></div>
-    </div>
-  </section>
+}</pre></li>
+      <li class="rv"><span class="sn">4</span><h3>Give it a seal</h3><p>Make an agent key in the app: it is generated in your browser and only the public half is sent. Bind tokens to it and they only work on requests it signed.</p><a class="lnk-arrow" href="/docs/#agent-keys">Agent keys in the docs</a></li>
+    </ol>
+    <p class="fine">The CLI keeps its first name, <code>leashcli</code>; it is the same service.</p>
+  </div>
+</section>
 
-  <section class="sec" id="security">
+<!-- ============================================================ SECURITY -->
+<section class="sec" id="security" aria-labelledby="se-h">
+  <div class="wrap">
     <p class="kicker">Security</p>
-    <h2>Built like it guards production. <em>Because it does.</em></h2>
-    <div class="grid3">
-      <div class="fact"><h4>Passkeys only</h4><p>No passwords to phish. The same tap that signs you in approves held calls.</p></div>
-      <div class="fact"><h4>The CLI can't approve</h4><p>An agent on your laptop can read the CLI's files, so a CLI session can never approve a hold.</p></div>
-      <div class="fact"><h4>Envelope encryption</h4><p>A key per secret, wrapped by a master key, bound to its row. Never logged, never returned by any API.</p></div>
-      <div class="fact"><h4>Locked-down web</h4><p>Strict CSP with Trusted Types, HSTS, SameSite=Strict cookies, CSRF headers, no CORS on your account's API.</p></div>
-      <div class="fact"><h4>Abuse limits</h4><p>Rate limits per token and per IP (IPv6 by /64). Upstream redirects are never followed.</p></div>
-      <div class="fact"><h4>Receipts anyone can verify</h4><p>Shaped after the IETF draft for agent credential brokers. Every decision can be sealed in a public log, checked <a class="ul" href="/verify/">in your browser</a>.</p></div>
+    <h2 id="se-h" class="h2">Built like it guards production. <em>Because it does.</em></h2>
+    <div class="cards3">
+      <article class="card rv"><h3>Passkeys only</h3><p>No passwords to phish. The same tap that signs you in approves held calls.</p></article>
+      <article class="card rv"><h3>The CLI can't approve</h3><p>An agent on your laptop can read the CLI's files, so a CLI session can never approve a hold.</p></article>
+      <article class="card rv"><h3>Envelope encryption</h3><p>A key per secret, wrapped by a master key, bound to its row. Never logged, never returned by any API.</p></article>
+      <article class="card rv"><h3>No downgrade</h3><p>A token bound to an agent key never accepts an unsigned request, and a replayed nonce is refused.</p></article>
+      <article class="card rv"><h3>Receipts nobody can forge</h3><p>Only the broker writes broker receipts. The log refuses to sign under a different name or key.</p></article>
+      <article class="card rv"><h3>Locked-down web</h3><p>Strict CSP with Trusted Types, HSTS, no third-party requests. This page loads nothing from anywhere else.</p></article>
     </div>
-  </section>
+    <p class="stat rv"><b>150+</b> automated tests &#183; zero runtime dependencies in the Worker, the CLI and the SDK &#183; <a href="/security/">How it is protected, and where it stops</a></p>
+  </div>
+</section>
 
-  <section class="sec" id="pricing">
+<!-- ============================================================ PRICING -->
+<section class="sec" id="pricing" aria-labelledby="pr-h">
+  <div class="wrap">
     <p class="kicker">Pricing</p>
-    <h2>Cheaper than one bad Tuesday.</h2>
-    <div class="tiers one">
-      <div class="tier hot"><h4>Public beta</h4><div class="price">Free</div><p class="muted">Free during the public beta.</p><ul><li>Every provider</li><li>Every rule</li><li>The full audit log</li></ul><p class="muted">Paid plans for teams (two-person approval, SSO) will come later, with 30 days' notice.</p><a class="btn btn-pri" href="/app">Start free</a></div>
+    <h2 id="pr-h" class="h2">Cheaper than one bad <em>Tuesday.</em></h2>
+    <div class="price rv">
+      <div class="p-l"><p class="p-tag">Public beta</p><p class="p-big">Free</p><p class="p-sub">Free during the public beta.</p><a class="btn btn-pri" href="/app">Start free</a></div>
+      <ul class="p-list">
+        <li>Every provider, every rule</li>
+        <li>The full audit log</li>
+        <li>Public receipts: 10,000 a month, 2,000 a day</li>
+        <li>Agent keys and signed requests</li>
+        <li>Phone alerts for held calls</li>
+        <li>The free signature checker</li>
+      </ul>
+      <p class="p-note">Paid plans for teams may come later. You will get at least 30 days' notice before anything you use starts to cost money.</p>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="final">
-    <h2>Ship with agents.<br><em>Keep production.</em></h2>
+<!-- ============================================================ END -->
+<section class="final" aria-labelledby="fin-h">
+  <div class="final-copy">
+    <h2 id="fin-h" class="h1">Ship with agents. <em>Keep production.</em></h2>
+    <p>Every irreversible action gets a second seal.</p>
     <a class="btn btn-pri" href="/app">Start free</a>
-  </section>
+  </div>
+  <img class="final-img" src="/img/seal-rest.webp" alt="A green wax seal on twisted silk cords, lying on a dark table" width="1600" height="1067" loading="lazy" decoding="async">
+</section>
 </main>
 
 <footer class="foot">
   <div class="foot-in">
-    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg>COUNTERSEAL</a>
-    <div class="foot-links"><a href="/docs/">Docs</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="mailto:hello@gautamkhosla.com">Contact</a></div>
+    <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/leash" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
     <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe or Supabase.</span>
   </div>
 </footer>

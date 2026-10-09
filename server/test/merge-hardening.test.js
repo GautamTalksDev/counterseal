@@ -19,6 +19,12 @@ async function boundSetup(w) {
 }
 
 test('R1 (DoS of the log): reads that reach the Durable Object have a tighter limit than cached reads', async () => {
+  // the limiter refills 2 tokens a second; hold the clock so a slow machine draining 120 tokens does not earn one back
+  const real = Date.now, t0 = real();
+  Date.now = () => t0;
+  try { await r1(); } finally { Date.now = real; }
+});
+async function r1() {
   const w = new World();
   for (let i = 0; i < 120; i++) assert.equal((await w.req('GET', '/v1/log/entries?start=0&count=1', anon)).status, 200);
   const r = await w.req('GET', '/v1/log/entries?start=0&count=1', anon);
@@ -30,7 +36,7 @@ test('R1 (DoS of the log): reads that reach the Durable Object have a tighter li
   for (let i = 0; i < 60; i++) await w.req('GET', '/v1/my/receipts', { cookie: u.cookie });
   assert.equal((await w.req('GET', '/v1/my/receipts', { cookie: u.cookie })).status, 429, 'your own receipts: 60 a minute');
   assert.equal((await w.req('GET', '/v1/holds', { cookie: u.cookie })).status, 200, 'other dashboard reads are unaffected');
-});
+}
 
 test('R2 (signature binding): a signed request with a body must cover its content type, and an agent key\'s last use is written at most once a minute', async () => {
   const w = new World();
