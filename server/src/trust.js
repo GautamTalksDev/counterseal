@@ -76,7 +76,7 @@ export async function demoCall(c) {
   if (a.frozen_at) throw frozenError();
   const tokenId = demoToken(s);
   const open = await env.DB.prepare("SELECT id, expires_at FROM holds WHERE token_id = ? AND account_id = ? AND kind = 'demo' AND status = 'pending' AND expires_at > ? LIMIT 1").bind(tokenId, s.accountId, t).first();
-  const url = async (id) => `${await appOrigin(env, s.accountId)}/app#hold=${id}`;
+  const url = async (id) => `${appOrigin(env)}/app#hold=${id}`;
   if (open) return { hold_id: open.id, status: 'pending', approve_url: await url(open.id), expires_at: open.expires_at, created: false, demo: true };
   await limit(env.DB, 'demo:' + s.accountId, DEMOS_PER_HOUR, 3600_000, t);
   const id = randomId(), expiresAt = t + DEMO_TTL;

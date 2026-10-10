@@ -183,10 +183,10 @@ keys it makes end with it. The code is typed in the app, never sent as a link: n
 approves a code gives that command line their account. Each sign-in alerts your devices and can be revoked in the app
 (Account), with every token and key it made.
 
-**Two hosts.** The product lives at counterseal.gautamkhosla.com. The old host, leash.gautamkhosla.com, keeps serving
-the API and the proxy exactly as before (so leashcli 0.1.1 and configured agents keep working) and its `/app` sign-in for
-passkeys made there; its other pages redirect to counterseal. An account made on the old host moves with a one-time
-link (Account, "Move with passkey") that adds a counterseal passkey to the same account. See docs/DEPLOY.md.
+**One host.** The product lives at counterseal.gautamkhosla.com only: one origin, one passkey RP ID. The earlier
+address, leash.gautamkhosla.com, answers every request (pages, `/app`, `/v1`, `/p`) with a 301 to the same path on
+counterseal and serves nothing itself, so point agents and command lines at counterseal (leashcli 0.1.1 does not follow
+redirects). Passkeys made on leash.gautamkhosla.com do not work on counterseal. See docs/DEPLOY.md.
 
 ### Connect your agent (MCP)
 
@@ -500,11 +500,11 @@ Publish the CLI before deploying a site whose install lines say `npx counterseal
 
 ## Status and roadmap
 
-**Live** (checked 9 Oct 2026 at leash.gautamkhosla.com; counterseal.gautamkhosla.com does not resolve yet): the broker for
+**Live** (checked 9 Oct 2026 at leash.gautamkhosla.com, before the product moved to counterseal.gautamkhosla.com): the broker for
 GitHub, Cloudflare, Railway, Stripe and Supabase (map `2026-10-09.1`), passkey approvals of held calls, and payload-free
 phone and desktop alerts. The published CLI is `leashcli` 0.1.1.
 
-**In this repository, not yet deployed:** the counterseal.gautamkhosla.com host and the domain move; public receipts and the
+**In this repository, not yet deployed:** one host only (leash.gautamkhosla.com answers 301 to counterseal for every request); public receipts and the
 public log; agent keys (Prove who); five more APIs (Vercel, Neon, Fly.io, Resend, Shopify; map `2026-10-10.1`); money caps,
 the breaker and Freeze; the Approvals API and guard keys; `counterseal guard` with its shell map and Claude Code plugin,
 `counterseal mcp wrap`, and CLI 0.3.0 (not yet on npm); the two-person seal with break-glass windows and Slack, Discord and

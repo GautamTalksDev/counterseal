@@ -25,9 +25,8 @@
       <p class="dim" id="authIntro">Sign in with a passkey. Your phone, laptop or security key is your login, and the same tap approves held calls.</p>
       <p id="offlineNote" class="alert" role="status" hidden>You are offline. Counterseal needs a connection to sign in, show held requests and approve them; nothing is kept on this device.</p>
       <p id="authErr" class="alert" role="alert" hidden></p>
-      <p id="devSignedOut" class="alert" hidden>Sign in to approve or deny a command line sign-in. You will type the code from your terminal next.<span id="devOtherHost" hidden> If your account and passkey are on <a id="devOtherLink" class="ul" href="/app"></a>, sign in there instead; the code works on both.</span></p>
+      <p id="devSignedOut" class="alert" hidden>Sign in to approve or deny a command line sign-in. You will type the code from your terminal next.</p>
       <button id="login" class="btn pri wide" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="8" r="3.2"/><path d="M9.8 10.2 16 16.4M13.5 13.9l1.6-1.6M15 15.4l1.4-1.4"/></svg>Sign in with a passkey</button>
-      <section id="moveIn" class="banner" hidden><div><h3>Finish moving to Counterseal</h3><p class="dim">Create a passkey on this host for <b id="moveName"></b>. It joins your existing account; your old passkey keeps working on the old host until you remove it.</p></div><div class="row"><button id="moveCreate" class="btn pri" type="button">Create a passkey here</button></div></section>
       <section id="inviteIn" class="invite-card" hidden>
         <div class="inv-seal" aria-hidden="true"><span class="wax on lg"></span><span class="wax lg"></span></div>
         <h2>You are invited to <span id="invAccount"></span></h2>
@@ -47,7 +46,6 @@
       </section>
       <div id="authMain">
       <div class="or"><span>New to Counterseal?</span></div>
-      <p id="signupMoved" class="dim" hidden>New accounts are made on the new host: <a id="signupLink" class="ul" href="/app">create yours there</a>.</p>
       <div id="signupBox">
       <label for="name" class="lbl">Your name</label>
       <div class="row"><input id="name" maxlength="60" autocomplete="name" placeholder="Ada Lovelace"><button id="register" class="btn" type="button">Create account</button></div>
@@ -436,11 +434,6 @@
       <div class="panel form">
         <h3>What Counterseal keeps about you</h3>
         <p class="dim small">Your name, your passkey's public key, your encrypted vault, token, receipts key and guard key hashes, agent public keys, holds (for a coding agent's command: the command, its folder name and your deny reason), your audit log, the limits and money caps you set on a token, what each token's money caps have let through today (kept 35 days), its breaker's counts for the current hour and 5 minutes, whether your account is frozen, your receipts counters and openings, the country and network name each command line sign-in started from and, if you turn on alerts, each device's push address. On a team, also each person's name, role and the label the owner gave them, who invited whom, open invites (as hashes), and who sealed each held action, with which passkey (a short fingerprint) and when. Also five first-time dates (your first token, first protected call, first demo, first installed use, first alerts) for the Get started list and our totals, and any demo held calls you try. Never your face, fingerprint, readable keys or private keys. <a class="ul" href="/privacy/">Privacy policy</a>. Download all of it or choose how long held requests are kept under <a class="ul" href="/app#privacy">Privacy</a>.</p>
-      </div>
-      <div class="panel form" id="movePanel" hidden>
-        <h3>Move to Counterseal</h3>
-        <p class="dim small">This service now lives at <b id="moveHost" class="mono"></b>. Passkeys belong to the host they were made on, so make a passkey there for this same account: confirm with your passkey here, and a one-time link (10 minutes) opens the new host. Your passkey here keeps working until you remove it.</p>
-        <div class="actions"><button id="moveBtn" class="btn pri" type="button">Move with passkey</button></div>
       </div>
       <div class="panel form">
         <h3>Passkeys</h3>

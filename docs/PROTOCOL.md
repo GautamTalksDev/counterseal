@@ -503,8 +503,8 @@ with `publishRepo`. Never the commit, workflow, run, person, label, summary or d
 
 ## The app, the first run and the privacy center (migration 0012, not yet deployed)
 
-All routes below are signed-in routes with the usual CSRF rules on both hosts (writes need an allow-listed `Origin` equal
-to the host and `x-leash: 1`).
+All routes below are signed-in routes with the usual CSRF rules (writes need an `Origin` equal to the one host and
+`x-leash: 1`).
 
 | Route | Who | What |
 |---|---|---|

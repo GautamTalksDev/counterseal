@@ -29,14 +29,14 @@
 // Invites: an owner makes one with a fresh passkey ceremony. The token is 32 random bytes, stored only as SHA-256, single
 // use, 2 hours by default (24 at most), bound to the account and to the owner who made it (it dies if they stop being an
 // owner), 10 an hour per account, and travels only in the URL fragment and POST bodies (never in a request line, a log
-// or a Referer), like the move link. The invite page shows the account, the inviter and the role before anything is
+// or a Referer). The invite page shows the account, the inviter and the role before anything is
 // created. Joining makes a new passkey on this host; an authenticator that already holds one of the account's passkeys
 // is excluded, and a browser already signed in to the account is refused (one person, one membership).
 //
 // Extension points for break-glass windows and team alert channels (feature 2b) are listed in docs/PROTOCOL.md (Team).
 import { HttpError, b64u, rand, randomId, sha256hex, now, str, cleanText } from './util.js';
 import { verifyRegistration } from './webauthn.js';
-import { newChallenge, takeChallenge, checkAssertion, rp, hosts, startWebSession, session as readSession } from './auth.js';
+import { newChallenge, takeChallenge, checkAssertion, rp, host, startWebSession, session as readSession } from './auth.js';
 import { audit } from './audit.js';
 import { limit, allow } from './ratelimit.js';
 import { notify } from './push.js';
@@ -214,7 +214,7 @@ export async function inviteFinish(env, sess, body) {
   // the audit log names the invite, never its token or the token's hash
   await audit(env, a, sess.kind, 'invite_created', { invite: id, role: p.role, label: p.label, by: sess.memberId, expires_at: expiresAt });
   return {
-    id, role: p.role, label: p.label, expiresAt, url: `${hosts(env)[0].origin}/app#invite=${token}`,
+    id, role: p.role, label: p.label, expiresAt, url: `${host(env).origin}/app#invite=${token}`,
     note: `Shown once. Send it privately to the person you named. It works once, until it expires, and shows them this account's name, your name and the role before they join.`,
   };
 }
@@ -228,9 +228,6 @@ export async function revokeInvite(env, sess, id) {
 }
 
 // ---------------------------------------------------------------- joining (public, on the product's host)
-function joinHost(env) {
-  if (rp(env).legacy) throw new HttpError(403, 'invite_on_new_host', `Open the invite at ${hosts(env)[0].origin}.`);
-}
 /** a live invite whose owner is still an owner: who invites, to which account, for which role */
 async function liveInvite(env, token) {
   const hash = await sha256hex(str(token, 'token', { re: TOKEN }));
@@ -254,14 +251,12 @@ async function nameFree(env, accountId, name) {
 
 /** POST /v1/invites/lookup {token}: what the invite page shows before anything is made */
 export async function inviteLookup(env, request, body) {
-  joinHost(env);
   const l = await liveInvite(env, body.token);
   await notMemberYet(env, request, l.account_id);
   return { account: l.account, inviter: l.inviter, role: l.role, label: l.label, expires_at: l.expires_at };
 }
 
 export async function joinBegin(env, request, body) {
-  joinHost(env);
   const l = await liveInvite(env, body.token);
   const name = str(typeof body.name === 'string' ? body.name.trim() : body.name, 'name', { max: 60, re: NAME });
   await notMemberYet(env, request, l.account_id);
@@ -282,7 +277,6 @@ export async function joinBegin(env, request, body) {
 }
 
 export async function joinFinish(env, request, body) {
-  joinHost(env);
   const ch = await takeChallenge(env, body.challengeId, 'team_join');
   const p = JSON.parse(ch.name);
   const hash = await sha256hex(str(body.token, 'token', { re: TOKEN }));

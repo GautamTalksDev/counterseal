@@ -68,7 +68,7 @@ npx counterseal token &lt;key-id&gt; --label coding-agent</pre></li>
     <li><strong>Connect your agent.</strong> Add the MCP server to your agent's config (see <a href="#mcp">below</a>).</li>
   </ol>
   <div class="callout">You can also do all of this in the app without the CLI. The CLI is just faster. From version 0.3.0 the CLI package is called <code>counterseal</code>; <code>leashcli</code>, the product's earlier name, keeps working as an alias that runs it; it is the same service.</div>
-  <div class="callout">Counterseal used to live at leash.gautamkhosla.com. That host still answers the API and the proxy exactly as before, so existing tokens, agents and <code>leashcli</code> 0.1.1 keep working, and its <code>/app</code> still signs in with passkeys made there. If your account was made there, sign in on the old host, open Account and choose <strong>Move with passkey</strong>: a one-time link (10 minutes) opens this host, where you make a passkey for the same account. Your old passkey keeps working on the old host until you remove it.</div>
+  <div class="callout">Counterseal lives at counterseal.gautamkhosla.com only. Its earlier address, leash.gautamkhosla.com, answers every request (pages, <code>/app</code>, <code>/v1</code>, <code>/p</code>) with a permanent redirect (301) to the same path here and serves nothing itself. Point agents and command lines at counterseal.gautamkhosla.com: <code>leashcli</code> 0.1.1 does not follow redirects. Passkeys made on the earlier address do not work here; make a new account.</div>
 
   <h2 id="concepts">Concepts</h2>
   <table>
@@ -114,7 +114,7 @@ Authorization: Bearer lsh_...</pre>
   "rule": "rw.mutation",
   "message": "Counterseal held this request because it cannot be undone..."
 }</pre>
-  <p>Open the link, check the method, host, path, reason and the request preview, and approve with your passkey. Then retry the <strong>exact same request</strong> once. Turn on phone alerts in the app, or run <code>npx counterseal watch</code> for a terminal bell and link for every new hold (with leashcli 0.1.1 its links point at leash.gautamkhosla.com; if your account is on counterseal, open the hold from the app or the alert).</p>
+  <p>Open the link, check the method, host, path, reason and the request preview, and approve with your passkey. Then retry the <strong>exact same request</strong> once. Turn on phone alerts in the app, or run <code>npx counterseal watch</code> for a terminal bell and link for every new hold (leashcli 0.1.1 calls leash.gautamkhosla.com, which now only redirects, and it does not follow redirects).</p>
 
   <h2 id="guard">Approvals for a coding agent's commands</h2>
   <p>Some irreversible actions never pass through an API the broker holds a key for: <code>terraform destroy</code>, <code>railway volume delete</code>, <code>gh repo delete</code>, <code>prisma migrate reset</code>, <code>DROP TABLE</code> through <code>psql</code>, <code>git push --force</code>. For those, a guard on the agent's machine asks the Approvals API with a guard key and waits for your passkey:</p>
@@ -425,9 +425,7 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>GET /v1/my/receipts</code>, <code>GET /v1/my/receipts/:index/bundle</code></td><td>Your receipts with openings; a fresh bundle for one.</td></tr>
     <tr><td><code>GET /v1/log/checkpoint</code>, <code>/v1/log/key</code>, <code>/v1/log/proof/inclusion?index=&amp;size=</code>, <code>/v1/log/proof/consistency?first=&amp;second=</code>, <code>/v1/log/entries?start=&amp;count=</code>, <code>/v1/stats</code></td><td>The public log. Anyone, any origin (CORS open), no account.</td></tr>
     <tr><td><code>GET /v1/tools/directory?agent=</code></td><td>Fetch an agent's Web Bot Auth key directory for the checker. Public, 10 a minute per network.</td></tr>
-    <tr><td><code>POST /v1/me/move/begin, /finish</code></td><td>On the old host: a one-time link to add a passkey on this host. Passkey.</td></tr>
-    <tr><td><code>POST /v1/move/begin, /finish</code></td><td>On this host: register a passkey with that link's token (in the body).</td></tr>
-    <tr><td><code>GET /v1/passkeys</code>, <code>POST /v1/passkeys/:id/remove/begin, /finish</code></td><td>Your passkeys and their hosts; remove one with a passkey check, which also signs out your other browsers (web only, never the last).</td></tr>
+    <tr><td><code>GET /v1/passkeys</code>, <code>POST /v1/passkeys/:id/remove/begin, /finish</code></td><td>Your passkeys; remove one with a passkey check, which also signs out your other browsers (web only, never the last).</td></tr>
     <tr><td><code>POST /v1/device/start</code>, <code>POST /v1/device/poll</code></td><td>Command line sign-in (RFC 8628 device code): a code to type at <code>/app#device</code>, valid 5 minutes, 10 starts an hour per network; poll every <code>interval</code> seconds.</td></tr>
     <tr><td><code>POST /v1/device/lookup</code>, <code>/v1/device/deny</code>, <code>/v1/device/approve/begin, /finish</code></td><td>In the app: where a sign-in started, then deny it, or approve it with a passkey. Web only.</td></tr>
     <tr><td><code>GET /v1/sessions</code>, <code>DELETE /v1/sessions/:id</code></td><td>Command line sign-ins of the last 7 days; revoke one and every token, agent key and receipts key it made, even after it signed out (revoking is web only).</td></tr>

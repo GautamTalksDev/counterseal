@@ -4,10 +4,7 @@ import { BRAND } from '/brand.js';
 const $ = (id) => document.getElementById(id);
 // the CLI package the install lines name (server/src/brand.js cliInstall; scripts/cli-name.mjs switches it)
 const CLI_PKG = BRAND.cliInstall || BRAND.cli || 'leashcli';
-// a "Move to Counterseal" link carries its one-time token in the fragment: read it, then take it out of the address bar
 // and the history at once, so it is never shown, bookmarked, logged or sent as a Referer
-let moveToken = null;
-{ const mv = location.hash.match(/^#move=([A-Za-z0-9_-]{43})$/); if (mv) { moveToken = mv[1]; history.replaceState(null, '', '/app'); } }
 // a team invite works the same way: the one-time token is in the fragment, read once and taken out of the address bar,
 // and it only ever travels in a POST body
 let inviteToken = null;
@@ -914,24 +911,6 @@ $('pushOff').onclick = async () => {
   } catch (e) { toast(e.message); }
 };
 
-// ---- the domain move
-async function moveIn() {
-  try {
-    const b = await api('POST', '/v1/move/begin', { token: moveToken });
-    $('moveName').textContent = b.name; $('moveIn').hidden = false;
-    $('moveCreate').onclick = async () => {
-      try {
-        const o = b.options;
-        const cred = await navigator.credentials.create({ publicKey: { ...o, challenge: b64u.dec(o.challenge), user: { ...o.user, id: b64u.dec(o.user.id) } } });
-        await api('POST', '/v1/move/finish', { token: moveToken, challengeId: b.challengeId, credential: { id: cred.id, attestationObject: b64u.enc(cred.response.attestationObject), clientDataJSON: b64u.enc(cred.response.clientDataJSON) } });
-        moveToken = null; $('moveIn').hidden = true; toast('Your passkey on this host is ready.'); boot();
-      } catch (e) { toast(e.message); }
-    };
-  } catch (e) { toast(e.message); }
-}
-$('moveBtn').onclick = async () => {
-  try { const r = await ceremony('/v1/me/move/begin', '/v1/me/move/finish'); location.assign(r.url); } catch (e) { toast(e.message); }
-};
 async function passkeysView() {
   const p = await api('GET', '/v1/passkeys');
   const P = $('passkeys'); P.replaceChildren();
@@ -1262,7 +1241,6 @@ async function boot() {
     // on a team, your own name (the account's name is the team's)
     const shown = ME.name || me.account.name;
     $('who').textContent = shown; $('who').title = ME.founder ? me.account.name : `${shown}, on ${me.account.name}`;
-    $('movePanel').hidden = !me.host.legacy; $('moveHost').textContent = me.host.primary;
     $('avatar').textContent = (shown.trim()[0] || '?').toUpperCase();
     api('GET', '/v1/team').then((t) => { NAMES = new Map(t.members.map((m) => [m.id, m.name])); }).catch(() => {});
     meta = meta || (await api('GET', '/v1/meta'));
@@ -1279,15 +1257,7 @@ async function boot() {
     prepareLogin();
     // a command line sign-in waits for you here; the code is typed after you sign in, never taken from the link
     $('devSignedOut').hidden = !/^#device/.test(location.hash);
-    // on the old host, sign-in stays and sign-up moves to the product's host
-    try {
-      meta = meta || (await api('GET', '/v1/meta'));
-      if (meta.app && meta.app !== location.origin) { $('signupBox').hidden = true; $('signupMoved').hidden = false; $('signupLink').href = meta.app + '/app'; }
-      // a sign-in code works on both hosts: point people whose account is on the other host there
-      const other = meta.app && meta.app !== location.origin ? meta.app : meta.legacyApp;
-      if (/^#device/.test(location.hash) && /^https?:\/\/[a-z0-9.:-]+$/.test(other || '')) { $('devOtherHost').hidden = false; $('devOtherLink').href = other + '/app#device'; $('devOtherLink').textContent = new URL(other).host + '/app#device'; }
-    } catch { /* offline: the form still works or explains itself */ }
   }
 }
 registerWorker();
-if (moveToken) { $('signedOut').hidden = false; $('signedIn').hidden = true; moveIn(); } else if (inviteToken) inviteIn(); else boot();
+if (inviteToken) inviteIn(); else boot();

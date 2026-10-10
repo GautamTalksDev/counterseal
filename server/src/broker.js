@@ -6,7 +6,7 @@ import { seal, open } from './vault.js';
 import { summarize, PROVIDERS, MAP_VERSION, storeHost, LIMITS } from './providers.js';
 import { normalisePolicy, decide, afterMap } from './policy.js';
 import { audit } from './audit.js';
-import { newChallenge, takeChallenge, checkAssertion, rp, hosts, appOrigin, sessionId } from './auth.js';
+import { newChallenge, takeChallenge, checkAssertion, rp, appOrigin, sessionId } from './auth.js';
 import { limit, allow } from './ratelimit.js';
 import { notify } from './push.js';
 import { verifyAgentSignature, d1Seen, ownActive } from './agentkeys.js';
@@ -136,7 +136,7 @@ export async function listHolds(env, sess, status) {
       LEFT JOIN guard_keys g ON h.kind IN ('shell','tool') AND g.id = substr(h.token_id, 3) AND g.account_id = h.account_id
       LEFT JOIN gates gt ON h.kind = 'deploy' AND gt.id = substr(h.token_id, 3) AND gt.account_id = h.account_id
     WHERE h.account_id = ?1 AND h.status = ?2 ORDER BY h.created_at DESC LIMIT 100`).bind(sess.accountId, st, t).all();
-  const base = await appOrigin(env, sess.accountId);
+  const base = appOrigin(env);
   // `headline`: the amount of a held Stripe refund or payout, for large type (the first line of its preview);
   // `needs`, `self_approve` and `votes`: the seals it needs now, whether its requester may be one, and who sealed it so far
   return {
@@ -180,7 +180,7 @@ export async function approveFinish(env, sess, holdId, body) {
     await audit(env, sess.accountId, 'web', 'approve_vote', { ...base, seals: s.votes.length, needs: s.need });
     // another approver's seal may have completed it in between (two people confirming at the same moment)
     if (s.status === 'approved') return { ok: true, approved: true, seals: s.votes.length, needs: s.need, note: 'Your seal is on, and the seals are complete: the agent can go ahead once, within 10 minutes.' };
-    Team.nudge(env, sess.accountId, sess.memberId, Channels.sealText({ seals: s.votes.length, needs: s.need, url: `${await appOrigin(env, sess.accountId)}/app#hold=${holdId}` }));
+    Team.nudge(env, sess.accountId, sess.memberId, Channels.sealText({ seals: s.votes.length, needs: s.need, url: `${appOrigin(env)}/app#hold=${holdId}` }));
     return { ok: true, approved: false, seals: s.votes.length, needs: s.need, note: `Your seal is on (${s.votes.length} of ${s.need}). It needs ${s.need - s.votes.length} more from a different approver before the agent can go ahead.` };
   }
   await audit(env, sess.accountId, 'web', demo ? 'demo_approved' : 'approve', { ...base, ...(s.need > 1 ? { quorum: s.need, votes: s.votes } : {}) }, { receipts: demo ? false : s.receipts });
@@ -280,7 +280,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   if (!m) throw new HttpError(401, 'leash_token_required', `Send your ${BRAND.name} token as: Authorization: Bearer lsh_...`);
   // one query: the token, whether its account has public receipts on and is frozen, its quorum settings (two-person
   // seal), and the agent key it is bound to (if any)
-  const tok = await env.DB.prepare(`SELECT t.*, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at, ${Team.ROLE_OF('COALESCE(t.member_id, t.account_id)', 't.account_id')} AS maker_role, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM passkeys p WHERE p.account_id = t.account_id AND p.rp_id = ?) AS has_new_passkey, EXISTS (SELECT 1 FROM windows w WHERE w.account_id = t.account_id AND w.closed_at IS NULL AND w.expires_at > ${Date.now()}) AS window_open FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?`).bind(hosts(env)[0].rpId, await sha256hex(m[1])).first();
+  const tok = await env.DB.prepare(`SELECT t.*, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at, ${Team.ROLE_OF('COALESCE(t.member_id, t.account_id)', 't.account_id')} AS maker_role, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM windows w WHERE w.account_id = t.account_id AND w.closed_at IS NULL AND w.expires_at > ${Date.now()}) AS window_open FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?`).bind(await sha256hex(m[1])).first();
   if (!tok || tok.revoked || tok.expires_at < now()) throw new HttpError(401, 'token_invalid');
   // a token bound to an agent key whose key is gone or revoked never works again (fails closed)
   if (tok.agent_key_id && (!tok.agent_keyid || tok.agent_revoked)) throw new HttpError(401, 'agent_key_revoked', 'The agent key this token is bound to was revoked.');
@@ -408,7 +408,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
         }
       }
       // the approve link goes where the owner can sign in: the product's host once they have a passkey there
-      const approveUrl = `${await appOrigin(env, tok.account_id, !!tok.has_new_passkey)}/app#hold=${h.id}`;
+      const approveUrl = `${appOrigin(env)}/app#hold=${h.id}`;
       return json({
         error: 'held_for_approval', hold_id: h.id, approve_url: approveUrl, expires_at: h.expires_at, rule: d.rule, map_version: MAP_VERSION, seals_needed: team.quorum,
         message: `${BRAND.name} held this request${d.rule.startsWith('brake.') ? ':' : ' because it cannot be undone:'} ${d.why} Stop and ask your human${team.quorum > 1 ? `s (${team.quorum} different approvers)` : ''} to approve it at ${approveUrl} . After they approve, retry the exact same request once.`,

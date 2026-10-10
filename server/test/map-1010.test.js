@@ -72,7 +72,7 @@ test('/v1/meta lists all ten providers with the new map version, and site/public
   assert.deepEqual(shop.perCredentialHost, { suffix: '.myshopify.com', label: 'Store address', example: 'your-store.myshopify.com' });
   assert.match(shop.note, /Admin GraphQL API only/);
   assert.equal(meta.providers.find((p) => p.id === 'vercel').perCredentialHost, undefined);
-  const { app, legacyApp, ...rest } = meta;
+  const { app, ...rest } = meta;
   assert.deepEqual(JSON.parse(read('site/public/data/meta.json')), rest, 'regenerate: node scripts/gen-meta.mjs');
   assert.equal(read('site/public/data/meta.json'), J(M.metaOf()), 'byte for byte what scripts/gen-meta.mjs writes');
 });

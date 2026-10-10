@@ -24,7 +24,7 @@ can read on the machine it runs on, an attacker who prompt-injects that agent ca
 | Someone holding a guard key (`lsg_`), for example the agent the guard runs next to | Ask for approvals (60 new an hour, 20 waiting); read and use its own approvals | Approve anything; see another key's or a brokered hold; list holds; reach the vault; outlive the CLI session that made it; alert more than once a minute |
 | One person on a team that requires two seals (an owner or approver, or someone who stole one person's phone and passkey) | Give one seal; deny anything; freeze; read everything the team reads | Approve a held action alone; count twice (a second passkey, a second browser, two confirmations at once); seal what their own token or guard key asked for when self-approval is off; pre-approve irreversible calls or set money caps; lower the quorum or turn self-approval on without 24 hours' notice to every member; give a new or promoted approver a seal that counts in those 24 hours |
 | A team member with a lower role (member or viewer) | A member: make tokens, guard keys and keys for their agents. A viewer: read and deny | Seal, change roles, invite, remove others, change the quorum, delete vault keys, switch receipts, delete the account (checked on the server on every request) |
-| Someone holding a stolen or forwarded invite link | Join the team once, with the invited role, within the invite's life (2 hours by default, 24 at most), with a passkey of their own | Join twice, join after it was used, revoked or expired or after its owner stopped being an owner, join from the old host, join quietly (every member's devices are woken), have their seal count for 24 hours while two seals are required |
+| Someone holding a stolen or forwarded invite link | Join the team once, with the invited role, within the invite's life (2 hours by default, 24 at most), with a passkey of their own | Join twice, join after it was used, revoked or expired or after its owner stopped being an owner, join from another origin, join quietly (every member's devices are woken), have their seal count for 24 hours while two seals are required |
 | A removed team member | Nothing | Sign in (passkeys deleted), use a session or a CLI session (deleted), get alerts (devices deleted), have a seal count, use a token, guard key or receipts key they made (revoked) |
 | Someone who knows a gate's id (it is pasted in workflow files, so it is public) | Ask that gate with a GitHub token from the repository and workflow it accepts | Get a hold from any other repository, workflow, ref or trigger (`403`, nothing written, nobody alerted); learn which repository the gate belongs to; approve anything |
 | A person who can edit the workflow in a repository a gate accepts | Remove the gate step; send any summary text (shown as "not verified"); start runs the gate accepts | Approve; make a run the gate refuses; get the phase 2 token before an approval; use another repository's gate |
@@ -108,9 +108,8 @@ account; the alert says how many are waiting. Test: *approval fatigue* (`test/se
 to, in the same statement, and retries otherwise. Test: *the audit chain does not fork*.
 
 **S14. Losing the account through a passkey.** A stolen cookie could remove the owner's other passkeys, and a browser
-signed in with a passkey added through a leaked move link stayed in after that passkey was removed. Removing a passkey
-needs a fresh passkey ceremony and signs out every other web session; a passkey added through a move link alerts every
-device. Test: *removing a passkey*.
+signed in with a passkey that was later removed stayed in. Removing a passkey needs a fresh passkey ceremony and signs
+out every other web session. Test: *removing a passkey*.
 
 **S15. Unbounded resources and catastrophic backtracking.** Ceilings per account (50 vault keys, 200 live tokens, 20
 receipts keys, 20 agent keys, 10 devices) and bounded lists keep one account from using up the shared D1 budget. Policy
@@ -410,8 +409,8 @@ owner can delete the account. A rogue owner is a trust problem the two-person se
 changes needs a fresh passkey ceremony, is in the audit log and wakes every member's devices, and lowering the quorum
 takes 24 hours. Collusion between two approvers is out of scope.
 
-**T8. CSRF and hosts.** Team changes need a web session, the `x-leash` header and an Origin equal to the host they were
-sent to; the public join routes check the Origin and refuse the old host. Test: *CSRF and hosts*.
+**T8. CSRF and hosts.** Team changes need a web session, the `x-leash` header and an Origin equal to the one host; the
+public join routes check the Origin too. Test: *CSRF and hosts*.
 
 **T9. Privacy.** Public receipts of an approval that needed two seals carry `meta.quorum` and `meta.votes` (numbers)
 only; a seal that does not complete the quorum is not a receipt. Names, member ids, labels and passkey fingerprints stay
@@ -599,29 +598,20 @@ argument that starts with a SQL word is held, a documented false positive that `
 and tool results are not pinned or inspected; remote (HTTP) servers and the elicitation URL mode are not supported; a change
 between two looks, at most a minute apart, is caught at the next one.
 
-### The domain move (two hosts)
+### One host (the retired leash.gautamkhosla.com)
 
-**D1. RP ID confusion.** The service answers on counterseal.gautamkhosla.com and leash.gautamkhosla.com. WebAuthn
-ceremonies use the RP ID of the host the request came from, chosen from an allow list of exactly these two by the
-Origin header (or the URL for clients without one); a client never names it. Each passkey records its RP ID and is
-refused on the other host; a challenge records its origin and is refused on the other host; the authenticator data's RP
-ID hash and the client data's origin are checked as before. Tests: `test/domain.test.js`.
+**D1. RP ID confusion.** There is one origin and one RP ID (counterseal.gautamkhosla.com); a client never names it. A
+passkey that records another RP ID is refused, a challenge records its origin and is refused elsewhere, and the
+authenticator data's RP ID hash and the client data's origin are checked as before. Tests: `test/domain.test.js`.
 
-**D2. Cross-host CSRF.** The two hosts are the same site (gautamkhosla.com), so SameSite alone does not separate them.
-Writes need the `x-leash` header (a preflight, refused) and an Origin equal to the origin of the host they were sent to;
-cookies are host-only (`__Host-`). Test: *CSRF*.
+**D2. The retired host.** leash.gautamkhosla.com is the same site (gautamkhosla.com) and still routes to the Worker.
+Every request to it, any method and path, gets a bodiless 301 to the same path on counterseal before anything else runs:
+no cookie is read or set, no API route, proxy call or asset is served, and the Origin of that host is refused by every
+CSRF check. A browser follows the 301 for GET; a POST or DELETE turned into a redirect is never replayed with its
+credentials by our code. Test: *the retired host answers every request*.
 
-**D3. The move link.** Whoever holds a live link can add a passkey to that account, so the link is made only on the
-old host, by a web session, after a fresh passkey assertion; it is 32 random bytes, stored as SHA-256, bound to the
-account, single use (consumed atomically when the new passkey is saved, and only for the account it was made for),
-valid 10 minutes, at most 3 an hour per account, and audited. It lives in the URL fragment and POST bodies, so it is not
-in request lines, logs or Referer headers, and the page removes it from the address bar at once. Residual: anyone who
-sees the link within those 10 minutes (a shoulder, a shared screen) could use it first; the owner would see
-`passkey_added` in the audit log and the extra passkey under Account, and can remove it. Tests: *Move to Counterseal*,
-*Move link: expiry, replay, wrong account, rate limit*.
-
-**D4. Old clients.** leashcli 0.1.1 and agents keep calling leash.gautamkhosla.com; `/v1` and `/p` are never
-redirected there.
+**D3. Old clients.** leashcli 0.1.1 and agents configured with leash.gautamkhosla.com get a 301 and, not following it,
+fail closed: nothing is proxied or approved there. Residual: they stop working until pointed at counterseal.
 
 ### The installable app, the first run and the privacy center (migration 0012, branch feat/app-trust, not yet deployed)
 

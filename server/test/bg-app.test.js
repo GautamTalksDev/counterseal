@@ -27,7 +27,7 @@ async function fixtures() {
   return { w, u, asha, tok, gk, ch: ch.body, win: win.body, me: await get('/v1/me'), team: await get('/v1/team'), tokens: await get('/v1/tokens'), guardKeys: await get('/v1/guard/keys') };
 }
 const routes = (f, over = {}) => ({
-  'GET /v1/me': async () => [200, f.me], 'GET /v1/meta': async () => [200, { providers: [], app: 'https://leash.test', legacyApp: null }], 'GET /v1/credentials': async () => [200, { credentials: [] }],
+  'GET /v1/me': async () => [200, f.me], 'GET /v1/meta': async () => [200, { providers: [], app: 'https://leash.test' }], 'GET /v1/credentials': async () => [200, { credentials: [] }],
   'GET /v1/tokens': async () => [200, f.tokens], 'GET /v1/holds': async () => [200, { holds: [] }], 'GET /v1/audit': async () => [200, { entries: [] }], 'GET /v1/agent-keys': async () => [200, { agentKeys: [] }],
   'GET /v1/push/key': async () => [200, { enabled: false }], 'GET /v1/team': async () => [200, f.team], 'GET /v1/guard/keys': async () => [200, f.guardKeys], ...over,
 });

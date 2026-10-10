@@ -98,37 +98,34 @@ test('who can sign and record for the account is on the record: agent keys and r
   assert.equal((await w.req('GET', '/v1/audit/verify', { cookie: u.cookie })).body.ok, true);
 });
 
-test('removing a passkey needs a fresh passkey and signs out the other browsers; a passkey added by a move link alerts every device', async () => {
-  const NEW = 'https://counterseal.test', OLD = 'https://leash.test';
+test('removing a passkey needs a fresh passkey and signs out the other browsers; a recently added passkey shows in the alerts', async () => {
   const w = new World();
-  const u = await w.user('Old', '198.51.100.61');
-  Object.assign(w.env, { ORIGIN: NEW, RP_ID: 'counterseal.test', LEGACY_ORIGIN: OLD, LEGACY_RP_ID: 'leash.test' });
-  await withVapid(w);
-  const at = (host, path, o = {}) => [host + path, { origin: host, ...o }];
-  assert.equal((await w.req('POST', ...at(OLD, '/v1/push/subscribe', { cookie: u.cookie, body: { endpoint: FCM + 'old-phone' } }))).status, 200);
-  // a second browser signed in on the old host
-  const lb = await w.req('POST', ...at(OLD, '/v1/auth/login/begin', { body: {} }));
-  const other = (await w.req('POST', ...at(OLD, '/v1/auth/login/finish', { body: { challengeId: lb.body.challengeId, credential: await u.auth.get(lb.body.options) } }))).headers.get('set-cookie').split(';')[0];
+  const u = await w.user('Owner', '198.51.100.61');
+  const at = (host, path, o = {}) => [host + path, { ...o }];
+  // a second browser signed in
+  const lb = await w.req('POST', '/v1/auth/login/begin', { body: {} });
+  const other = (await w.req('POST', '/v1/auth/login/finish', { body: { challengeId: lb.body.challengeId, credential: await u.auth.get(lb.body.options) } })).headers.get('set-cookie').split(';')[0];
   await timeShift(5 * 60_000, async () => {
-    // the move: whoever holds the link gets a passkey, and every device hears about it at once
-    const mb = await w.req('POST', ...at(OLD, '/v1/me/move/begin', { cookie: u.cookie, body: {} }));
-    const link = (await w.req('POST', ...at(OLD, '/v1/me/move/finish', { cookie: u.cookie, body: { challengeId: mb.body.challengeId, credential: await u.auth.get(mb.body.options) } }))).body.url;
-    const token = link.split('#move=')[1];
-    const auth = new Authenticator(NEW, 'counterseal.test');
-    const rb = await w.req('POST', ...at(NEW, '/v1/move/begin', { body: { token } }));
-    const rf = await w.req('POST', ...at(NEW, '/v1/move/finish', { body: { token, challengeId: rb.body.challengeId, credential: await auth.create(rb.body.options) } }));
-    assert.equal(rf.status, 200);
-    assert.deepEqual(w.pushes, [FCM + 'old-phone'], 'the old phone is woken');
-    const al = (await w.req('GET', OLD + '/v1/alerts', { cookie: u.cookie, ...bare })).body;
-    assert.equal(al.passkeys.length, 1); assert.equal(al.passkeys[0].host, NEW);
-    const cookie = rf.headers.get('set-cookie').split(';')[0];
-    const pks = (await w.req('GET', NEW + '/v1/passkeys', { cookie, ...bare })).body.passkeys;
-    const oldId = pks.find((p) => p.host === OLD).id;
+    // a second passkey of the same person (made through a throwaway sign-up, then moved onto this account in the database)
+    const auth = new Authenticator('https://leash.test', 'leash.test');
+    const tb = await w.req('POST', '/v1/auth/register/begin', { ip: '198.51.100.62', body: { name: 'Second' } });
+    const tf = await w.req('POST', '/v1/auth/register/finish', { ip: '198.51.100.62', body: { challengeId: tb.body.challengeId, credential: await auth.create(tb.body.options) } });
+    assert.equal(tf.status, 200, JSON.stringify(tf.body));
+    const id = await w.accountId(u.cookie), tmp = await w.accountId(tf.headers.get('set-cookie').split(';')[0]);
+    w.env.DB.raw.prepare('UPDATE passkeys SET account_id = ?, member_id = NULL WHERE account_id = ?').run(id, tmp);
+    w.env.DB.raw.prepare('DELETE FROM sessions WHERE account_id = ?').run(tmp);
+    const lb2 = await w.req('POST', '/v1/auth/login/begin', { body: {} });
+    const cookie = (await w.req('POST', '/v1/auth/login/finish', { body: { challengeId: lb2.body.challengeId, credential: await auth.get(lb2.body.options) } })).headers.get('set-cookie').split(';')[0];
+    const al = (await w.req('GET', '/v1/alerts', { cookie: u.cookie, ...bare })).body;
+    assert.equal(al.passkeys.length, 1); assert.equal(al.passkeys[0].host, 'https://leash.test');
+    const pks = (await w.req('GET', '/v1/passkeys', { cookie, ...bare })).body.passkeys;
+    assert.equal(pks.length, 2);
+    const oldId = pks[0].id, newId = pks[1].id;
+    const OLD = '', NEW = '';
     // no ceremony, no removal; a CLI session never; a ceremony for another passkey id does not carry over
     assert.equal((await w.req('POST', ...at(NEW, `/v1/passkeys/${oldId}/remove/finish`, { cookie, body: {} }))).status, 400);
     const cli = await cliFor(w, u);
     assert.equal((await w.req('POST', OLD + `/v1/passkeys/${oldId}/remove/begin`, { bearer: cli, ...bare, body: {} })).body.error, 'passkey_required');
-    const newId = pks.find((p) => p.host === NEW).id;
     const wrong = await w.req('POST', ...at(NEW, `/v1/passkeys/${newId}/remove/begin`, { cookie, body: {} }));
     assert.equal((await w.req('POST', ...at(NEW, `/v1/passkeys/${oldId}/remove/finish`, { cookie, body: { challengeId: wrong.body.challengeId, credential: await auth.get(wrong.body.options) } }))).body.error, 'challenge_expired');
     // the real thing

@@ -31,7 +31,7 @@
   <a href="#brakes">Caps, breaker and Freeze</a>
   <a href="#receipts">How the public log is protected</a>
   <a href="#agentkeys">How agent keys work</a>
-  <a href="#hosts">Two hosts</a>
+  <a href="#hosts">One host</a>
   <a href="#cli">Command line sign-in</a>
   <a href="#controls">Controls, mapped to OWASP</a>
   <a href="/security/standards/">Standards self-assessment</a>
@@ -131,11 +131,11 @@
     <li><strong>On the record.</strong> Your audit entry names the agent key behind each signed call; the public receipt says a registered key signed it.</li>
   </ul>
 
-  <h2 id="hosts">Two hosts</h2>
+  <h2 id="hosts">One host</h2>
   <ul>
-    <li><strong>One allow list of two origins.</strong> counterseal.gautamkhosla.com (new passkeys) and leash.gautamkhosla.com (passkeys made before the move, the API and the proxy). Each has its own RP ID, picked from the request's Origin (or its URL) out of that list of two; a client never names an RP ID; a passkey only works on its own host, and a challenge only on the host that issued it.</li>
-    <li><strong>Host-only cookies, same-origin writes.</strong> Sessions are per host; a write is accepted only from the origin of the host it was sent to.</li>
-    <li><strong>Moving an account</strong> needs a fresh passkey check on the old host. The one-time link is 32 random bytes, stored only as a hash, single use, valid 10 minutes, at most 3 an hour, and sits in the URL fragment, so it never reaches a server log or a Referer. Making the link and the passkey it adds are in your audit log, and the new passkey alerts your devices.</li>
+    <li><strong>One origin, one RP ID.</strong> Every passkey ceremony and every write check uses counterseal.gautamkhosla.com and nothing else; a client never names an RP ID, and a challenge only works on the host that issued it.</li>
+    <li><strong>Host-only cookies, same-origin writes.</strong> Sessions are <code>__Host-</code> cookies; a write is accepted only with an Origin of counterseal.gautamkhosla.com.</li>
+    <li><strong>The retired address.</strong> leash.gautamkhosla.com answers every request with a 301 to the same path on counterseal.gautamkhosla.com (with HSTS, <code>nosniff</code>, no referrer and a deny-all CSP) and serves, signs in and proxies nothing.</li>
   </ul>
 
   <h2 id="cli">Signing in the command line</h2>

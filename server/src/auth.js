@@ -1,12 +1,9 @@
 // Accounts and sessions. Passkeys are the only way in; there are no passwords to phish or reuse.
 // Web sessions: __Host- cookie (HttpOnly, Secure, SameSite=Strict) + a custom header on writes (CSRF), Origin checked.
 //
-// Two hosts (the domain move, 9 Oct 2026): the product lives at ORIGIN (counterseal.gautamkhosla.com, RP ID RP_ID); the
-// old host LEGACY_ORIGIN (leash.gautamkhosla.com, RP ID LEGACY_RP_ID) keeps its API, proxy and /app sign-in so existing
-// passkeys and the published CLI keep working. Which host a request belongs to, and so which RP ID a WebAuthn ceremony
-// uses, is chosen only by the request: its Origin header (browsers), else its own URL (CLI, agents), and only from that
-// allow list of exactly two. A client never names an RP ID. Cookies are host-only (__Host-), so each host has its own
-// sessions in the browser.
+// One host: ORIGIN (counterseal.gautamkhosla.com) with RP ID RP_ID. Every WebAuthn ceremony and every CSRF check uses
+// exactly that origin and RP ID; a client never names an RP ID. (leash.gautamkhosla.com only answers 301 to it, see
+// src/index.js.)
 // CLI sessions: bearer token from a device-code sign-in approved with a passkey. A CLI session can mint tokens and
 // list holds but can never approve a hold or pre-approve irreversible operations: an agent on the same machine can
 // read the CLI's file, so anything dangerous needs a human's passkey.
@@ -24,47 +21,23 @@ import { notify } from './push.js';
 export const WEB_IDLE = 60 * 60_000;
 export const WEB_TTL = 12 * 3600_000, CLI_TTL = 7 * 86400_000, CH_TTL = 5 * 60_000, DEVICE_TTL = 5 * 60_000, DEVICE_INTERVAL = 5;
 
-/** the allow list: the product's host first, then the old host if one is configured. Exactly these, nothing else. */
-export function hosts(env) {
-  const list = [{ origin: env.ORIGIN || 'http://localhost:8787', rpId: env.RP_ID || 'localhost', legacy: false }];
-  if (env.LEGACY_ORIGIN && env.LEGACY_RP_ID) list.push({ origin: env.LEGACY_ORIGIN, rpId: env.LEGACY_RP_ID, legacy: true });
-  return list;
-}
+/** the one host: its origin and RP ID */
+export const host = (env) => ({ origin: env.ORIGIN || 'http://localhost:8787', rpId: env.RP_ID || 'localhost' });
 
-/** the host entry this request belongs to: by its Origin header when it sends one (null if that Origin is not on the
- *  list), else by its own URL, else the product's host */
-export function hostOf(env, request) {
-  const list = hosts(env);
-  const o = request.headers.get('origin');
-  if (o) return list.find((h) => h.origin === o) || null;
-  let u = null;
-  try { u = new URL(request.url).origin; } catch { /* unreachable for a Request */ }
-  return list.find((h) => h.origin === u) || list[0];
-}
-
-/** a browser write is same-origin and from one of the two hosts: the Origin header must be on the list and must be
- *  the origin of the URL it was sent to */
+/** a browser write is same-origin and from the one host: the Origin header must be ORIGIN and the origin of the URL */
 export function originAllowed(env, request) {
   const o = request.headers.get('origin');
-  return !!o && o === new URL(request.url).origin && hosts(env).some((h) => h.origin === o);
+  return !!o && o === new URL(request.url).origin && o === host(env).origin;
 }
 
-/** the RP for this request (src/index.js sets env.__rp per request); without one, the product's host */
+/** the RP for every WebAuthn ceremony */
 export function rp(env) {
-  const h = env.__rp || hosts(env)[0];
-  return { rpId: h.rpId, origin: h.origin, legacy: !!h.legacy, name: BRAND.name };
+  const h = host(env);
+  return { rpId: h.rpId, origin: h.origin, name: BRAND.name };
 }
 
-/** where a person signs in to approve: the product's host once the account has a passkey there, else the old host */
-export async function appOrigin(env, accountId, known) {
-  const list = hosts(env);
-  if (list.length === 1) return list[0].origin;
-  const hasNew = known ?? !!(await env.DB.prepare('SELECT 1 AS x FROM passkeys WHERE account_id = ? AND rp_id = ? LIMIT 1').bind(accountId, list[0].rpId).first());
-  return hasNew ? list[0].origin : list[1].origin;
-}
-
-/** the RP ID a stored passkey belongs to: recorded since the move; before it, the host that was then the only one */
-export const passkeyRpId = (env, pk) => pk.rp_id || (env.LEGACY_RP_ID && env.LEGACY_ORIGIN ? env.LEGACY_RP_ID : hosts(env)[0].rpId);
+/** where a person signs in to approve */
+export const appOrigin = (env) => host(env).origin;
 
 async function newChallenge(env, kind, accountId = null, name = null) {
   const id = randomId(), challenge = b64u(rand(32));
@@ -82,8 +55,6 @@ async function takeChallenge(env, id, kind) {
 }
 
 export async function registerBegin(env, body) {
-  // new accounts are made on the product's host only; the old host keeps sign-in for the passkeys it already has
-  if (rp(env).legacy) throw new HttpError(403, 'register_on_new_host', `Create your account at ${hosts(env)[0].origin}/app.`);
   const name = str(body.name, 'name', { max: 60, re: /^[\p{L}\p{N} ._'-]+$/u });
   const { id, challenge } = await newChallenge(env, 'register', null, name);
   const userId = b64u(rand(16));
@@ -102,7 +73,6 @@ export async function registerBegin(env, body) {
 }
 
 export async function registerFinish(env, body, request) {
-  if (rp(env).legacy) throw new HttpError(403, 'register_on_new_host', `Create your account at ${hosts(env)[0].origin}/app.`);
   const ch = await takeChallenge(env, body.challengeId, 'register');
   const r = rp(env);
   const c = await verifyRegistration(body.credential || {}, { challenge: ch.challenge, origin: r.origin, rpId: r.rpId });
@@ -141,8 +111,9 @@ export async function verifyPasskey(env, cred, challenge, who = null) {
   if (!pk || (accountId && pk.account_id !== accountId)) throw new HttpError(401, 'unknown_passkey', `That passkey is not linked to this ${BRAND.name} account. If you made more than one account, pick the passkey you created for the one you are signed in to.`);
   if (memberId && (pk.member_id || pk.account_id) !== memberId) throw new HttpError(401, 'unknown_passkey', 'That passkey belongs to another person on this team. Use your own passkey.');
   const r = rp(env);
-  // a passkey only ever works on the host (RP ID) it was made for; the authenticator data proves it too
-  if (passkeyRpId(env, pk) !== r.rpId) throw new HttpError(401, 'unknown_passkey', `That passkey belongs to ${hosts(env).find((h) => h.rpId === passkeyRpId(env, pk))?.origin || 'another host'}. Sign in there.`);
+  // a passkey only ever works for the RP ID it was made for (one made on the retired leash.gautamkhosla.com never works
+  // here); the authenticator data proves it too
+  if (pk.rp_id && pk.rp_id !== r.rpId) throw new HttpError(401, 'unknown_passkey', 'That passkey was made for another host and cannot sign in here.');
   const count = await verifyAssertion(cred, { challenge, origin: r.origin, rpId: r.rpId, alg: pk.alg, jwk: JSON.parse(pk.jwk), signCount: pk.sign_count });
   await env.DB.prepare('UPDATE passkeys SET sign_count = ?, last_used = ? WHERE cred_id = ?').bind(count, now(), pk.cred_id).run();
   return pk;
@@ -256,10 +227,8 @@ export async function deviceStart(env, request, from = whereFrom(null)) {
   await env.DB.prepare('INSERT INTO device_codes (device_hash, user_code, expires_at, created_at, country, network, asn) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .bind(await sha256hex(device), user, now() + DEVICE_TTL, now(), from.country, from.network, from.asn).run();
   // verification_uri is the plain page: the code is typed there, never carried in a link (no verification_uri_complete).
-  // Always the product's host, where accounts are made (the published leashcli 0.1.1 calls the old host by default, and
-  // an account made on counterseal cannot sign in there); a code works on either host, and the page on the product's
-  // host tells people whose account is still on the old host to type it there.
-  return { device_code: device, user_code: user, verification_uri: `${hosts(env)[0].origin}/app#device`, interval: DEVICE_INTERVAL, expires_in: DEVICE_TTL / 1000 };
+  // Always the one host.
+  return { device_code: device, user_code: user, verification_uri: `${host(env).origin}/app#device`, interval: DEVICE_INTERVAL, expires_in: DEVICE_TTL / 1000 };
 }
 async function pendingCode(env, code) {
   const row = await env.DB.prepare('SELECT * FROM device_codes WHERE user_code = ?').bind(code).first();

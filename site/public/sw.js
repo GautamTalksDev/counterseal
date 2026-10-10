@@ -145,7 +145,6 @@ self.addEventListener('push', (e) => {
           // a held Stripe refund or payout leads with its amount (Counterseal wrote that line itself, from the request)
           body = `${typeof h.headline === 'string' && h.headline ? h.headline + '\n' : ''}${h.path}\n${h.why}${seals}${holds.length > 1 ? `\n+${holds.length - 1} more waiting` : ''}\nTap to review. Approving needs your passkey in the app.`;
           tag = 'leash-' + h.id; url = '/app#hold=' + h.id;
-          // after the move, the approve link points at the host where this account has a passkey (the server says which)
           if (typeof h.approve_url === 'string' && appUrl(h.approve_url)) url = h.approve_url;
         }
       }

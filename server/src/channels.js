@@ -106,7 +106,7 @@ export const sealText = ({ seals, needs, url }) => `Counterseal: a held action h
 
 /** the one call the three places that hold something make, after their phone alert (and under the same one-a-minute limit) */
 export async function holdAlert(env, accountId, { who, rule, needs, holdId }) {
-  const url = `${await appOrigin(env, accountId)}/app#hold=${holdId}`;
+  const url = `${appOrigin(env)}/app#hold=${holdId}`;
   return announce(env, accountId, holdText({ who, rule, needs, seals: 0, url }));
 }
 

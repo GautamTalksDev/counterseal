@@ -19,7 +19,7 @@
 // GitHub's key set is fetched at most every 10 minutes per isolate, and a request that is refused writes nothing at all.
 import { HttpError, json, b64u, rand, randomId, sha256hex, now, str, cleanText } from './util.js';
 import { audit } from './audit.js';
-import { newChallenge, takeChallenge, checkAssertion, appOrigin, hosts, rp } from './auth.js';
+import { newChallenge, takeChallenge, checkAssertion, appOrigin, host, rp } from './auth.js';
 import { limit, readLimit, allow } from './ratelimit.js';
 import { notify } from './push.js';
 import { PENDING_PER_ACCOUNT, MAX_LIVE_TOKENS } from './broker.js';
@@ -53,7 +53,7 @@ const OIDC_BEARER = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/;
 
 /** the audience a gate's tokens must carry: this service's product host and the gate, so a token made for one gate (or
  *  for another service) is no use at any other */
-export const audienceFor = (env, gateId) => `${hosts(env)[0].origin}/gate/${gateId}`;
+export const audienceFor = (env, gateId) => `${host(env).origin}/gate/${gateId}`;
 
 /** Freeze (src/brakes.js): while the owner has the account frozen nothing new is asked, a wait ends at once with this
  *  answer, and no approval is spent. Same code and status as every other frozen answer (423 account_frozen). */
@@ -134,7 +134,7 @@ function gateView(g) {
 
 export async function listGates(env, sess) {
   const r = await env.DB.prepare('SELECT g.*, c.provider AS credential_provider, c.label AS credential_label FROM gates g LEFT JOIN credentials c ON c.id = g.credential_id AND c.account_id = g.account_id WHERE g.account_id = ? ORDER BY g.created_at DESC LIMIT 100').bind(sess.accountId).all();
-  return { gates: r.results.map(gateView), server: hosts(env)[0].origin };
+  return { gates: r.results.map(gateView), server: host(env).origin };
 }
 
 /** revoking only tightens, so any signed-in session of its maker or an owner may (anyone else who sees trouble freezes the
@@ -206,7 +206,7 @@ export async function request(c) {
   const facts = { gate: g.id, repository: claims.repository, repository_id: claims.repository_id, owner_id: claims.repository_owner_id, ref: claims.ref, sha: claims.sha, workflow_ref: claims.workflow_ref, job_workflow_ref: claims.job_workflow_ref, environment: claims.environment, run_id: claims.run_id, run_attempt: claims.run_attempt, check_run_id: claims.check_run_id };
   const hash = await gateHash(facts);
   const tokenId = tokenIdOf(g.id);
-  const url = async (id) => `${await appOrigin(env, g.account_id)}/app#hold=${id}`;
+  const url = async (id) => `${appOrigin(env)}/app#hold=${id}`;
   const rule = bind ? 'gate.bind' : 'gate.deploy';
   let hold = await env.DB.prepare("SELECT id, status, expires_at FROM holds WHERE token_id = ? AND req_hash = ? AND status IN ('approved','pending') AND expires_at > ? ORDER BY status = 'approved' DESC, created_at DESC LIMIT 1").bind(tokenId, hash, t).first();
   let created = false;

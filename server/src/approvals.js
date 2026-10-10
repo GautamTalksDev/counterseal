@@ -153,7 +153,7 @@ export async function create(c) {
   if (pv.length > MAX_PREVIEW) throw new HttpError(400, 'bad_detail', 'detail has too many invisible or control characters to show.');
   const tokenId = guardTokenId(k.id);
   const hash = await approvalHash(r.kind, r.agent, r.detail, r.cwd);
-  const url = async (id) => `${await appOrigin(env, k.account_id)}/app#hold=${id}`;
+  const url = async (id) => `${appOrigin(env)}/app#hold=${id}`;
   const found = await env.DB.prepare("SELECT id, status, expires_at FROM holds WHERE token_id = ? AND req_hash = ? AND status IN ('approved','pending') AND expires_at > ? ORDER BY status = 'approved' DESC, created_at DESC LIMIT 1")
     .bind(tokenId, hash, t).first();
   if (found) {

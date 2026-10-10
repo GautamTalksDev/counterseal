@@ -152,7 +152,7 @@ test('the dashboard\'s background refresh: nothing while the page is hidden, one
   const get = async (p) => (await w.req('GET', p, { cookie: u.cookie })).body;
   const me = await get('/v1/me'), alerts = await get('/v1/alerts');
   const p = await page({
-    'GET /v1/me': async () => [200, me], 'GET /v1/meta': async () => [200, { providers: [], app: 'https://leash.test', legacyApp: null }], 'GET /v1/credentials': async () => [200, { credentials: [] }],
+    'GET /v1/me': async () => [200, me], 'GET /v1/meta': async () => [200, { providers: [], app: 'https://leash.test' }], 'GET /v1/credentials': async () => [200, { credentials: [] }],
     'GET /v1/tokens': async () => [200, { tokens: [] }], 'GET /v1/holds': async () => [200, { holds: [] }], 'GET /v1/audit': async () => [200, { entries: [] }], 'GET /v1/agent-keys': async () => [200, { agentKeys: [] }],
     'GET /v1/push/key': async () => [200, { enabled: false }], 'GET /v1/team': async () => [200, await get('/v1/team')], 'GET /v1/alerts': async () => [200, alerts],
   });

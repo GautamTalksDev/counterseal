@@ -70,7 +70,7 @@ async function fixtures({ summary = 'deploy a1b2c3d to production', claims = {} 
   return { w, gh, u, g, r, holds: await get('/v1/holds'), gates: await get('/v1/gates'), me: await get('/v1/me') };
 }
 const baseRoutes = (f, over = {}) => ({
-  'GET /v1/me': async () => [200, f.me], 'GET /v1/meta': async () => [200, { providers: [], app: 'https://leash.test', legacyApp: null }], 'GET /v1/credentials': async () => [200, { credentials: [{ id: 'c'.repeat(24), provider: 'github', label: 'deploy key', hint: 'DDDD', created_at: 1 }] }],
+  'GET /v1/me': async () => [200, f.me], 'GET /v1/meta': async () => [200, { providers: [], app: 'https://leash.test' }], 'GET /v1/credentials': async () => [200, { credentials: [{ id: 'c'.repeat(24), provider: 'github', label: 'deploy key', hint: 'DDDD', created_at: 1 }] }],
   'GET /v1/tokens': async () => [200, { tokens: [] }], 'GET /v1/holds': async () => [200, f.holds], 'GET /v1/audit': async () => [200, { entries: [] }], 'GET /v1/agent-keys': async () => [200, { agentKeys: [] }],
   'GET /v1/push/key': async () => [200, { enabled: false }], 'GET /v1/gates': async () => [200, f.gates], ...over,
 });

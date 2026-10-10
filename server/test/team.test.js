@@ -938,10 +938,10 @@ test('roles on every route: a viewer reads and denies; a member makes keys but c
   assert.equal(rf.status, 401); assert.equal(rf.body.error, 'unknown_passkey');
 });
 
-test('CSRF and hosts: team changes need the host\'s own Origin and the x-leash header, on both hosts; invites are opened and joined on the product\'s host only', async () => {
+test('CSRF and hosts: team changes need the one host\'s Origin and the x-leash header; invites are opened and joined on that host only', async () => {
   const NEW = 'https://counterseal.test', OLD = 'https://leash.test';
   const w = new World();
-  Object.assign(w.env, { ORIGIN: NEW, RP_ID: 'counterseal.test', LEGACY_ORIGIN: OLD, LEGACY_RP_ID: 'leash.test' });
+  Object.assign(w.env, { ORIGIN: NEW, RP_ID: 'counterseal.test' });
   const auth = new Authenticator(NEW, 'counterseal.test');
   const rb = await w.req('POST', NEW + '/v1/auth/register/begin', { origin: NEW, body: { name: 'Owner' } });
   const rf = await w.req('POST', NEW + '/v1/auth/register/finish', { origin: NEW, body: { challengeId: rb.body.challengeId, credential: await auth.create(rb.body.options) } });
@@ -958,10 +958,10 @@ test('CSRF and hosts: team changes need the host\'s own Origin and the x-leash h
   assert.equal(f.status, 200, JSON.stringify(f.body));
   assert.ok(f.body.url.startsWith(NEW + '/app#invite='), 'the link is always on the product\'s host');
   const token = tokenOf(f);
-  // the public join routes check the Origin too, and refuse the old host
+  // the public join routes check the Origin too: only the one host's
   assert.equal((await w.req('POST', NEW + '/v1/invites/lookup', { origin: OLD, body: { token } })).body.error, 'csrf');
-  assert.equal((await w.req('POST', OLD + '/v1/invites/lookup', { origin: OLD, body: { token } })).body.error, 'invite_on_new_host');
-  assert.equal((await w.req('POST', OLD + '/v1/invites/begin', { origin: OLD, body: { token, name: 'Ben' } })).body.error, 'invite_on_new_host');
+  assert.equal((await w.req('POST', OLD + '/v1/invites/lookup', { origin: OLD, body: { token } })).body.error, 'csrf');
+  assert.equal((await w.req('POST', OLD + '/v1/invites/begin', { origin: OLD, body: { token, name: 'Ben' } })).body.error, 'csrf');
   const m = await join(w, token, 'Ben', { host: NEW, origin: NEW, rpId: 'counterseal.test' });
   assert.equal(m.status, 200, JSON.stringify(m.body)); assert.equal(m.role, 'approver');
   assert.equal(w.env.DB.raw.prepare('SELECT rp_id FROM passkeys WHERE member_id = ?').get(m.member).rp_id, 'counterseal.test');

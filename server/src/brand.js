@@ -15,12 +15,11 @@ export const BRAND = {
   tagline: 'Every irreversible action gets a second seal.',
   // the line for the Record part (decided 9 Oct 2026)
   recordLine: 'If it was recorded, you can prove it.',
-  // Where the product lives. The old host (legacyDomain) keeps serving /v1 and /p exactly as before (the published CLI
-  // refuses redirects) and /app for the passkeys made there, and redirects every other page here (docs/DEPLOY.md).
-  // The hosts the server accepts are set by ORIGIN / RP_ID and LEGACY_ORIGIN / LEGACY_RP_ID in wrangler.jsonc.
+  // Where the product lives: the one host (ORIGIN / RP_ID in wrangler.jsonc). The retired host (retiredDomain) answers
+  // every request with a 301 to the same path here and serves nothing else (src/index.js, docs/DEPLOY.md).
   domain: 'counterseal.gautamkhosla.com',
   origin: 'https://counterseal.gautamkhosla.com',
-  legacyDomain: 'leash.gautamkhosla.com',
+  retiredDomain: 'leash.gautamkhosla.com',
   // npm. The CLI was published as leashcli (0.1.1); from 0.3.0 it is the counterseal package (not published yet).
   // cli and cliPlanned are rebrand keys (whole-value text replacement); install lines follow cliInstall below.
   cli: 'leashcli',

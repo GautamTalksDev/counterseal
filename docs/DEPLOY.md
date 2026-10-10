@@ -45,10 +45,11 @@ npx -y wrangler@4 deploy
 ```
 
 Existing secrets stay as they are: `LEASH_KEK`, `IP_SALT`, `VAPID_PRIVATE_JWK`. Workers Logs are turned off in
-`wrangler.jsonc` (`observability.enabled: false`); the deploy applies that. The deploy also adds the custom domain
-counterseal.gautamkhosla.com (DNS record included) next to leash.gautamkhosla.com, and switches `ORIGIN` / `RP_ID` to
-counterseal with leash as `LEGACY_ORIGIN` / `LEGACY_RP_ID` (see "Two hosts" below). The live data (3 accounts, 1 passkey
-on 9 Oct 2026) keeps working on leash.gautamkhosla.com, and each account can move with the link described below.
+`wrangler.jsonc` (`observability.enabled: false`); the deploy applies that. Both custom domains stay in `routes`
+(counterseal.gautamkhosla.com and leash.gautamkhosla.com); `ORIGIN` / `RP_ID` are counterseal, the one host, and
+leash.gautamkhosla.com answers every request with a 301 to the same path on counterseal (see "One host" below). No
+table, column or account is removed: accounts whose only passkey was made on leash.gautamkhosla.com stay in D1 but can
+no longer sign in (deleting them is a separate decision).
 
 Then check:
 
@@ -59,9 +60,9 @@ curl -s https://counterseal.gautamkhosla.com/.well-known/security.txt
 curl -s -H "authorization: Bearer $STATS_TOKEN" https://counterseal.gautamkhosla.com/v1/admin/stats
 ```
 
-and in the app: on https://leash.gautamkhosla.com/app sign in with the existing passkey, see the existing tokens and
-holds, approve a test hold, then use Account, "Move with passkey" and finish on https://counterseal.gautamkhosla.com/app.
-Check that https://leash.gautamkhosla.com/ answers 301 to counterseal and that `npx counterseal holds` (0.1.1) still works.
+and in the app: on https://counterseal.gautamkhosla.com/app sign in, see your tokens and holds and approve a test hold.
+Check that `curl -sI https://leash.gautamkhosla.com/app`, `.../v1/meta` and `.../p/github/user` all answer 301 with
+`location: https://counterseal.gautamkhosla.com/...` (same path).
 Run `npx counterseal login` (0.1.1): it prints `.../app#device` and a code; type the code in the app, check that the
 approval screen shows your country and network, approve, and see the "A command line was signed in" alert and the
 sign-in under Account, Command line sign-ins.
@@ -95,7 +96,7 @@ npx -y wrangler@4 deploy
 ```
 
 `routes`, `RP_ID` and `ORIGIN` in `wrangler.jsonc` name the domain users see (the passkey RP ID must be that domain);
-leave out `LEGACY_ORIGIN` and `LEGACY_RP_ID` for a single host.
+`BRAND.retiredDomain` in `server/src/brand.js` is the hostname that only redirects (drop its route on a fork).
 Without `VAPID_PRIVATE_JWK`, phone alerts are off. Without `LOG_KEY_JWK`, the broker works and receipts are skipped.
 
 ## Settings (vars in wrangler.jsonc)
@@ -262,39 +263,26 @@ The audit chain is verified in the browser, never on the server: re-hashing a lo
 
 These are Node numbers, not a load test on Workers. Run one before raising the batch caps in `server/src/receipts.js`.
 
-## Two hosts: counterseal.gautamkhosla.com and leash.gautamkhosla.com
+## One host: counterseal.gautamkhosla.com (leash.gautamkhosla.com only redirects)
 
-The product lives at **counterseal.gautamkhosla.com**. `wrangler deploy` adds it as a custom domain and creates its DNS
-record (the zone gautamkhosla.com is already on the account); nothing has to be set up by hand. Both hostnames are
-`routes` in `wrangler.jsonc`, served by the same Worker and the same assets, so the CSP, HSTS and every other header are
-identical on both.
+The product lives at **counterseal.gautamkhosla.com**, the one origin and passkey RP ID (`ORIGIN`, `RP_ID`). Both
+hostnames stay custom domains in `routes`, served by the same Worker, so wrangler keeps the DNS record of the retired one.
 
 | | counterseal.gautamkhosla.com | leash.gautamkhosla.com |
 |---|---|---|
-| `/v1/*` API, `/p/*` proxy, `/.well-known/security.txt` | served | served exactly as before (the published CLI, leashcli 0.1.x, refuses redirects) |
-| `/app` (dashboard, sign-in, approvals) | served; new passkeys use RP ID `counterseal.gautamkhosla.com` | served for the passkeys made there (RP ID `leash.gautamkhosla.com`); sign-up is refused and points to counterseal |
-| Site pages (landing, docs, verify, tools, privacy, security, terms) | served | 301 to the same path and query on counterseal |
+| Every request: pages, assets, `/app`, `/v1/*`, `/p/*`, `/.well-known/*`, any method | served | 301 to the same path and query on counterseal, no body, with HSTS, `nosniff`, `referrer-policy: no-referrer`, `default-src 'none'; frame-ancestors 'none'` and `x-frame-options: DENY`; no cookie is read or set, nothing is proxied |
 
-- **Passkeys.** WebAuthn ceremonies accept exactly two origins (`ORIGIN`, `LEGACY_ORIGIN`), each with its own RP ID
-  (`RP_ID`, `LEGACY_RP_ID`), chosen by the request's Origin header (or, for the CLI and agents, the host they called).
-  A client never names an RP ID. A challenge issued on one host is refused on the other. Each passkey records its RP ID
-  (`passkeys.rp_id`; NULL means it was made before the move, on the old host).
-- **Sessions.** The `__Host-leash` cookie is host-only, so each host has its own browser sessions. CSRF checks accept a
-  write only from the same origin as the host it was sent to, and only from these two.
-- **Moving an account.** On the old host, Account, "Move with passkey" makes a one-time link (32 random bytes, only its
-  SHA-256 stored, single use, 10 minutes, 3 an hour per account, written to the audit log) to `counterseal/app#move=...`.
-  The token travels in the URL fragment and in POST bodies, never in a path, query, log line or Referer. On the new host
-  the person makes a new passkey that joins the same account. The old passkey keeps working on the old host until its
-  owner removes it (Account, Passkeys; never the last one).
-- **Approval links and phone alerts** point to counterseal once the account has a passkey there, and to the old host
-  until then.
-- **Pages added later** need their paths in `run_worker_first` (`server/test/domain.test.js` checks every page in
-  `site/public` is listed), or the old host serves them instead of redirecting. Unknown paths on the old host get the
-  404 page, not a redirect.
-- **A single host.** Without `LEGACY_ORIGIN` and `LEGACY_RP_ID` the Worker serves one host, as before the move (the
-  tests and `dev/local.js` run this way).
-- **Rollback note.** Rolling the code back to the version before the move makes `ORIGIN` the only host again; passkeys
-  made on counterseal then cannot sign in on the old host until the move is redeployed.
+- **Passkeys.** Every WebAuthn ceremony uses `RP_ID` and `ORIGIN`; a client never names an RP ID. A passkey whose
+  recorded `passkeys.rp_id` is another RP ID (one made on leash.gautamkhosla.com) is refused, and the authenticator data
+  proves the RP ID anyway. Such passkeys and their accounts stay in D1 (additive-only), unusable.
+- **Sessions.** The `__Host-leash` cookie is host-only. CSRF checks accept a write only with an Origin equal to `ORIGIN`.
+- **Assets.** `run_worker_first` is `true`, so the Worker sees every request and can redirect assets on the retired host
+  too; on counterseal it passes everything outside `/v1`, `/p` and `/.well-known` to the assets binding and adds the
+  site's security headers. Every asset request is therefore a Worker request (Workers Free: 100,000 a day).
+- **Old clients.** leashcli 0.1.1 defaults to leash.gautamkhosla.com and does not follow redirects, so it stops working
+  there; agents and tools configured with a leash.gautamkhosla.com base URL get a 301 and must be pointed at counterseal.
+- **Move links.** The "Move to Counterseal" flow is gone; the `move_links` table stays (additive-only), no new rows are
+  made, and old ones are swept a day after expiry and with their account.
 
 ## Publishing the CLI (publish first, then deploy)
 

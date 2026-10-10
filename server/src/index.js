@@ -17,7 +17,7 @@ import { LEDGER_ROUTES, PUBLIC_PATH, CORS, logOf, apiKey, cachedHead, quotaFor, 
 import { logKey } from './note.js';
 import { directoryTool } from './tools.js';
 import { stats, checkStatsToken, markSeen } from './admin.js';
-import * as Move from './move.js';
+import * as Passkeys from './passkeys.js';
 import * as Brakes from './brakes.js';
 import * as Team from './team.js';
 import * as Win from './windows.js';
@@ -30,10 +30,10 @@ const ID = '([0-9a-f]{24})';
 // the least role a signed-in route needs (src/team.js): reads are open to every member, writes default to MEMBER (a
 // viewer only reads and denies); the fifth element of a route overrides it
 const { viewer: ANY, member: MEMBER, approver: APPROVER, owner: OWNER } = Team.LEVEL;
-// on the old host, these stay (the dashboard and what it loads); /v1, /p and /.well-known are handled before this
-// (the installed app's icons, badge and shortcut icon, and the receipts SDK the evidence pack checks a checkpoint with)
-const KEEP_ON_OLD_HOST = /^\/(app(\/.*)?|sw\.js|manifest\.webmanifest|styles\.css|brand\.js|favicon\.svg|receipts-sdk\.js|(icon|badge|shortcut)-[a-z0-9-]+\.png|apple-touch-icon\.png|fonts\/.*)$/;
-const movedPermanently = (location) => new Response(null, { status: 301, headers: { location, 'cache-control': 'public, max-age=3600', 'strict-transport-security': 'max-age=63072000; includeSubDomains; preload', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } });
+// The retired host (BRAND.retiredDomain, leash.gautamkhosla.com): every request, whatever its method or path (pages,
+// /app, /v1, /p, /.well-known, assets), answers 301 to the same path and query on the one host, with security headers
+// and no body. Nothing on it is served, signed in to or proxied any more.
+const movedPermanently = (location) => new Response(null, { status: 301, headers: { location, 'cache-control': 'public, max-age=3600', 'strict-transport-security': 'max-age=63072000; includeSubDomains; preload', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'none'; frame-ancestors 'none'", 'x-frame-options': 'DENY' } });
 const DO_READS = /^\/v1\/(log\/(entries|proof\/)|my\/)/;
 // The site's security headers, the same as the "/*" block of site/public/_headers (server/test/second-pass.test.js
 // checks they match). Pages the Worker serves through env.ASSETS (every page listed in run_worker_first) may not get
@@ -67,7 +67,7 @@ const REG_PER_DAY = (env) => Number(env.REG_PER_IP_DAY) || 5;
 //   gate:  a GitHub Actions OIDC token (verified in the route, src/oidc.js); poll: a gate poll secret (gps_); both with a
 //          per-network limit in memory (GitHub's runners share networks, so it is generous), the routes add their own limits
 const ROUTES = [
-  ['GET', /^\/v1\/meta$/, 'public', (c) => ({ app: A.hosts(c.env)[0].origin, legacyApp: A.hosts(c.env)[1]?.origin || null, ...metaOf() })],
+  ['GET', /^\/v1\/meta$/, 'public', (c) => ({ app: A.host(c.env).origin, ...metaOf() })],
   ['POST', /^\/v1\/auth\/register\/begin$/, 'publicw', (c) => A.registerBegin(c.env, c.body)],
   ['POST', /^\/v1\/auth\/register\/finish$/, 'publicw', async (c) => {
     await limit(c.env.DB, await ipBucket(c.env, c.request, 'regday'), REG_PER_DAY(c.env), 86_400_000, now());
@@ -95,7 +95,7 @@ const ROUTES = [
   // 15 minutes, whether the account is frozen (and since when), and team events (someone joined; the quorum will be
   // lowered)
   ['GET', /^\/v1\/alerts$/, 'session', async (c) => ({
-    holds: (await B.listHolds(c.env, c.s, 'pending')).holds, signins: await A.recentCliSignins(c.env, c.s.accountId), passkeys: await Move.recentPasskeys(c.env, c.s.accountId),
+    holds: (await B.listHolds(c.env, c.s, 'pending')).holds, signins: await A.recentCliSignins(c.env, c.s.accountId), passkeys: await Passkeys.recentPasskeys(c.env, c.s.accountId),
     frozen_at: (await c.env.DB.prepare('SELECT frozen_at FROM accounts WHERE id = ?').bind(c.s.accountId).first())?.frozen_at ?? null,
     team: await Team.recentEvents(c.env, c.s.accountId),
   })],
@@ -118,8 +118,6 @@ const ROUTES = [
       team: Team.effective({ quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at }),
       // a break-glass window that is open (the app shows a banner with a countdown on every page)
       breakglass: await Win.listOpen(c.env, c.s.accountId),
-      // which host this is, and where the product lives (the app offers "Move to Counterseal" on the old host)
-      host: { here: A.rp(c.env).origin, legacy: A.rp(c.env).legacy, primary: A.hosts(c.env)[0].origin },
       // receipts numbers at the top level as well, as the receipts API always had them
       usage: u.usage, quota: c.env.UNLIMITED ? null : quotaFor(c.env),
       // the first-run checklist: what this account has done so far (times, or null)
@@ -169,15 +167,10 @@ const ROUTES = [
     await audit(c.env, c.s.accountId, 'web', 'receipts_off', who(c.s));
     return { ok: true, on: false };
   }, OWNER],
-  // the domain move: a one-time link from the old host, and a new passkey on the new host for the same person
-  ['POST', /^\/v1\/me\/move\/begin$/, 'webw', (c) => Move.linkBegin(c.env, c.s), ANY],
-  ['POST', /^\/v1\/me\/move\/finish$/, 'webw', (c) => Move.linkFinish(c.env, c.s, c.body), ANY],
-  ['POST', /^\/v1\/move\/begin$/, 'publicw', (c) => Move.registerBegin(c.env, c.body)],
-  ['POST', /^\/v1\/move\/finish$/, 'publicw', (c) => Move.registerFinish(c.env, c.body)],
-  ['GET', /^\/v1\/passkeys$/, 'session', (c) => Move.listPasskeys(c.env, c.s)],
+  ['GET', /^\/v1\/passkeys$/, 'session', (c) => Passkeys.listPasskeys(c.env, c.s)],
   // removing one of your own passkeys needs a fresh passkey ceremony and signs out your other web sessions
-  ['POST', new RegExp(`^/v1/passkeys/${ID}/remove/begin$`), 'webw', (c) => Move.removeBegin(c.env, c.s, c.m[1]), ANY],
-  ['POST', new RegExp(`^/v1/passkeys/${ID}/remove/finish$`), 'webw', (c) => Move.removeFinish(c.env, c.s, c.m[1], c.body), ANY],
+  ['POST', new RegExp(`^/v1/passkeys/${ID}/remove/begin$`), 'webw', (c) => Passkeys.removeBegin(c.env, c.s, c.m[1]), ANY],
+  ['POST', new RegExp(`^/v1/passkeys/${ID}/remove/finish$`), 'webw', (c) => Passkeys.removeFinish(c.env, c.s, c.m[1], c.body), ANY],
   ['GET', /^\/v1\/push\/key$/, 'session', (c) => Push.publicKey(c.env)],
   // alerts are a browser feature: only a web session adds, removes or tests a device (a stolen CLI session could
   // otherwise fill the account's 10 device slots, or learn when holds happen through a device of its own)
@@ -340,7 +333,8 @@ export async function handle(request, rawEnv, opts = {}) {
     if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(q);
     return q;
   };
-  const env = { ...rawEnv, __ctx: ctx ? { waitUntil } : undefined, __log: opts.log || rawEnv.__log, __rp: A.hostOf(rawEnv, request) };
+  if (url.hostname === BRAND.retiredDomain) return movedPermanently(A.host(rawEnv).origin + url.pathname + url.search);
+  const env = { ...rawEnv, __ctx: ctx ? { waitUntil } : undefined, __log: opts.log || rawEnv.__log };
   const isPublic = PUBLIC_PATH.test(url.pathname);
   try {
     if (url.pathname.startsWith('/.well-known/')) return wellKnown(url, request, env);
@@ -351,9 +345,6 @@ export async function handle(request, rawEnv, opts = {}) {
       return await B.proxy(env, request, pm[1], pm[2], opts.fetcher || fetch);
     }
     if (!url.pathname.startsWith('/v1/')) {
-      // the old host keeps /app (sign-in for its passkeys); every other page moves to the product's host
-      const here = A.hosts(env).find((h) => h.origin === url.origin);
-      if (here && here.legacy && !KEEP_ON_OLD_HOST.test(url.pathname)) return movedPermanently(A.hosts(env)[0].origin + url.pathname + url.search);
       return env.ASSETS ? withSiteHeaders(await env.ASSETS.fetch(request)) : json({ error: 'not_found' }, 404);
     }
     if (request.method === 'OPTIONS') {

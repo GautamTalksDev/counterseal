@@ -6,7 +6,7 @@ export const BRAND = {
   "recordLine": "If it was recorded, you can prove it.",
   "domain": "counterseal.gautamkhosla.com",
   "origin": "https://counterseal.gautamkhosla.com",
-  "legacyDomain": "leash.gautamkhosla.com",
+  "retiredDomain": "leash.gautamkhosla.com",
   "cli": "leashcli",
   "cliPlanned": "counterseal",
   "cliInstall": "counterseal",

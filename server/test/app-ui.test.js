@@ -15,7 +15,7 @@ function live(w, u, over = {}) {
   const fwd = (method, path) => async (body) => { const r = await w.req(method, path, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) }); return [r.status, r.body]; };
   const r = {};
   for (const p of ['/v1/me', '/v1/credentials', '/v1/tokens', '/v1/holds', '/v1/audit', '/v1/agent-keys', '/v1/team', '/v1/guard/keys', '/v1/push/key', '/v1/gates']) r['GET ' + p] = fwd('GET', p);
-  r['GET /v1/meta'] = async () => [200, { providers: [], app: 'https://leash.test', legacyApp: null }];
+  r['GET /v1/meta'] = async () => [200, { providers: [], app: 'https://leash.test' }];
   r['POST /v1/demo/call'] = fwd('POST', '/v1/demo/call');
   return { ...r, ...over };
 }
