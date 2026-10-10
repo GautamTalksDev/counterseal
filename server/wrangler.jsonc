@@ -2,7 +2,7 @@
   // Counterseal (internal name: leash): control API (/v1/*), agent proxy (/p/*), the public receipts log and the site, one Worker.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "leash",
-  "main": "src/index.js",
+  "main": "src/worker.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": false,
   // Two custom domains (wrangler adds the DNS records on deploy). counterseal.gautamkhosla.com is the product.
