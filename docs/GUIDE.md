@@ -133,6 +133,48 @@ general). They do not cap LLM tokens, and they do not cover SQL sent straight ov
 
 A token without `limits` and `money` costs no extra database writes. See the [policy reference](POLICY.md).
 
+# Counterseal CLI Reference
+
+All commands can be run with `npx counterseal`. Arguments in angle brackets are placeholders for values you supply.
+
+## Commands
+
+| Command | Arguments and flags | What it does |
+|---|---|---|
+| `login` | `[--server <url>]` | Signs this machine in through the browser and passkey approval. `--server` selects the Counterseal server. |
+| `logout` | None | Ends the session on the server when possible and signs this machine out locally. |
+| `add` | `<provider> [label] [--host <store-host>]` | Reads a provider API key without echoing it and stores it in the encrypted vault. Supported providers are `github`, `cloudflare`, `railway`, `stripe`, `supabase`, `vercel`, `neon`, `fly`, `resend`, and `shopify`; `--host` is for Shopify only. |
+| `creds` | None | Lists stored credentials and their metadata, including IDs, providers, labels, key hints, and hosts. |
+| `tokens` | None | Lists proxy tokens that have not been revoked. |
+| `token` | `[credentialId] [--label <label>] [--policy <file.json>] [--ttl <hours>] [--agent-key <id>]` | Creates a proxy token for a stored credential. The credential ID can be omitted when exactly one credential exists. Optional flags set its label, policy file, lifetime in hours, and agent-key binding. |
+| `revoke` | `<id>` | Revokes the proxy token identified by the supplied ID. |
+| `freeze` | None | Stops every agent token on the account. Unfreezing requires passkey approval in the app. |
+| `holds` | None | Lists held requests, including their IDs, methods, hosts, paths, and matching rules. |
+| `watch` | None | Checks for new holds every four seconds and prints each new hold with its approval link until you press `Ctrl+C`. |
+| `agent-key` | `[file] [--label <label>]` | Generates an Ed25519 agent key, saves the private key to the specified file (default: `agent-key.json`), and registers the public key. Existing files are not overwritten. |
+| `agent-keys` | None | Lists registered agent keys that have not been revoked. |
+| `mcp` | No command-line arguments; uses `LEASH_TOKENS` and optionally `LEASH_AGENT_KEY` | Starts the MCP server over standard input and output. Configure the environment variables with the provider's proxy token and, when required, the agent's private-key file path. |
+| `mcp wrap` | `--name <id> [--policy <file>] [--require-pin] -- <command> [args...]` | Runs a local MCP server behind Counterseal. Destructive tool calls wait for passkey approval, and changes to pinned tool definitions are held for review. `--policy` uses a policy file instead of the default one for this name. `--require-pin` refuses to start if the server has no pin yet. |
+| `mcp pin` | `--name <id> [--yes] [--policy <file>] [-- <command> [args...]]` | Pins the tool definitions the server shows now, after showing what changed and asking you to type `pin`. Without `-- <command>` it pins what the wrapper last saw and held for review. With a command it starts that server and lists its tools itself. `--yes` skips the question. If the policy sets `repin` to `passkey`, it waits for your passkey instead. |
+| `mcp unpin` | `--name <id>` | Removes the pin. The next run through `mcp wrap` pins whatever the server shows then. |
+| `mcp status` | `--name <id> [--check] [--policy <file>]` | Shows the pin, any tools waiting for review, the policy in effect and whether a guard key is set. `--check` also tests that the server is reachable and the key works. |
+| `mcp status` | `--name <id>` | Shows the status of the named MCP server's tool-definition pin. |
+| `guard install` | `[--agents claude-code,codex,cursor\|none] [--scope user\|project] [--paste-key] [--label <label>] [--dry-run]` | Installs the guard for the selected coding agents and configures its key. `--agents none` creates a key without installing hooks; `--paste-key` uses a key from the app, and `--dry-run` previews changes without writing them or creating a key. |
+| `guard uninstall` | `[--agents <list>] [--scope user\|project] [--keep-key] [--revoke-key]` | Removes the guard hooks for the selected agents. `--keep-key` preserves the local key configuration; `--revoke-key` requests key revocation when uninstalling selected agents. |
+| `guard status` | None | Checks the guard configuration, key, installed hook files, and server response, and reports problems. |
+| `guard check` | `[--cwd <dir>] [--json] -- <command>` | Checks a shell command against the local guard map without making a network request. `--cwd` specifies the working directory, and `--json` returns JSON output. |
+| `guard map` | `[--json]` | Lists the shell-command and MCP-tool rules used by the guard. `--json` outputs the rules as JSON. |
+| `help` | None | Prints the CLI usage summary. |
+| `--version` or `-v` | None | Prints the CLI version. |
+
+## Additional guard subcommands
+
+The current `cli/guard.mjs` source also implements these subcommands:
+
+| Command | Arguments and flags | What it does |
+|---|---|---|
+| `guard update-map` | None | Fetches the current API map from the server and saves it locally. |
+| `guard hook` | `--agent <claude-code\|codex\|cursor> [--mode wait\|retry]` | Processes the JSON input supplied on standard input by a coding agent's hook and returns the appropriate hook response. This is intended for agent-hook integration. |
 ### Two-person seal (teams)
 
 The counterseal in the literal sense: a second, different person seals what the first one approved. In this repo on
