@@ -351,6 +351,39 @@ test('two confirmations at once: one person in two browsers is counted once; two
   assert.equal((await w.req('DELETE', '/p/github/repos/acme/race', { bearer: h2.token, ...anon })).status, 200);
 });
 
+test('a seal cannot be replayed: not the same confirmation twice, not on another hold, not after the hold changed', async () => {
+  const w = new World();
+  const u = await founder(w);
+  const asha = await add(w, u, 'Asha');
+  await setQuorum(w, u, 2, true);
+  const cred = await vault(w, u);
+  const h = await heldCall(w, u, cred, '/repos/acme/one');
+  const h2 = await heldCall(w, u, cred, '/repos/acme/two');
+  const b = await w.req('POST', `/v1/holds/${h.hold}/approve/begin`, { cookie: u.cookie, body: {} });
+  const finish = { challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) };
+  // the confirmation for hold one cannot seal hold two (its challenge is bound to hold one)
+  const other = await w.req('POST', `/v1/holds/${h2.hold}/approve/finish`, { cookie: u.cookie, body: finish });
+  assert.equal(other.status, 400); assert.equal(other.body.error, 'challenge_expired');
+  // (that try used the challenge up: a challenge is taken once, whatever happens next)
+  assert.equal((await w.req('POST', `/v1/holds/${h.hold}/approve/finish`, { cookie: u.cookie, body: finish })).body.error, 'challenge_expired');
+  const b2 = await w.req('POST', `/v1/holds/${h.hold}/approve/begin`, { cookie: u.cookie, body: {} });
+  const ok = { challengeId: b2.body.challengeId, credential: await u.auth.get(b2.body.options) };
+  assert.equal((await w.req('POST', `/v1/holds/${h.hold}/approve/finish`, { cookie: u.cookie, body: ok })).body.seals, 1);
+  // the very same confirmation again: refused, and still one seal
+  assert.equal((await w.req('POST', `/v1/holds/${h.hold}/approve/finish`, { cookie: u.cookie, body: ok })).body.error, 'challenge_expired');
+  // an old signature on a new challenge does not verify
+  const b3 = await w.req('POST', `/v1/holds/${h2.hold}/approve/begin`, { cookie: u.cookie, body: {} });
+  const stale = await w.req('POST', `/v1/holds/${h2.hold}/approve/finish`, { cookie: u.cookie, body: { challengeId: b3.body.challengeId, credential: ok.credential } });
+  assert.equal(stale.status, 400); assert.equal(stale.body.error, 'bad_challenge', JSON.stringify(stale.body));
+  // a seal is bound to the request hash its approver began with: if the hold's request were not the one shown, it fails
+  const b4 = await w.req('POST', `/v1/holds/${h2.hold}/approve/begin`, { cookie: asha.cookie, body: {} });
+  w.env.DB.raw.prepare('UPDATE holds SET req_hash = ? WHERE id = ?').run('f'.repeat(64), h2.hold);
+  const changed = await w.req('POST', `/v1/holds/${h2.hold}/approve/finish`, { cookie: asha.cookie, body: { challengeId: b4.body.challengeId, credential: await asha.auth.get(b4.body.options) } });
+  assert.equal(changed.status, 409); assert.equal(changed.body.error, 'hold_changed');
+  assert.equal(count(w, 'SELECT COUNT(*) n FROM hold_votes WHERE hold_id = ?', h.hold), 1);
+  assert.equal(count(w, 'SELECT COUNT(*) n FROM hold_votes WHERE hold_id = ?', h2.hold), 0);
+});
+
 test('self-approval off: whoever made the token or guard key that asked cannot be one of the seals; turning it on waits 24 hours', async () => {
   const w = new World();
   const u = await founder(w);
