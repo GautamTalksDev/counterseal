@@ -352,7 +352,7 @@ published; until then run `cli/leash.mjs`):
   `{"key": "lsg_..."}` in `~/.config/leash/guard.json`, the file the coding-agent guard uses. Without one, a held call is
   refused with a message that says why; calls that are not held never touch Counterseal. A frozen account (Freeze)
   answers every held call with "Counterseal is frozen" and the agent is told not to retry. The wrapped server does not
-  receive the guard key. `--require-pin` refuses to start a server that has no pin yet.
+  receive the guard key. `--require-pin` refuses to start a server that has no pin yet. While a team's break-glass window is open, a held call is approved at once (the team opened the window with passkeys) and the wrapper says so on stderr.
 - **A seatbelt, not a sandbox.** The wrapper runs on the machine of the agent it guards, as the same user. It only sees
   what the client sends through it: an agent that can start the server another way, edit your client's MCP
   configuration, rewrite the pin or policy files, or call a tool the lists do not name is not stopped. Tool names and

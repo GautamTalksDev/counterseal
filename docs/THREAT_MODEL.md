@@ -582,7 +582,7 @@ can only ask anyway (S2, G1), but a server that spammed approvals would wear the
 
 **W7. Failing open.** No guard key, no network, a revoked key, a frozen account (423), a reply the wrapper does not
 understand, or a failure inside the wrapper: the call is not run and the model is told why in plain words (and, for Freeze,
-not to retry). Calls that are not held never wait for Counterseal.
+not to retry). Calls that are not held never wait for Counterseal. While a break-glass window is open (T12) the Approvals API answers an ask as approved at once; the wrapper uses it, once, and says so on stderr.
 
 **W8. Privacy.** The tool and its arguments are on the approval card (as for a command, G7); the summary (`<server>: <tool>`)
 can appear on a phone lock screen. Public receipts carry only `CALL mcp`, the decision, the rule id and the map version.

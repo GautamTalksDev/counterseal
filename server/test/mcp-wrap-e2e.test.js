@@ -520,3 +520,21 @@ test('end to end: pinning a server whose definitions have no single reading is r
     assert.match(st.stdout, /not pinned yet/);
   } finally { await t.done(); }
 });
+
+test('end to end: inside a break-glass window the held call is approved at once, once, and the person is told on stderr', async () => {
+  const t = await setup();
+  try {
+    const wr = new Wrapped(t);
+    await wr.handshake(); await wr.tools();
+    assert.match(await wr.text('delete_project', { id: 'before' }), /^Held by Counterseal/);
+    const b = await t.w.req('POST', '/v1/team/breakglass/begin', { cookie: t.u.cookie, body: { minutes: 30, reason: 'prod is down, second approver asleep' } });
+    assert.equal(b.status, 200, JSON.stringify(b.body));
+    const f = await t.w.req('POST', '/v1/team/breakglass/finish', { cookie: t.u.cookie, body: { minutes: 30, reason: 'prod is down, second approver asleep', challengeId: b.body.challengeId, credential: await t.u.auth.get(b.body.options) } });
+    assert.equal(f.status, 200, JSON.stringify(f.body));
+    assert.equal(await wr.text('delete_project', { id: 'during' }), ran('delete_project', { id: 'during' }), 'approved by the window, used at once');
+    assert.deepEqual(callsReceived(t).filter((c) => c.name === 'delete_project'), [{ name: 'delete_project', arguments: { id: 'during' } }]);
+    assert.match(wr.err, /delete_project was approved without a question: a break-glass window is open/);
+    assert.match(await wr.text('delete_project', { id: 'during' }), /^ran delete_project/, 'each call is asked afresh and the open window answers each');
+    await wr.end();
+  } finally { await t.done(); }
+});

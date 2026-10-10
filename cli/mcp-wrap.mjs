@@ -390,6 +390,8 @@ export class Gateway {
         if (c.status !== 200 && c.status !== 202) return { text: `${failureText(c)} ${tool} was not run.` };
         const r = readApproval(c.body);
         if (!r) return { text: `Counterseal sent an answer this wrapper does not understand, so ${tool} was not run.` };
+        // a break-glass window (the team opened it, with passkeys) approves at once: nobody is asked, and the person should see that on stderr
+        if (c.status === 200 && c.body.breakglass === true) this.log(`${tool} was approved without a question: a break-glass window is open on your Counterseal account`);
         this.asked.set(key, { id: r.id, hash: r.hash, url: r.url });
         if (c.status === 202 || r.status !== 'approved') return { text: heldText(tool, verdict.why, r.url) };
         a = { id: r.id, hash: r.hash, url: r.url };
