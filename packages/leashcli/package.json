@@ -1,6 +1,6 @@
 {
   "name": "leashcli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "The old name of the Counterseal CLI. It runs the counterseal package of the same version; new installs: npx counterseal",
   "type": "module",
   "bin": {
@@ -11,7 +11,7 @@
     "leash.mjs"
   ],
   "dependencies": {
-    "counterseal": "0.3.0"
+    "counterseal": "0.4.0"
   },
   "engines": {
     "node": ">=20"

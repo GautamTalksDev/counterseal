@@ -3,7 +3,7 @@
 All notable changes to Counterseal. The CLI follows [Semantic Versioning](https://semver.org/); the hosted service and
 the self-hosted Worker change together with this repository (see [docs/DEPLOY.md](docs/DEPLOY.md) for migrations).
 
-## Unreleased
+## 0.4.0 (2026-10-10)
 
 ### Fixed
 

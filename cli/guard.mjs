@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { classify, classifyTool, redact, canonicalJson, apiMapFromMeta, SHELL_MAP_VERSION, SHELL_RULES, TOOL_RULES } from './shellmap.mjs';
 
-export const GUARD_VERSION = '0.3.0';
+export const GUARD_VERSION = '0.4.0';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AGENTS = ['claude-code', 'codex', 'cursor'];
 const NOT_YET = ['copilot', 'gemini', 'antigravity'];
