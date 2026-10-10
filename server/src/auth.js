@@ -19,6 +19,9 @@ import { notify } from './push.js';
 
 // CLI sessions last 7 days (30 before migration 0005): a sign-in phished out of someone is a smaller prize, and nothing a
 // CLI session makes outlives it (see broker.js mintToken). Device codes last 5 minutes (RFC 8628 says "short").
+// A web session also ends after WEB_IDLE without an action of yours (a write, or a read the app marks as yours with
+// x-leash-active: 1; its background refresh is not one). OWASP ASVS 5.0 7.3.1 (inactivity) and 7.3.2 (absolute lifetime).
+export const WEB_IDLE = 60 * 60_000;
 export const WEB_TTL = 12 * 3600_000, CLI_TTL = 7 * 86400_000, CH_TTL = 5 * 60_000, DEVICE_TTL = 5 * 60_000, DEVICE_INTERVAL = 5;
 
 /** the allow list: the product's host first, then the old host if one is configured. Exactly these, nothing else. */
@@ -89,8 +92,11 @@ export async function registerBegin(env, body) {
     challengeId: id,
     options: {
       challenge, rp: { id: r.rpId, name: r.name }, user: { id: userId, name, displayName: name },
+      // ES256 first: what iCloud Keychain, Android and Windows Hello make. requireResidentKey: true is the WebAuthn Level 1
+      // spelling of residentKey: 'required', for older Safari and security keys that only read that one (both are sent).
+      // No attestation, so no browser shows an extra "allow this site to see your security key" prompt.
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-      authenticatorSelection: { residentKey: 'required', userVerification: 'required' }, attestation: 'none', timeout: 300000,
+      authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' }, attestation: 'none', timeout: 300000,
     },
   };
 }
@@ -155,8 +161,8 @@ export async function loginFinish(env, body) {
 
 export async function startWebSession(env, accountId, memberId = null) {
   const token = b64u(rand(32));
-  await env.DB.prepare('INSERT INTO sessions (hash, account_id, kind, created_at, expires_at, member_id) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(await sha256hex(token), accountId, 'web', now(), now() + WEB_TTL, memberId).run();
+  await env.DB.prepare('INSERT INTO sessions (hash, account_id, kind, created_at, expires_at, member_id, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(await sha256hex(token), accountId, 'web', now(), now() + WEB_TTL, memberId, now()).run();
   return { body: { ok: true }, cookie: `__Host-leash=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${WEB_TTL / 1000}` };
 }
 
@@ -183,12 +189,20 @@ export async function session(env, request, write) {
   const hash = await sha256hex(token);
   const s = await env.DB.prepare('SELECT s.*, m.id AS m_id, m.role AS m_role, m.removed_at AS m_removed, m.name AS m_name FROM sessions s LEFT JOIN members m ON m.id = COALESCE(s.member_id, s.account_id) AND m.account_id = s.account_id WHERE s.hash = ? AND s.kind = ?').bind(hash, kind).first();
   if (!s || s.expires_at < now()) throw new HttpError(401, 'signed_out');
+  if (kind === 'web' && (s.seen_at ?? s.created_at) < now() - WEB_IDLE) throw new HttpError(401, 'signed_out', 'Signed out after an hour without activity. Sign in again with your passkey.', { reason: 'idle' });
   // NULL member_id: written before teams existed, so the account's founder; the founder has no members row until the
   // team is first changed, and until then is the owner
   const memberId = s.member_id || s.account_id;
   const role = s.m_id ? (s.m_removed ? null : s.m_role) : memberId === s.account_id ? 'owner' : null;
   if (!role) throw new HttpError(401, 'signed_out');
-  return { accountId: s.account_id, kind, hash, expiresAt: s.expires_at, memberId, role, memberName: s.m_name || null };
+  return { accountId: s.account_id, kind, hash, expiresAt: s.expires_at, memberId, role, memberName: s.m_name || null, seenAt: s.seen_at ?? s.created_at };
+}
+
+/** an action of yours keeps a web session alive: written at most once a minute per session (src/index.js decides what
+ *  counts as an action) */
+export function touchSession(env, sess) {
+  if (sess.kind !== 'web' || sess.seenAt > now() - 60_000) return null;
+  return env.DB.prepare('UPDATE sessions SET seen_at = ? WHERE hash = ?').bind(now(), sess.hash).run();
 }
 
 /** a session's public id: derived from its stored hash, so it can be listed and revoked without exposing the hash, and
@@ -249,7 +263,7 @@ export async function deviceStart(env, request, from = whereFrom(null)) {
 }
 async function pendingCode(env, code) {
   const row = await env.DB.prepare('SELECT * FROM device_codes WHERE user_code = ?').bind(code).first();
-  if (!row || row.status !== 'pending' || row.expires_at < now()) throw new HttpError(404, 'code_not_found', 'That code is wrong or expired. Run leashcli login again and type the new code.');
+  if (!row || row.status !== 'pending' || row.expires_at < now()) throw new HttpError(404, 'code_not_found', 'That code is wrong or expired. Run counterseal login again and type the new code.');
   return row;
 }
 

@@ -3,6 +3,7 @@
 // browser"; the service worker then fetches the held request from LEASH over the user's own session and shows it.
 // Secret VAPID_PRIVATE_JWK (an ES256 private JWK) is set with `wrangler secret put`; without it push is simply off.
 import { HttpError, b64u, now, randomId } from './util.js';
+import { markFirst } from './trust.js';
 
 const MAX_SUBS = 10;
 // only real push services: an endpoint is a URL we will POST to, so it must never point anywhere else (SSRF)
@@ -52,6 +53,7 @@ export async function subscribe(env, sess, body) {
     if (dup) await env.DB.prepare('UPDATE push_subs SET account_id = ?, created_at = ?, last_ok_at = NULL, member_id = ? WHERE id = ?').bind(sess.accountId, now(), member, dup.id).run();
     else await env.DB.prepare('INSERT INTO push_subs (id, account_id, endpoint, created_at, member_id) VALUES (?, ?, ?, ?, ?)').bind(randomId(), sess.accountId, endpoint, now(), member).run();
   }
+  await markFirst(env, sess.accountId, 'alerts'); // the launch funnel's "alerts on" (one row, once)
   return { ok: true };
 }
 

@@ -22,6 +22,7 @@ import * as Brakes from './brakes.js';
 import * as Team from './team.js';
 import * as Win from './windows.js';
 import * as Ch from './channels.js';
+import * as T from './trust.js';
 import { BRAND } from './brand.js';
 export { ReceiptLog } from './log.js';
 
@@ -30,7 +31,8 @@ const ID = '([0-9a-f]{24})';
 // viewer only reads and denies); the fifth element of a route overrides it
 const { viewer: ANY, member: MEMBER, approver: APPROVER, owner: OWNER } = Team.LEVEL;
 // on the old host, these stay (the dashboard and what it loads); /v1, /p and /.well-known are handled before this
-const KEEP_ON_OLD_HOST = /^\/(app(\/.*)?|sw\.js|manifest\.webmanifest|styles\.css|brand\.js|favicon\.svg|icon-\d+\.png|fonts\/.*)$/;
+// (the installed app's icons, badge and shortcut icon, and the receipts SDK the evidence pack checks a checkpoint with)
+const KEEP_ON_OLD_HOST = /^\/(app(\/.*)?|sw\.js|manifest\.webmanifest|styles\.css|brand\.js|favicon\.svg|receipts-sdk\.js|(icon|badge|shortcut)-[a-z0-9-]+\.png|apple-touch-icon\.png|fonts\/.*)$/;
 const movedPermanently = (location) => new Response(null, { status: 301, headers: { location, 'cache-control': 'public, max-age=3600', 'strict-transport-security': 'max-age=63072000; includeSubDomains; preload', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } });
 const DO_READS = /^\/v1\/(log\/(entries|proof\/)|my\/)/;
 // The site's security headers, the same as the "/*" block of site/public/_headers (server/test/second-pass.test.js
@@ -105,9 +107,9 @@ const ROUTES = [
   ['POST', new RegExp(`^/v1/tokens/${ID}/reset/begin$`), 'webw', (c) => Brakes.resetBegin(c.env, c.s, c.m[1]), APPROVER],
   ['POST', new RegExp(`^/v1/tokens/${ID}/reset/finish$`), 'webw', (c) => Brakes.resetFinish(c.env, c.s, c.m[1], c.body), APPROVER],
   ['GET', /^\/v1\/me$/, 'session', async (c) => {
-    const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan, frozen_at, quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at FROM accounts WHERE id = ?').bind(c.s.accountId).first();
+    const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan, frozen_at, quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at, first_token_at, first_call_at, demo_at, installed_at, alerts_at, hold_days FROM accounts WHERE id = ?').bind(c.s.accountId).first();
     const u = await usageOf(c.env, c.s.accountId);
-    const { receipts, quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at, ...rest } = account || {};
+    const { receipts, quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at, first_token_at, first_call_at, demo_at, installed_at, alerts_at, hold_days, ...rest } = account || {};
     return {
       account: account ? rest : null, kind: c.s.kind,
       // who is signed in: on a team, one member with their own role (the account's founder: the account's id and name)
@@ -120,9 +122,30 @@ const ROUTES = [
       host: { here: A.rp(c.env).origin, legacy: A.rp(c.env).legacy, primary: A.hosts(c.env)[0].origin },
       // receipts numbers at the top level as well, as the receipts API always had them
       usage: u.usage, quota: c.env.UNLIMITED ? null : quotaFor(c.env),
+      // the first-run checklist: what this account has done so far (times, or null)
+      progress: { token: first_token_at ?? null, call: first_call_at ?? null, demo: demo_at ?? null, installed: installed_at ?? null, alerts: alerts_at ?? null },
+      retention: { holdDays: T.holdDaysOf(hold_days), choices: T.HOLD_DAYS, rules: T.RETENTION.map(([what, rule]) => ({ what, rule })) },
       receipts: { on: !!receipts, usage: u.usage, today: u.today, skipped: u.skipped, quota: c.env.UNLIMITED ? null : quotaFor(c.env), dayCap: c.env.UNLIMITED ? null : dayCapFor(c.env) },
     };
   }],
+  // the privacy center: download everything we keep about the account (an owner, a fresh passkey ceremony, 3 an hour,
+  // audited, never a secret) and how long closed holds are kept (an owner, in the app, audited)
+  ['POST', /^\/v1\/me\/export\/begin$/, 'webw', (c) => T.exportBegin(c.env, c.s), OWNER],
+  ['POST', /^\/v1\/me\/export\/finish$/, 'webw', (c) => T.exportFinish(c.env, c.s, c.body), OWNER],
+  ['POST', /^\/v1\/me\/retention$/, 'webw', (c) => T.setRetention(c.env, c.s, c.body), OWNER],
+  // the export's held requests and commands, page by page (a read, so no CSRF header is needed; still an owner in the app)
+  ['GET', /^\/v1\/export\/holds$/, 'session', (c) => {
+    if (c.s.kind !== 'web') throw new HttpError(403, 'passkey_required', `Download your data in the ${BRAND.name} app.`);
+    return T.exportHolds(c);
+  }, OWNER],
+  // the evidence pack: the audit chain page by page with the log's checkpoint, verified in the browser (reads only, like
+  // GET /v1/audit)
+  ['GET', /^\/v1\/export\/evidence$/, 'session', (c) => T.evidence(c)],
+  // the app reports once that it runs installed (a launch funnel count; one row written at most)
+  ['POST', /^\/v1\/me\/installed$/, 'write', (c) => T.installed(c.env, c.s), ANY],
+  // "Try a held call": a demo hold against the built-in demo provider; approving it is the real passkey ceremony, and
+  // nothing is proxied or sealed in the public log. Browser only.
+  ['POST', /^\/v1\/demo\/call$/, 'webw', (c) => T.demoCall(c), ANY],
   // deleting the account erases the whole team's data: an owner, with a fresh passkey ceremony
   ['POST', /^\/v1\/me\/delete\/begin$/, 'webw', (c) => deleteBegin(c.env, c.s), OWNER],
   ['POST', /^\/v1\/me\/delete\/finish$/, 'webw', (c) => deleteAccount(c.env, c.s, c.body), OWNER],
@@ -265,6 +288,7 @@ async function deleteAccount(env, s, body) {
   await env.DB.batch([
     ...deleteStatements(env.DB, id),
     ...Brakes.deleteStatements(env.DB, id), // their tokens' daily totals and breaker windows, before the tokens go
+    ...T.deleteStatements(env.DB, id), // rate limit rows that name the account
     // (gate_polls, gate_runs, windows and channels go with the account by their foreign keys: ON DELETE CASCADE)
     ...['push_subs', 'hold_votes', 'holds', 'guard_keys', 'gates', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes', 'invites', 'members'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
     env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id),
@@ -367,6 +391,9 @@ export async function handle(request, rawEnv, opts = {}) {
         Team.requireLevel(c.s, role ?? (guard === 'session' ? ANY : MEMBER));
         const seen = markSeen(env, c.s.accountId);
         if (seen) waitUntil(seen);
+        // an action of yours keeps a web session alive (an hour without one ends it, src/auth.js): any write, or a read the
+        // app sends as yours; its 5-second background refresh and the service worker's alert fetch are not actions
+        if (request.method !== 'GET' || request.headers.get('x-leash-active') === '1') { const t2 = A.touchSession(env, c.s); if (t2) waitUntil(t2); }
         // reads cost no D1 write for their limit; writes are counted in D1 so the limit holds across isolates
         if (guard === 'session') await readLimit(env, 'acct:' + c.s.accountId, 300, t);
         else await limit(env.DB, 'acct:' + c.s.accountId, 300, 60_000, t);
@@ -392,7 +419,7 @@ export async function handle(request, rawEnv, opts = {}) {
 
 // Expired rows are always rejected at read time; this only tidies them away. There is no cron (the account's five cron
 // triggers are used by other Workers): it runs on about 1 in 50 requests, and after sign-ins and sign-ups at most every
-// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 19 statements (D1 allows 50).
+// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 20 statements (D1 allows 50).
 export async function sweep(env, t = Date.now()) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM challenges WHERE expires_at < ?').bind(t),
@@ -416,6 +443,7 @@ export async function sweep(env, t = Date.now()) {
     env.DB.prepare('DELETE FROM windows WHERE expires_at < ?').bind(t - 7 * 86400_000),
     ...cleanupStatements(env.DB, t),
     ...Brakes.sweepStatements(env.DB, t), // breaker windows that ended, daily money totals older than 35 days
+    ...T.retentionStatements(env.DB, t), // closed holds past the account's retention (365 days unless it chose 30 or 90)
   ]);
 }
 let lastSweep = 0;

@@ -16,6 +16,7 @@ import * as Brakes from './brakes.js';
 import * as Team from './team.js';
 import * as Windows from './windows.js';
 import * as Channels from './channels.js';
+import { markLater } from './trust.js';
 
 const HOLD_TTL = 30 * 60_000, MAX_BODY = 1_048_576, MAX_RESP = 10 * 1_048_576;
 export const PENDING_PER_TOKEN = 20, PENDING_PER_ACCOUNT = 100, MAX_CREDENTIALS = 50, MAX_LIVE_TOKENS = 200, LIST_TOKENS = 500;
@@ -87,6 +88,7 @@ export async function mintToken(env, sess, body, byPasskey = false) {
   // member_id: who made it (with self-approval off, they cannot seal what it asks for; removing them revokes it)
   await env.DB.prepare('INSERT INTO tokens (id, account_id, credential_id, hash, label, policy, minted_by, expires_at, created_at, agent_key_id, session_id, member_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(id, sess.accountId, cred.id, await sha256hex(token), label, JSON.stringify(policy), byPasskey ? 'passkey' : sess.kind, expiresAt, now(), ak ? ak.id : null, cli, sess.memberId || null).run();
+  markLater(env, sess.accountId, 'token');
   await audit(env, sess.accountId, sess.kind, 'mint', { id, credential: cred.id, provider: cred.provider, label, hours, preapproved: policy.unattendedIrreversible.length, ...(ak ? { agent_key: ak.keyid } : {}), ...(cli ? { session: cli, expires_at: expiresAt } : {}) });
   return { id, token, provider: cred.provider, baseUrl: `${rp(env).origin}/p/${cred.provider}`, expiresAt, ...(ak ? { agentKey: ak.keyid } : {}), note: `Shown once. ${BRAND.name} keeps only a hash.${cli && expiresAt === sess.expiresAt ? ' It ends with this command line sign-in; make longer-lived tokens in the app.' : ''}` };
 }
@@ -170,7 +172,9 @@ export async function approveFinish(env, sess, holdId, body) {
   // team, also whose seal it was, and with two seals required, every seal (the public receipt gets only the counts)
   const who = sess.memberId && sess.memberId !== sess.accountId ? { member: sess.memberId } : {};
   const base = { hold: holdId, method: h.method, host: h.host, rule: h.rule, passkey: s.passkey, ...who, ...guardDetail(h) };
-  const guard = h.kind && h.kind !== 'proxy';
+  const guard = h.kind && h.kind !== 'proxy' && h.kind !== 'demo';
+  // the built-in demo (src/trust.js): the same ceremony and seals, but never a public decision or a receipt
+  const demo = h.kind === 'demo';
   if (!s.final) {
     // a seal that does not complete the quorum is private: no receipt until the hold is approved
     await audit(env, sess.accountId, 'web', 'approve_vote', { ...base, seals: s.votes.length, needs: s.need });
@@ -179,14 +183,15 @@ export async function approveFinish(env, sess, holdId, body) {
     Team.nudge(env, sess.accountId, sess.memberId, Channels.sealText({ seals: s.votes.length, needs: s.need, url: `${await appOrigin(env, sess.accountId)}/app#hold=${holdId}` }));
     return { ok: true, approved: false, seals: s.votes.length, needs: s.need, note: `Your seal is on (${s.votes.length} of ${s.need}). It needs ${s.need - s.votes.length} more from a different approver before the agent can go ahead.` };
   }
-  await audit(env, sess.accountId, 'web', 'approve', { ...base, ...(s.need > 1 ? { quorum: s.need, votes: s.votes } : {}) }, { receipts: s.receipts });
-  return { ok: true, approved: true, seals: s.votes.length, needs: s.need, note: !guard ? 'The agent can now retry the exact same request once, within 10 minutes.' : h.kind === 'deploy' ? 'The job can now go on, once, within 10 minutes.' : 'The agent can now run that exact command once, within 10 minutes.' };
+  await audit(env, sess.accountId, 'web', demo ? 'demo_approved' : 'approve', { ...base, ...(s.need > 1 ? { quorum: s.need, votes: s.votes } : {}) }, { receipts: demo ? false : s.receipts });
+  return { ok: true, approved: true, seals: s.votes.length, needs: s.need, note: demo ? 'Approved. The demo agent can now retry once, within 10 minutes. No public receipt is written for the demo.' : !guard ? 'The agent can now retry the exact same request once, within 10 minutes.' : h.kind === 'deploy' ? 'The job can now go on, once, within 10 minutes.' : 'The agent can now run that exact command once, within 10 minutes.' };
 }
 
 /** for a coding-agent approval: its kind, and the shell map version its receipts name; for a deploy: its kind, and the
  *  repository name only if the owner opted in for the gate (default off) */
 function guardDetail(h) {
   if (!h.kind || h.kind === 'proxy') return {};
+  if (h.kind === 'demo') return { kind: 'demo' };
   if (h.kind === 'deploy') return { kind: 'deploy', ...publicRepoOf(h.context) };
   const map = mapOf(h.context);
   return { kind: h.kind, ...(map ? { map } : {}) };
@@ -205,7 +210,7 @@ export async function denyHold(env, sess, holdId, body = {}) {
   const h = await env.DB.prepare("UPDATE holds SET status = 'denied', decided_at = ?, deny_reason = ? WHERE id = ? AND account_id = ? AND status = 'pending' RETURNING method, host, rule, kind, context").bind(now(), reason, holdId, sess.accountId).first();
   if (!h) throw new HttpError(404, 'not_found');
   const who = sess.memberId && sess.memberId !== sess.accountId ? { member: sess.memberId } : {};
-  await audit(env, sess.accountId, sess.kind, 'deny', { hold: holdId, method: h.method, host: h.host, rule: h.rule, by: sess.kind, ...who, ...(reason ? { reason } : {}), ...guardDetail(h) });
+  await audit(env, sess.accountId, sess.kind, h.kind === 'demo' ? 'demo_denied' : 'deny', { hold: holdId, method: h.method, host: h.host, rule: h.rule, by: sess.kind, ...who, ...(reason ? { reason } : {}), ...guardDetail(h) });
   return { ok: true };
 }
 
@@ -288,6 +293,8 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   }
   const seen = markSeen(env, tok.account_id);
   if (seen) { if (env.__ctx) env.__ctx.waitUntil(seen); else await seen; }
+  // the launch funnel's "first protected call" (one row, once; src/trust.js)
+  markLater(env, tok.account_id, 'call');
   const cred = await env.DB.prepare('SELECT * FROM credentials WHERE id = ? AND account_id = ?').bind(tok.credential_id, tok.account_id).first();
   if (!cred || cred.provider !== provider) throw new HttpError(403, 'wrong_provider', `This token is for ${cred ? cred.provider : 'another provider'}.`);
   const policy = JSON.parse(tok.policy);

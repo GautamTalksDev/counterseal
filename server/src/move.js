@@ -66,7 +66,7 @@ export async function registerBegin(env, body) {
     options: {
       challenge, rp: { id: r.rpId, name: r.name }, user: { id: b64u(rand(16)), name: l.name, displayName: l.name },
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-      authenticatorSelection: { residentKey: 'required', userVerification: 'required' }, attestation: 'none', timeout: 300000,
+      authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' }, attestation: 'none', timeout: 300000,
     },
   };
 }

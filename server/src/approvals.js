@@ -1,5 +1,5 @@
 // Approvals for actions the broker does not proxy: a coding agent's shell command or an MCP tool call. A hook on the
-// agent's machine (leashcli guard) holds a guard key (lsg_), asks here, and waits; the human approves in the app with a
+// agent's machine (counterseal guard) holds a guard key (lsg_), asks here, and waits; the human approves in the app with a
 // passkey, exactly as for a held API call (the same holds table, alerts, approve and deny routes, and public receipts).
 //
 // What a guard key can do: ask for an approval and read and use its own. Never approve (every approve route needs a web
@@ -23,6 +23,7 @@ import { BRAND } from './brand.js';
 import * as Team from './team.js';
 import * as Windows from './windows.js';
 import * as Channels from './channels.js';
+import { markLater } from './trust.js';
 
 export const AGENTS = ['claude-code', 'codex', 'cursor', 'copilot', 'gemini', 'antigravity', 'mcp'];
 /** the kinds a guard key may ask for, and the method word their holds and public receipts carry */
@@ -99,7 +100,7 @@ export async function guardKey(env, request) {
   if (!m) throw new HttpError(401, 'guard_key_required', `Send your ${BRAND.name} guard key as: Authorization: Bearer lsg_...`);
   const k = await env.DB.prepare('SELECT g.id, g.account_id, g.revoked, g.expires_at, g.last_used, g.member_id, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at, EXISTS (SELECT 1 FROM windows w WHERE w.account_id = g.account_id AND w.closed_at IS NULL AND w.expires_at > ' + Date.now() + ') AS window_open FROM guard_keys g JOIN accounts a ON a.id = g.account_id WHERE g.hash = ?')
     .bind(await sha256hex(m[1])).first();
-  if (!k || k.revoked || (k.expires_at !== null && k.expires_at <= now())) throw new HttpError(401, 'guard_key_invalid', 'This guard key was revoked or has ended. Make a new one in the app, or run leashcli guard install again.');
+  if (!k || k.revoked || (k.expires_at !== null && k.expires_at <= now())) throw new HttpError(401, 'guard_key_invalid', 'This guard key was revoked or has ended. Make a new one in the app, or run counterseal guard install again.');
   return k;
 }
 
@@ -184,6 +185,7 @@ export async function create(c) {
   }
   await audit(env, k.account_id, 'guard:' + k.id, 'hold', { method, host: r.agent, rule: r.rule, hold: id, kind: r.kind, agent: r.agent, preview_sha256: await sha256hex(pv || ''), ...(r.map ? { map: r.map } : {}), ...(bg ? { breakglass: bg.id } : {}) }, { receipts: !!k.receipts_on && !bg });
   touch(env, k, t, c.waitUntil);
+  markLater(env, k.account_id, 'call'); // the launch funnel's "first protected call"
   const seen = markSeen(env, k.account_id);
   if (seen) c.waitUntil(seen);
   // a window approved it: nobody is asked (the team was told when the window opened), and the answer is the approval

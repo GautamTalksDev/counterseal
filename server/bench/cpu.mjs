@@ -297,3 +297,19 @@ await measure('proxy DELETE held, with one alert channel (hold + push check + un
   clearLimits(); w.env.DB.raw.prepare("UPDATE holds SET status = 'denied' WHERE status = 'pending'").run();
   return request('DELETE', url('/repos/bg/h' + i), { bearer: plain });
 }, (s) => s === 428);
+// ---- the app, the first run and the privacy center (src/trust.js)
+await measure('demo hold ("Try a held call": hold, audit, alert check)', async () => {
+  clearLimits(); w.env.DB.raw.prepare("UPDATE holds SET status = 'denied' WHERE kind = 'demo' AND status = 'pending'").run();
+  return request('POST', '/v1/demo/call', { cookie: u.cookie, body: {}, headers: { origin: 'https://leash.test', 'x-leash': '1' } });
+});
+{
+  const { audit } = await import('../src/audit.js');
+  const acct = (await w.req('GET', '/v1/me', { cookie: u.cookie })).body.account.id;
+  for (let i = 0; i < 600; i++) await audit(w.env, acct, 'web', 'note', { i, path: '/repos/acme/app/' + 'x'.repeat(200) });
+}
+await measure('evidence pack, first page (250 audit entries as stored, checkpoint)', () => request('GET', '/v1/export/evidence', { cookie: u.cookie }));
+await measure('data export (every table but the audit log, passkey verify included)', async () => {
+  clearLimits();
+  const b = await w.req('POST', '/v1/me/export/begin', { cookie: u.cookie, body: {} });
+  return request('POST', '/v1/me/export/finish', { cookie: u.cookie, body: { challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) }, headers: { origin: 'https://leash.test', 'x-leash': '1' } });
+});

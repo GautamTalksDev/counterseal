@@ -276,7 +276,7 @@ export async function joinBegin(env, request, body) {
     options: {
       challenge, rp: { id: r.rpId, name: r.name }, user: { id: b64u(rand(16)), name, displayName: `${name} (${l.account})`.slice(0, 120) },
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], excludeCredentials: exclude,
-      authenticatorSelection: { residentKey: 'required', userVerification: 'required' }, attestation: 'none', timeout: 300000,
+      authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' }, attestation: 'none', timeout: 300000,
     },
   };
 }

@@ -2,6 +2,11 @@
 // Counts only: never an id, name, email, IP, path or key. 404 (as for any unknown route) when STATS_TOKEN is not set or
 // the token is wrong, so the endpoint does not even show that it exists. Twelve aggregate queries and one cached
 // Durable Object read; no writes.
+//
+// The launch funnel (`funnel`): accounts that made a token, made a first protected call, tried the demo, run the app
+// installed, and turned alerts on, in total and by UTC day for 30 days. The by-day numbers come from the first-time
+// markers of migration 0012 (src/trust.js); the totals also count older evidence (any token made, a token or guard key
+// ever used, an alert device), so accounts from before the markers are not lost.
 import { HttpError, sha256, eqBytes, now } from './util.js';
 
 const DAY = 86_400_000;
@@ -17,20 +22,25 @@ export async function checkStatsToken(env, request) {
 export async function stats(env, head) {
   const t = now(), d1 = t - DAY, d7 = t - 7 * DAY, d30 = t - 30 * DAY;
   const one = (sql, ...a) => env.DB.prepare(sql).bind(...a).first();
-  const [accounts, byDay, tokens, keys, audit, holds, push, receipts, guardKeys, kinds, teams, gates] = await Promise.all([
-    one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last24h, SUM(created_at > ?) AS last7d, SUM(last_seen > ?) AS active7d, SUM(receipts = 1) AS receiptsOn, SUM(plan != \'free\') AS paid FROM accounts', d1, d7, d7),
+  const [accounts, byDay, tokens, keys, audit, holds, receipts, guardKeys, kinds, teams, gates, firsts] = await Promise.all([
+    one(`SELECT COUNT(*) AS total, SUM(created_at > ?1) AS last24h, SUM(created_at > ?2) AS last7d, SUM(last_seen > ?2) AS active7d, SUM(receipts = 1) AS receiptsOn, SUM(plan != 'free') AS paid,
+      SUM(first_call_at IS NOT NULL OR EXISTS (SELECT 1 FROM tokens t WHERE t.account_id = accounts.id AND t.last_used IS NOT NULL) OR EXISTS (SELECT 1 FROM guard_keys g WHERE g.account_id = accounts.id AND g.last_used IS NOT NULL)) AS called,
+      SUM(demo_at IS NOT NULL) AS demo, SUM(installed_at IS NOT NULL) AS installed,
+      SUM(alerts_at IS NOT NULL OR EXISTS (SELECT 1 FROM push_subs p WHERE p.account_id = accounts.id)) AS alerts,
+      SUM(installed_at IS NOT NULL OR alerts_at IS NOT NULL OR EXISTS (SELECT 1 FROM push_subs p WHERE p.account_id = accounts.id)) AS appOrAlerts FROM accounts`, d1, d7),
     env.DB.prepare("SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n FROM accounts WHERE created_at > ? GROUP BY day ORDER BY day").bind(d30).all(),
-    one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last7d, SUM(agent_key_id IS NOT NULL) AS bound FROM tokens', d7),
+    one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last7d, SUM(agent_key_id IS NOT NULL) AS bound, COUNT(DISTINCT account_id) AS accounts FROM tokens', d7),
     one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last7d FROM agent_keys', d7),
     env.DB.prepare("SELECT action, COUNT(*) AS total, SUM(at > ?) AS last7d FROM audit WHERE action IN ('hold', 'approve', 'deny', 'proxy', 'proxy_approved', 'run_approved', 'gate_passed', 'cli_signin_approved', 'agent_signature_failed') GROUP BY action").bind(d7).all(),
     one("SELECT COUNT(*) AS pending FROM holds WHERE status = 'pending' AND expires_at > ?", t),
-    one('SELECT COUNT(*) AS total FROM push_subs'),
     env.DB.prepare('SELECT day, receipts FROM global_usage WHERE day >= ? ORDER BY day').bind(new Date(d30).toISOString().slice(0, 10)).all(),
     one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last7d, SUM(revoked = 0) AS active FROM guard_keys', d7),
     env.DB.prepare('SELECT kind, COUNT(*) AS n FROM holds WHERE created_at > ? GROUP BY kind').bind(d7).all(),
     // two-person seal: accounts with more than one person, the people on them, and accounts that require two seals
-    one('SELECT (SELECT COUNT(DISTINCT account_id) FROM members WHERE removed_at IS NULL AND id != account_id) AS teams, (SELECT COUNT(*) FROM members WHERE removed_at IS NULL) AS members, (SELECT COUNT(*) FROM accounts WHERE quorum >= 2) AS quorum2, (SELECT COUNT(*) FROM windows WHERE opened_at > ?) AS windows7d, (SELECT COUNT(*) FROM channels) AS channels', d7),
+    one('SELECT (SELECT COUNT(DISTINCT account_id) FROM members WHERE removed_at IS NULL AND id != account_id) AS teams, (SELECT COUNT(*) FROM members WHERE removed_at IS NULL) AS members, (SELECT COUNT(*) FROM accounts WHERE quorum >= 2) AS quorum2, (SELECT COUNT(*) FROM windows WHERE opened_at > ?) AS windows7d, (SELECT COUNT(*) FROM channels) AS channels, (SELECT COUNT(*) FROM push_subs) AS pushTotal', d7),
     one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last7d, SUM(revoked = 0) AS active, SUM(repository_id IS NOT NULL) AS bound, SUM(credential_id IS NOT NULL) AS withKey FROM gates', d7),
+    // the funnel by UTC day, one query for all five markers
+    env.DB.prepare(FIRSTS_BY_DAY).bind(d30).all(),
   ]);
   const a = Object.fromEntries(audit.results.map((r) => [r.action, { total: r.total, last7d: r.last7d || 0 }]));
   const pick = (k) => a[k] || { total: 0, last7d: 0 };
@@ -47,9 +57,27 @@ export async function stats(env, head) {
     team: { accountsWithTeams: n(teams.teams), people: n(teams.members), accountsRequiringTwoSeals: n(teams.quorum2), breakGlassWindowsLast7d: n(teams.windows7d), alertChannels: n(teams.channels) },
     // deploy gates (GitHub Actions): gates made, still active, bound to a repository, handing out a key; counts only
     gates: { made: n(gates.total), madeLast7d: n(gates.last7d), active: n(gates.active), bound: n(gates.bound), handingOutAKey: n(gates.withKey) },
-    pushSubscriptions: n(push.total),
+    funnel: {
+      accountsWithToken: n(tokens.accounts), accountsWithFirstProtectedCall: n(accounts.called), accountsTriedDemo: n(accounts.demo),
+      accountsWithAppInstalled: n(accounts.installed), accountsWithAlertsOn: n(accounts.alerts), accountsWithAppInstalledOrAlertsOn: n(accounts.appOrAlerts),
+      byDay30d: byDayOf(firsts.results),
+    },
+    pushSubscriptions: n(teams.pushTotal),
     receipts: { logEntries: head?.size || 0, byDay30d: receipts.results },
   };
+}
+
+const FIRSTS = { token: 'first_token_at', firstProtectedCall: 'first_call_at', demo: 'demo_at', installed: 'installed_at', alertsOn: 'alerts_at' };
+const FIRSTS_BY_DAY = Object.entries(FIRSTS).map(([k, col]) => `SELECT '${k}' AS k, strftime('%Y-%m-%d', ${col} / 1000, 'unixepoch') AS day, COUNT(*) AS n FROM accounts WHERE ${col} > ?1 GROUP BY day`).join(' UNION ALL ');
+/** [{day, token, firstProtectedCall, demo, installed, alertsOn}], oldest first, only days with something */
+function byDayOf(rows) {
+  const days = new Map();
+  for (const r of rows) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(r.day) || !Object.hasOwn(FIRSTS, r.k)) continue;
+    if (!days.has(r.day)) days.set(r.day, Object.fromEntries([['day', r.day], ...Object.keys(FIRSTS).map((k) => [k, 0])]));
+    days.get(r.day)[r.k] = r.n;
+  }
+  return [...days.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
 // "Active" means any signed-in request or proxied call: the account's last_seen day is written at most once a day per
