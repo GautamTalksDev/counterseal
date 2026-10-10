@@ -147,11 +147,12 @@ branch `feat/two-person`, not yet deployed (migration 0009).
   browsers. You can also require that the person whose token or guard key asked is not one of them. Anyone can deny:
   one no ends it.
 - **Never lowered quietly.** Raising the quorum takes effect at once. Lowering it, or letting the person who asked count,
-  takes 24 hours, wakes every member's devices, and any approver can cancel it. While two seals are required, a new
+  takes 24 hours, wakes every member's devices, and any approver can cancel it. While one person cannot approve alone, a new
   approver's seal counts 24 hours after they join, and pre-approvals and money caps are paused: no one person can
   approve in advance.
 - **Leaving is instant.** Removing someone signs them out everywhere, deletes their passkeys and alert devices, revokes
-  the tokens and keys they made and drops their seals, in one step. The last owner can never be removed.
+  the tokens and keys they made, drops their seals and voids approvals they helped give that are not yet used, in one
+  step. The last owner can never be removed. Only its maker or an owner can revoke someone's token or key.
 - **Public receipts** of an approval record how many seals were required and given, never who.
 
 What it does not do: stop two people who agree to act together. See [threat model T1 to T11](docs/THREAT_MODEL.md) and the

@@ -11,7 +11,7 @@ working on the migrated database, and the new code keeps working with everything
 (`server/test/migration.test.js` runs the deployed code, migrates, then runs the new code). CLI sessions made before 0005
 keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as `kind: "proxy"` (a brokered API
 call); 0006 adds the guard keys table and the coding-agent approvals (branch `feat/approvals`, not yet deployed). 0010 adds one
-nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0008 (Brakes, branch `feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and `counters`; every existing token and account is not tripped, not frozen and has no caps. 0009 (the two-person seal, branch `feat/two-person`, not yet deployed) adds the tables `members`, `invites` and `hold_votes`, a `member_id` on passkeys, sessions, push devices, device codes, move links, tokens, guard keys and receipts keys, the quorum columns on `accounts` (quorum 1, self-approval on) and `needs` and `requested_by` on `holds`; every existing account is one person, its owner, and one seal approves, as before (no row is rewritten: a NULL `member_id` means the account's founder).
+nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0008 (Brakes, branch `feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and `counters`; every existing token and account is not tripped, not frozen and has no caps. 0009 (the two-person seal, branch `feat/two-person`, not yet deployed) adds the tables `members`, `invites` and `hold_votes`, a `member_id` on passkeys, sessions, push devices, device codes, move links, tokens, guard keys, receipts keys and agent keys, the quorum columns on `accounts` (quorum 1, self-approval on) and `needs` and `requested_by` on `holds`; every existing account is one person, its owner, and one seal approves, as before (no row is rewritten: a NULL `member_id` means the account's founder).
 
 ```bash
 cd server
@@ -183,11 +183,12 @@ invocation from `server/test/team.test.js` (budgets) and a counting run with rec
 
 | Path | Worker CPU | Durable Object CPU | D1 queries |
 |---|---|---|---|
-| `GET /v1/team` | 0.2 ms (0.4) | | 5 |
-| A seal that does not complete the quorum (passkey verify, seal, nudge) | 1.2 ms (5.8) | | 15 |
-| The seal that approves (passkey verify, seal, approval), sealed | 1.3 ms (1.8) | 0.6 ms | 14 |
-| Joining a team (registration verify, member and passkey, alert) | 0.7 ms (1.6) | | 15 |
+| `GET /v1/team` | 0.2 to 0.3 ms (0.4) | | 5 |
+| A seal that does not complete the quorum (passkey verify, seal, nudge) | 1.2 to 1.3 ms (at most 6.3 over five runs) | | 15 |
+| The seal that approves (passkey verify, seal, approval), sealed | 1.3 to 1.4 ms (at most 2.9) | 0.6 ms | 14 |
+| Joining a team (registration verify, member and passkey, alert) | 0.7 to 0.9 ms (at most 2.8) | | 15 |
 | A proxied GET on a team account | as on a one-person account (the same query count) | | 6 |
+| Unfreeze / reset a tripped token on a team (passkey verify, plus the 24-hour check) | 1.0 ms (1.2) / 1.1 ms (6.2) | | |
 
 These are Node numbers, not a load test on Workers. Run one before raising the batch caps in `server/src/receipts.js`.
 

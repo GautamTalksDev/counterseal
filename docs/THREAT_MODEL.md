@@ -283,14 +283,18 @@ person, a second browser, or two confirmations racing each other land on the sam
 and the approval run in one transaction, so two approvers confirming at once approve exactly once. A person with two
 authenticators who accepts two invites is two members to the server: the authenticator that already holds one of the
 team's passkeys refuses to make another (`excludeCredentials`), a browser signed in to the account cannot join, every
-join wakes every member's devices and is in the audit log, and while two seals are required a new approver's seal counts
-only 24 hours after joining. Tests: *two seals*, *two confirmations at once*, *joining*.
+join wakes every member's devices and is in the audit log, and while one person cannot approve alone (two seals
+required, or self-approval off) a new or promoted approver's seal counts only 24 hours later. Tests: *two seals*, *two
+confirmations at once*, *joining*, *self-approval off at quorum 1*.
 
 **T2. A passkey proves presence, not authority.** Roles are read with the session on every request and checked on the
 server for every signed-in route (writes default to `member`); a viewer or member cannot even begin a seal. The seal's
 insert checks the role again in the same statement, so an approver demoted between their passkey prompt and their
-confirmation does not count, and the approval counts only seals whose members may still seal. Tests: *roles on every
-route*, *roles*.
+confirmation does not count, and the approval counts only seals whose members may still seal. Demoting someone below
+approver also voids any approval their seal completed that is not yet used, and pauses the pre-approvals and money caps
+of the tokens they made (the proxy reads the maker's role in the token's query); making someone a viewer revokes what
+they made. Revoking someone else's token or key needs an owner. Tests: *roles on every route*, *roles*, *an approver made
+a member or a viewer*, *revoking a token or key*.
 
 **T3. Separation of duties.** With self-approval off, the member who made the token or guard key that asked
 (`holds.requested_by`) cannot be one of the seals (`403 own_request`). With it on (the default, as for one person), they
@@ -302,8 +306,10 @@ on is stored as a pending change that takes effect 24 hours later, wakes every m
 every page of the app), and can be cancelled by any owner or approver with a passkey; a request that loosens nothing
 clears it. The quorum write is a compare-and-set on what was read, so a concurrent raise is never overwritten. The two
 switches that let one person approve in advance, pre-approved irreversible calls and money caps, are paused while two
-seals are required or self-approval is off, and cannot be made then. Tests: *the quorum*, *the quorum change is what
-the passkey approved*, *no one person can get around two seals*, *money caps made at quorum 1*.
+seals are required or self-approval is off, and cannot be made then. Every change to the team or the quorum wakes the
+devices with no rate limit, so a change cannot hide behind another made a moment earlier. Tests: *the quorum*, *the
+quorum change is what the passkey approved*, *no one person can get around two seals*, *money caps made at quorum 1*,
+*every team change wakes every device*.
 
 **T5. Invite links.** An invite is 32 random bytes, stored as SHA-256, made by an owner with a fresh passkey ceremony
 (the role, label and lifetime are bound into its challenge), single use (consumed in the same transaction that writes the
@@ -313,14 +319,16 @@ fragment and POST bodies only; the app removes it from the address bar at once (
 the app already runs). The invite page shows the account, the inviter and the role before anything is made, and warns
 that Counterseal never sends invites itself. The audit log names invites by id, never by token or hash. Residual: anyone
 who gets a live link before its person does can join with that role; every member is alerted and an owner can remove
-them, and while two seals are required their seal does not count for 24 hours. Tests: *invites*, *invites are
-limited*.
+them, and while one person cannot approve alone their seal does not count for 24 hours (nor can they unfreeze or reset
+a breaker). The join re-checks, in its own statement, that the invite's maker is still an owner of this account. Tests:
+*invites*, *invites are limited*, *an invite counts only while its maker is an owner*.
 
 **T6. Removing someone.** One transaction marks the member removed (only if the account keeps an owner and enough
 approvers for the quorum), and only then deletes their sessions (web and CLI), passkeys and push devices, drops their
-seals on waiting holds, revokes the tokens, guard keys and receipts keys they made, closes what those asked for, and
-revokes their open invites. The last owner can be neither removed nor demoted, so the account is never left without
-someone who can run it. Test: *removing a member*.
+seals on waiting holds, voids approvals their seal helped complete that are not yet used, revokes the tokens, guard
+keys, agent keys and receipts keys they made, closes what those asked for, and revokes their open invites and unused
+move links. Their own devices get one last alert before they are gone. The last owner can be neither removed nor
+demoted, so the account is never left without someone who can run it. Test: *removing a member*.
 
 **T7. The owner plane.** Owners can invite, change roles (owners included), remove people and lower the quorum, and an
 owner can delete the account. A rogue owner is a trust problem the two-person seal does not solve: every one of these
@@ -337,7 +345,9 @@ the holds and the command line sign-ins (with where each started). Test: *receip
 
 **T10. Freeze and seals.** Nothing is sealed or approved while the account is frozen (checked in the seal's statement),
 and freezing drops the seals already on waiting holds, so nothing anyone said yes to before the freeze counts after it.
-Test: *Freeze*.
+Unfreezing and resetting a tripped breaker take one approver with a passkey (not one whose seal does not count yet).
+Residual: a reset lets a token's held writes run again as its rules allow, without seals; the breaker is a brake on
+volume, and calls its rules hold as irreversible still need every seal. Test: *Freeze*.
 
 **T11. Budgets.** The proxy reads the quorum in the token's query (no extra query); a seal, a join, a removal and
 reading the team each stay well under 50 D1 queries. Test: *budgets*.
@@ -374,7 +384,9 @@ redirected there.
 - The human approves the wrong thing. Mitigation: the approve screen shows method, host, path, rule, reason and a preview.
 - Two people who agree to act together, or one person with two identities their owner invited, can give two seals
   (T1, T7). Mitigation: every join and role change is announced and audited, a new approver's seal waits 24 hours while
-  two are required, and the authenticator that holds one of the team's passkeys cannot make another.
+  one person cannot approve alone, and the authenticator that holds one of the team's passkeys cannot make another. An
+  approver added while one seal was enough counts at once if the quorum is raised later (their joining was announced
+  then); an owner who wants a second identity can also simply wait 24 hours.
 - A person approves a CLI sign-in someone sent them (S11). Mitigation: typed codes, context and warnings, 7-day
   sessions, alerts and one-tap revoke of the session and all it made.
 - A compromised agent machine signs for the attacker, and a CLI session on it can mint tokens and register keys. Prove

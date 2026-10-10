@@ -203,7 +203,7 @@ deployed (migration 0009). Code: `server/src/team.js`; tests: `server/test/team.
 
 ### Members and roles
 
-Every web or CLI session, passkey, push device, token, guard key and receipts key belongs to one member: the person whose
+Every web or CLI session, passkey, push device, token, guard key, agent key and receipts key belongs to one member: the person whose
 passkey made the session, or who made the key. The account's founder has the account id as their member id, so every row
 written before teams (`member_id` NULL) is the founder's: the member behind a row is `COALESCE(member_id, account_id)`.
 The founder's `members` row is written with the first invite; until then the founder is the owner without one.
@@ -211,8 +211,8 @@ The founder's `members` row is written with the first invite; until then the fou
 | Role | Can | Cannot |
 |---|---|---|
 | owner | everything below, and: invite, change roles, remove people, change the quorum, delete vault keys, switch receipts, delete the account | be the last owner and leave or be demoted |
-| approver | seal held actions; make tokens, guard keys, agent keys and receipts keys; cancel a waiting lowering; unfreeze; reset a tripped breaker | anything owner-only |
-| member | add vault keys; make tokens, guard keys, agent keys and receipts keys; revoke them | seal, pre-approve, set money caps |
+| approver | seal held actions; make tokens (pre-approved ones and money caps too, while one seal is enough), guard keys, agent keys and receipts keys; cancel a waiting lowering; unfreeze; reset a tripped breaker | anything owner-only |
+| member | add vault keys; make tokens, guard keys, agent keys and receipts keys | seal, pre-approve, set money caps |
 | viewer | read everything (holds, tokens, audit log, team, command line sign-ins); deny a held action; freeze; and, like everyone, manage their own passkeys and alert devices, sign in their own command line and leave the team | anything else |
 
 The role is read with the session on every request (one query, a join) and checked on the server for every signed-in
@@ -220,6 +220,10 @@ route: reads need any role, writes need `member` unless the route says otherwise
 member's sessions are deleted; a session whose member is removed or missing is `401 signed_out`. Every passkey ceremony
 of a signed-in person must use that person's own passkey (`401 unknown_passkey` otherwise). A CLI sign-in gets the role
 of the member who approved it.
+
+Revoking a token, guard key, agent key or receipts key is for the person who made it or an owner (`403 role_required`
+otherwise, and nothing is closed); anyone else who sees trouble freezes the account. A command line sign-in is revoked
+by its own person or an owner.
 
 ### Invites
 
@@ -252,8 +256,9 @@ Joining (public, `Origin` checked like every public write):
 `max(holds.needs, quorum in force now)`; `holds.needs` is the quorum when the hold was made, so a raise applies to
 waiting holds at once and a lowering never applies to them.
 
-A seal counts while: its member is an owner or approver and not removed; their `votes_from` has passed (while two seals
-are required, a new or promoted approver's seal counts 24 hours after joining or promotion); with self-approval off,
+A seal counts while: its member is an owner or approver and not removed; their `votes_from` has passed (if one person
+could not approve alone when they joined or were promoted, because two seals were required or self-approval was off,
+their seal counts 24 hours later); with self-approval off,
 they are not the member who made the token or guard key that asked (`holds.requested_by`); the account is not frozen;
 and it was given for the hold's exact request hash (the challenge carries it from `begin` to `finish`, `409
 hold_changed` otherwise). One row per (hold, member): two passkeys or two browsers of one person count once
@@ -262,7 +267,8 @@ approve exactly once. Refusals before the passkey prompt: `403 role_required` or
 approver), `403 seal_not_yet`, `403 own_request`, `409 already_sealed`, `423 account_frozen`.
 
 Any member may deny (`POST /v1/holds/<id>/deny`), a viewer too: one no ends the hold, whatever seals it has. Freezing
-drops the seals already on waiting holds. Removing someone, or demoting them below approver, drops their seals.
+drops the seals already on waiting holds and voids approvals not yet used. Removing someone, or demoting them below
+approver, drops their seals on waiting holds and voids any approval their seal helped complete that is not yet used.
 
 `GET /v1/holds` adds `needs`, `self_approve`, `requested_by` and `votes: [{member, name, passkey, at}]` (the seals that
 still count, oldest first; `passkey` is the 16-hex fingerprint). A held API call's `428` adds `seals_needed`.
@@ -284,7 +290,10 @@ of the approval carries `meta.quorum` and `meta.votes` only.
   before it takes effect.
 - While the quorum is 2 or self-approval is off, pre-approved irreversible calls and money caps (one person approving
   in advance) are paused: those calls are held like any other. Minting a token with either is refused (`409
-  quorum_blocks_preapproval`).
+  quorum_blocks_preapproval`). They are also paused on a token whose maker can no longer approve (made a member or a
+  viewer, or removed): the proxy reads the maker's role in the token's query.
+- While one person cannot approve alone, an approver whose seal does not count yet cannot unfreeze the account or
+  reset a tripped breaker either (`403 seal_not_yet`).
 - `GET /v1/me` has `team: {quorum, selfApprove, pending}`; `GET /v1/team` has the members (with passkey count, last
   use and when their seal starts counting), the quorum, a pending change, open invites and who you are.
 
@@ -292,20 +301,25 @@ of the approval carries `meta.quorum` and `meta.votes` only.
 
 - `POST /v1/team/members/<id>/role/begin {role}` and `/finish` (owner, fresh passkey ceremony). Never leaves the account
   without an owner (`409 last_owner`) or with fewer owners and approvers than the quorum (`409 not_enough_approvers`);
-  the same rules are in the update statement itself. Demoting below approver drops the member's seals on waiting holds;
-  demoting an owner revokes their open invites. Every member's devices are woken.
+  the same rules are in the update statement itself. Demoting below approver drops the member's seals on waiting holds
+  and voids unused approvals their seal helped complete; demoting an owner revokes their open invites; making someone a
+  viewer revokes the tokens, guard keys, agent keys and receipts keys they made and closes what those asked for (a
+  viewer runs no agents). Every member's devices are woken.
 - `POST /v1/team/members/<id>/remove/begin|finish` (an owner removes anyone; anyone may remove themselves, which is
   leaving; fresh passkey ceremony). In one transaction: the member is marked removed (only if the rules still hold), and
   only then their sessions, passkeys and push devices are deleted, their seals on waiting holds dropped, the tokens,
-  guard keys and receipts keys they made revoked, what those asked for closed, and their open invites and unused move
-  links revoked. Returns the counts. Every remaining member's devices are woken.
+  guard keys, agent keys and receipts keys they made revoked, what those asked for closed, unused approvals their seal
+  helped complete voided, and their open invites and unused move links revoked. Returns the counts. Every remaining
+  member's devices are woken, and so are the removed person's (one last push; their phone then reads that it is
+  signed out).
 
 ### Alerts
 
 `GET /v1/alerts` adds `team: [{kind, at, ...}]` for the last 15 minutes: `member_joined` (name, role),
 `member_role_changed` (name, from, to), `member_removed` (name, role), `quorum_lowering` (from, to, effective_at) and
-`quorum_lowering_cancelled`. A seal that does not complete the quorum wakes the other members' devices (at most once a
-minute per account, shared with hold alerts).
+`quorum_lowering_cancelled`. Every change to the team or the quorum wakes the devices at once, with no rate limit (each
+took a passkey, so none can be hidden behind another). A seal that does not complete the quorum wakes the other
+members' devices (at most once a minute per account, shared with hold alerts).
 
 ### Extension points (break-glass windows and team alert channels)
 
@@ -322,7 +336,8 @@ minute per account, shared with hold alerts).
 - Seals: who may seal is one SQL rule (`ELIGIBLE` in `team.js`), used by the seal, the approval and the hold card.
   A window that lets holds through without seals is one person loosening protection while two seals are required:
   this branch builds no windows; when they come, audit each one and announce it to every member and channel.
-- Alerts: `notify(env, accountId, fetch, {exceptMember})` wakes every member's devices but one; team events for the
+- Alerts: `notify(env, accountId, fetch, {exceptMember, extra})` wakes every member's devices but one (plus `extra`
+  devices no longer in the account); team events for the
   phone come from audit actions listed in `Team.recentEvents`. A channel message can say "n of m seals" from
   `holds.needs` and the hold's `votes`.
 
