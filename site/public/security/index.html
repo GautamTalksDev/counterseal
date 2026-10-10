@@ -75,6 +75,15 @@
     <li><strong>No flood of alerts.</strong> Each guard key can ask for 60 new approvals an hour, with 20 waiting; asking again for the same command sends no new alert, and alerts go out at most once a minute.</li>
     <li><strong>A seatbelt, not a sandbox.</strong> The guard runs on the agent's machine. An agent that edits its hook settings or wraps a command in a script is not stopped by it. Only keys kept in the vault are enforced by the server, so for a hard stop give your agent a Counterseal token instead of the real key.</li>
   </ul>
+  <h3 id="team">Two people, two passkeys (teams, not yet live)</h3>
+  <ul>
+    <li><strong>Each person counts once.</strong> A team can require two seals on every held action. A seal belongs to the person whose passkey made it, so a second passkey, a second browser or two taps at the same moment still count once, and the approval happens in the same database transaction as the last seal.</li>
+    <li><strong>Roles are checked by the server.</strong> A passkey proves who is there; what they may do (owner, approver, member, viewer) is checked on every request. Only owners and approvers can seal, and you can require that the person whose agent asked is not one of them.</li>
+    <li><strong>Protection is never lowered at once.</strong> Raising the seals needed applies immediately. Lowering them takes 24 hours, wakes every member's devices and can be cancelled; meanwhile no one person can pre-approve or set money caps, and a new approver's seal counts only after 24 hours.</li>
+    <li><strong>Invites are one-time and short-lived.</strong> Made by an owner with a passkey, stored only as a hash, single use, 2 hours by default, sent only in the link's fragment; the page shows who invites you to what before anything is made, and the team is told when someone joins.</li>
+    <li><strong>Removal is total and immediate.</strong> Sessions, passkeys, alert devices, the keys and tokens they made, and their seals, in one step. The last owner can never be removed.</li>
+    <li><strong>What it does not stop:</strong> two people who agree to act together.</li>
+  </ul>
 
   <h2 id="brakes">Money caps, the breaker and Freeze</h2>
   <ul>

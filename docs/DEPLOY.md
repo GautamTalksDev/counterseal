@@ -6,12 +6,12 @@ Object (`ReceiptLog`, the public log) and static assets. It fits the Workers Fre
 ## Upgrading the live service (from the broker-only version)
 
 The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005_cli_signin.sql`,
-`0006_approvals.sql`, `0008_brakes.sql` and `0010_provider_host.sql` only add tables, indexes and defaulted or nullable columns, so the code that runs today keeps
+`0006_approvals.sql`, `0008_brakes.sql`, `0009_team.sql` and `0010_provider_host.sql` only add tables, indexes and defaulted or nullable columns, so the code that runs today keeps
 working on the migrated database, and the new code keeps working with everything the old code wrote
 (`server/test/migration.test.js` runs the deployed code, migrates, then runs the new code). CLI sessions made before 0005
 keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as `kind: "proxy"` (a brokered API
 call); 0006 adds the guard keys table and the coding-agent approvals (branch `feat/approvals`, not yet deployed). 0010 adds one
-nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0008 (Brakes, branch `feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and `counters`; every existing token and account is not tripped, not frozen and has no caps.
+nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0008 (Brakes, branch `feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and `counters`; every existing token and account is not tripped, not frozen and has no caps. 0009 (the two-person seal, branch `feat/two-person`, not yet deployed) adds the tables `members`, `invites` and `hold_votes`, a `member_id` on passkeys, sessions, push devices, device codes, move links, tokens, guard keys and receipts keys, the quorum columns on `accounts` (quorum 1, self-approval on) and `needs` and `requested_by` on `holds`; every existing account is one person, its owner, and one seal approves, as before (no row is rewritten: a NULL `member_id` means the account's founder).
 
 ```bash
 cd server
@@ -21,7 +21,7 @@ npx -y wrangler@4 d1 time-travel info leash
 # 2. new secrets (names only; values never leave your machine)
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK        # the log's Ed25519 signing key; prints the public part to stderr: keep it
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx -y wrangler@4 secret put STATS_TOKEN   # optional: /v1/admin/stats
-# 3. the additive migrations (applies 0004 to 0006, 0008 and 0010; 0001 to 0003 are already applied)
+# 3. the additive migrations (applies 0004 to 0006 and 0008 to 0010; 0001 to 0003 are already applied)
 npx -y wrangler@4 d1 migrations apply leash --remote
 # 4. the code (creates the ReceiptLog Durable Object through the "v1" migration in wrangler.jsonc)
 npx -y wrangler@4 deploy
@@ -73,7 +73,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" |
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))" | npx -y wrangler@4 secret put IP_SALT
 node dev/vapid-keygen.mjs | npx -y wrangler@4 secret put VAPID_PRIVATE_JWK   # phone alerts (Web Push); optional
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK          # the public log
-npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0006, then 0008 and 0010 (0007 and 0009 are numbers other features will use)
+npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0006, then 0008 to 0010 (0007 is a number another feature will use)
 npx -y wrangler@4 deploy
 ```
 
@@ -127,6 +127,11 @@ after sign-ins.
 | Brakes: a capped Stripe refund or payout | one more (the day's total), plus one lookup at Stripe (a subrequest, no D1) | |
 | Brakes: a call on a frozen account | 1 (the per-network limit); no token row, no audit entry except one per token every 10 minutes | none |
 | Brakes: a token without `limits` or `money` | none | |
+| Two-person seal: a proxied call on a team | none more (the quorum is read in the token's query) | |
+| Two-person seal: one seal that does not complete the quorum | about 6 (limit, challenge, passkey counter, seal, audit), plus one per device nudged (at most one alert a minute) | none |
+| Two-person seal: the seal that approves, sealed | about 9 (the above, the approval, receipt bookkeeping) | 1 request, about 7 rows |
+| Two-person seal: making an invite / joining | about 7 / about 9, plus one per device alerted | none |
+| Two-person seal: reading the team (`GET /v1/team`) | 0 (5 D1 queries) | none |
 | Receipts API, one unsigned receipt | about 3 | 1 request |
 | Public log read (stats, checkpoint, key) | 0 | 0 within 10 s of the last head read per isolate |
 | Public log read (entries, proofs) | 0 | 1 |
@@ -172,6 +177,17 @@ table above:
 | Approve a guard hold (passkey verify), sealed | 1.5 ms (3.4) | 0.8 ms |
 | `POST /v1/approvals/<id>/use`, sealed | 0.7 ms (4.4) | 0.7 ms |
 | `POST /v1/holds/<id>/deny` with a reason, sealed | 0.7 ms (2.5) | 0.6 ms |
+
+The two-person seal (branch `feat/two-person`), measured after rebasing on Brakes and map `2026-10-10.1`; D1 queries per
+invocation from `server/test/team.test.js` (budgets) and a counting run with receipts on and two devices per person:
+
+| Path | Worker CPU | Durable Object CPU | D1 queries |
+|---|---|---|---|
+| `GET /v1/team` | 0.2 ms (0.4) | | 5 |
+| A seal that does not complete the quorum (passkey verify, seal, nudge) | 1.1 ms (3.1) | | 15 |
+| The seal that approves (passkey verify, seal, approval), sealed | 1.2 ms (2.0) | 0.5 ms | 14 |
+| Joining a team (registration verify, member and passkey, alert) | 0.7 ms (4.7) | | 15 |
+| A proxied GET on a team account | as on a one-person account (the same query count) | | 6 |
 
 These are Node numbers, not a load test on Workers. Run one before raising the batch caps in `server/src/receipts.js`.
 

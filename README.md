@@ -105,7 +105,9 @@ sequenceDiagram
 A token can carry `unattendedIrreversible` rules for calls an agent may run unattended, **but only a passkey holder can mint
 such a token**. A CLI session cannot, because an agent running on the same laptop can read the CLI's config file. The same
 goes for approving holds (a coding agent's commands included), revoking agent keys and turning public receipts off, and for everything that loosens a brake
-(below): setting money caps, resetting a tripped breaker and unfreezing. Stopping things never needs a passkey.
+(below): setting money caps, resetting a tripped breaker and unfreezing. Stopping things never needs a passkey. On a team
+that requires two seals, nobody can flip this switch alone: pre-approvals and money caps are paused until the quorum is
+lowered again, which takes 24 hours and tells everyone.
 
 ### Brakes
 
@@ -130,6 +132,30 @@ general). They do not cap LLM tokens, and they do not cover SQL sent straight ov
   app unfreezes.
 
 A token without `limits` and `money` costs no extra database writes. See the [policy reference](docs/POLICY.md).
+
+### Two-person seal (teams)
+
+The counterseal in the literal sense: a second, different person seals what the first one approved. In this repo on
+branch `feat/two-person`, not yet deployed (migration 0009).
+
+- **People, not shared logins.** An owner invites people with a link that works once (2 hours by default, 24 at most);
+  each person makes their own passkey and signs in as themselves. Roles: **owner** (the team, the quorum, the vault),
+  **approver** (seals held actions), **member** (makes tokens and keys for their agents, cannot seal), **viewer** (reads,
+  can deny). Roles are checked on the server for every request.
+- **Two seals.** With the quorum at 2, a held API call or coding-agent command goes ahead only when two different owners
+  or approvers have each approved it with their own passkey. One person counts once, with any number of passkeys or
+  browsers. You can also require that the person whose token or guard key asked is not one of them. Anyone can deny:
+  one no ends it.
+- **Never lowered quietly.** Raising the quorum takes effect at once. Lowering it, or letting the person who asked count,
+  takes 24 hours, wakes every member's devices, and any approver can cancel it. While two seals are required, a new
+  approver's seal counts 24 hours after they join, and pre-approvals and money caps are paused: no one person can
+  approve in advance.
+- **Leaving is instant.** Removing someone signs them out everywhere, deletes their passkeys and alert devices, revokes
+  the tokens and keys they made and drops their seals, in one step. The last owner can never be removed.
+- **Public receipts** of an approval record how many seals were required and given, never who.
+
+What it does not do: stop two people who agree to act together. See [threat model T1 to T11](docs/THREAT_MODEL.md) and the
+[team API](docs/PROTOCOL.md#team-the-two-person-seal).
 
 ## Quickstart
 
@@ -256,6 +282,7 @@ server/        Cloudflare Worker: API, proxy, vault, WebAuthn, policy, audit, th
   src/agentkeys.js   agent keys: proof of possession, RFC 9421 broker signatures
   src/approvals.js   the Approvals API and guard keys: approvals for a coding agent's commands and tool calls
   src/brakes.js      money caps, the breaker and Freeze (src/money.js: how amounts are read and shown)
+  src/team.js        the two-person seal: members, invites, roles, the quorum and seals
   test/              node:test suite: virtual passkeys, fake upstream, migration on data from the live code
   bench/cpu.mjs      CPU of the hot paths
   dev/local.js       full local server on node:sqlite
@@ -276,14 +303,15 @@ node dev/local.js 8790                          # http://localhost:8790 (passkey
 
 ## Deploy
 
-See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), five additive migrations (0004, 0005, 0006, 0008, 0010), `wrangler deploy`.
+See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), six additive migrations (0004, 0005, 0006, 0008, 0009, 0010), `wrangler deploy`.
 
 ## Status and roadmap
 
 Brokers GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify; phone and desktop alerts for held calls (Web Push,
 payload-free); public receipts; agent keys; money caps, a breaker and Freeze. In this repo, not yet deployed: the Approvals API and guard keys for a
-coding agent's commands. Next: AWS (SigV4 re-signing), PlanetScale; two-person
-approval; SSO for teams; external witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
+coding agent's commands, and the two-person seal (team members, invites, roles, quorum votes). Next: AWS (SigV4
+re-signing), PlanetScale; break-glass windows and Slack, Discord and Google Chat alerts for teams; SSO for teams; external
+witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
 
 Counterseal maps to the proxy-gateway model of the IETF draft
 [Credential Broker for Agents (CB4A)](https://www.ietf.org/archive/id/draft-hartman-credential-broker-4-agents-00.html)

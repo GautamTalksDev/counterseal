@@ -33,6 +33,7 @@
   <a href="#guard">Approvals for commands</a>
   <a href="#policy">Token policies</a>
   <a href="#brakes">Brakes</a>
+  <a href="#team">Teams: two seals</a>
   <a href="#providers">Providers and the map</a>
   <b>Record</b>
   <a href="#receipts">Receipts: the public log</a>
@@ -186,6 +187,18 @@ curl -s https://counterseal.gautamkhosla.com/v1/approvals/&lt;id&gt;/use \
   <h3>Freeze</h3>
   <p>The Freeze bar at the top of the app, <code>leash freeze</code>, or the Freeze button on a phone alert stops every token of the account at once: each call answers <code>423 account_frozen</code>, a coding agent's guard is stopped too, approvals nobody used yet are void, and approving waits. Any signed-in session can freeze. Only your passkey, in the app, unfreezes.</p>
 
+  <h2 id="team">Teams: the two-person seal</h2>
+  <p>In the repository, not yet on the live service. An account can have several people, each with their own passkey, and a held call or command can need two of them.</p>
+  <ul>
+    <li><strong>Invite.</strong> In the app, Team, an owner makes an invite with their passkey: a role, who it is for, and how long it works (2 hours by default, 24 at most). The link works once. Send it privately; it shows the person your account, your name and the role before they make their own passkey. Every member's devices are told when someone joins.</li>
+    <li><strong>Roles.</strong> Owner (the team, the seals needed, the vault, deleting the account), approver (seals held actions), member (makes tokens and keys for their agents, cannot seal), viewer (reads, can deny). Counterseal checks the role on every request. A command line sign-in gets the role of the person who approved it.</li>
+    <li><strong>Two seals.</strong> With two seals, a held action goes ahead only when two different owners or approvers have each approved it with their own passkey. The card shows "1 of 2 seals" and who sealed. One person counts once, whatever their passkeys or browsers. You can also require that the person whose token or guard key asked is not one of them. Anyone can deny: one no ends it.</li>
+    <li><strong>Lowering waits.</strong> Raising the seals needed applies at once, to waiting actions too. Lowering them, or letting the person who asked count, applies 24 hours later, tells every member's devices and shows a banner in the app; any owner or approver can cancel it. While two seals are needed, a new approver's seal counts 24 hours after they join, and pre-approvals and money caps are paused.</li>
+    <li><strong>Leaving.</strong> Removing someone signs them out everywhere, removes their passkeys and alert devices, revokes the tokens and keys they made and drops their seals, at once. Anyone can leave. The last owner cannot be removed.</li>
+    <li><strong>Public receipts</strong> of an approval that needed two seals say <code>"quorum": 2, "votes": 2</code> in <code>meta</code>, never who.</li>
+  </ul>
+  <p>Two people who agree to act together are not stopped: two seals mean two passkeys of two people on your team.</p>
+
   <h2 id="providers">Providers and the map</h2>
   <p>The irreversible map covers 10 APIs: GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify. Management APIs only; SQL sent straight over a database connection string never passes through Counterseal. The current irreversible map, with the reason for every rule, is on the <a href="/#map">homepage</a> and at <code>GET /v1/meta</code>. Every DELETE is held on GitHub, Cloudflare, Stripe, Supabase, Vercel, Neon, Fly.io and Resend, and every Railway mutation is held unless every field is a redeploy or restart. Vercel, Neon and Fly.io hold production promotions and rollbacks, restores that overwrite data, secret and token changes, and access grants; Resend holds batch sends, broadcasts and any email to more than one recipient. Shopify is brokered through its Admin GraphQL endpoint only, at the store address you give when you add the key (<code>your-store.myshopify.com</code>, checked strictly), and holds mutations that delete, move money, cancel, change gift cards or customer data, or cannot be read. Also held: force pushes, repo transfers, Stripe refunds and payouts, Cloudflare purges of everything, a whole host or a URL prefix, and any SQL on Supabase or D1 that is not a single plain read (SELECT, WITH ... SELECT, EXPLAIN without ANALYZE, SHOW), including Supabase migrations and D1 imports. Paths are matched in one canonical form (no empty segments, no <code>;</code> path parameters, escapes of plain letters decoded, one trailing slash dropped) and that canonical path is sent upstream. Rules match it without regard to case, the map also ignores a format suffix such as <code>.json</code>, and a HEAD counts as a GET. A body the broker cannot read one way on a route with a body rule is held: a watched parameter that appears twice, in both the body and the query string, or as a case variant, and JSON with repeated keys. A request that carries a method override (<code>_method</code>) is held on every provider and cannot be pre-approved.</p>
 
@@ -269,7 +282,12 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>POST /v1/me/freeze</code></td><td>Freeze the account: every <code>lsh_</code> token is answered <code>423</code>. Any signed-in session, the command line included. <code>GET /v1/me</code> shows <code>account.frozen_at</code>.</td></tr>
     <tr><td><code>POST /v1/me/unfreeze/begin, /finish</code></td><td>End a freeze (<code>409 not_frozen</code> if it is not frozen). Passkey. Web only.</td></tr>
     <tr><td><code>GET /v1/holds</code></td><td>Calls and commands waiting for you, each with its <code>kind</code> (<code>proxy</code>, <code>shell</code>, <code>tool</code>, <code>deploy</code>) and a <code>preview</code> of what it would do (for a call: query string, SQL or GraphQL, body, at most 2 KB; for a command: the whole command). A held Stripe refund or payout has a <code>headline</code> with its amount.</td></tr>
-    <tr><td><code>POST /v1/holds/:id/approve/begin, /finish</code></td><td>Approve a hold. Passkey.</td></tr>
+    <tr><td><code>POST /v1/holds/:id/approve/begin, /finish</code></td><td>Approve a hold (on a team, add your seal: the answer says <code>approved</code>, <code>seals</code> and <code>needs</code>). Passkey. Owners and approvers.</td></tr>
+    <tr><td><code>GET /v1/team</code></td><td>The people, their roles, the seals needed and a waiting change, open invites, and who you are.</td></tr>
+    <tr><td><code>POST /v1/team/invites/begin, /finish</code>, <code>DELETE /v1/team/invites/:id</code></td><td>Make an invite (<code>{role, label, hours}</code>; owner, passkey) or revoke one.</td></tr>
+    <tr><td><code>POST /v1/invites/lookup</code>, <code>/begin</code>, <code>/finish</code></td><td>The invite page: what the invite is, then join with a new passkey. The invite's token goes in the body.</td></tr>
+    <tr><td><code>POST /v1/team/members/:id/role/begin, /finish</code>, <code>/remove/begin, /finish</code></td><td>Change someone's role (owner) or remove them (owner, or yourself to leave). Passkey.</td></tr>
+    <tr><td><code>POST /v1/team/quorum/begin, /finish</code>, <code>/quorum/cancel/begin, /finish</code></td><td>Set the seals needed (<code>{quorum: 1 or 2, selfApprove}</code>; owner, passkey), or cancel a waiting lowering (owner or approver, passkey).</td></tr>
     <tr><td><code>POST /v1/holds/:id/deny</code></td><td>Deny a hold. Optional <code>{"reason"}</code> (200 characters), handed back to a guard.</td></tr>
     <tr><td><code>GET, POST /v1/guard/keys</code>, <code>DELETE /v1/guard/keys/:id</code></td><td>Guard keys (<code>lsg_</code>, shown once). Revoking one closes its open approvals.</td></tr>
     <tr><td><code>POST /v1/approvals</code>, <code>GET /v1/approvals/:id?wait=</code>, <code>POST /v1/approvals/:id/use</code></td><td>Ask for, wait for (up to 20 s) and use an approval for a coding agent's command. Bearer <code>lsg_</code> guard key.</td></tr>
@@ -308,6 +326,9 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td>403</td><td><code>leash_denied</code></td><td>A policy deny rule, readOnly, or the allow list or default blocked the call.</td></tr>
     <tr><td>403</td><td><code>wrong_provider</code></td><td>The token belongs to a different provider.</td></tr>
     <tr><td>403</td><td><code>passkey_required</code></td><td>Needs the web app and your passkey.</td></tr>
+    <tr><td>403</td><td><code>role_required</code>, <code>own_request</code>, <code>seal_not_yet</code></td><td>On a team: your role does not allow it; your own token or guard key asked and someone else must seal it; or you joined or became an approver less than 24 hours ago while two seals are needed.</td></tr>
+    <tr><td>409</td><td><code>already_sealed</code>, <code>quorum_blocks_preapproval</code>, <code>last_owner</code>, <code>not_enough_approvers</code></td><td>You sealed this already; pre-approvals and money caps wait while two seals are needed; the account needs an owner; the seals needed need that many owners or approvers.</td></tr>
+    <tr><td>400</td><td><code>invite_invalid</code></td><td>The invite was used, has expired, was revoked, or its owner is no longer an owner.</td></tr>
     <tr><td>403</td><td><code>csrf</code></td><td>Web write without the right Origin or <code>x-leash</code> header.</td></tr>
     <tr><td>409</td><td><code>replay</code>, <code>key_taken</code>, <code>signer_taken</code></td><td>A signed receipt sent twice; a public key registered to another account.</td></tr>
     <tr><td>409</td><td><code>too_many_credentials</code>, <code>too_many_tokens</code>, <code>too_many_keys</code>, <code>too_many_agent_keys</code>, <code>too_many_guard_keys</code>, <code>too_many_devices</code></td><td>A ceiling per account: 50 vault keys, 200 live tokens, 20 receipts keys, 20 agent keys, 20 guard keys, 10 alert devices.</td></tr>

@@ -22,6 +22,10 @@ can read on the machine it runs on, an attacker who prompt-injects that agent ca
 | Someone holding a leaked `lsh_` token bound to an agent key | Nothing: every request is refused before the policy, the token's rate limit or the upstream | Use it without the agent's private key |
 | Someone holding a stolen CLI session | List holds; mint ordinary tokens (with a breaker if it likes); register agent keys and bind tokens to them; make and revoke guard keys; deny holds; freeze the account (which only stops things; the owner is alerted); for at most 7 days | Approve holds; mint pre-approved tokens or tokens with money caps; reset a tripped breaker; unfreeze; read keys; delete vaulted keys; revoke agent keys; turn receipts on or off; approve or revoke CLI sign-ins; delete the account; keep anything it made after the owner revokes it |
 | Someone holding a guard key (`lsg_`), for example the agent the guard runs next to | Ask for approvals (60 new an hour, 20 waiting); read and use its own approvals | Approve anything; see another key's or a brokered hold; list holds; reach the vault; outlive the CLI session that made it; alert more than once a minute |
+| One person on a team that requires two seals (an owner or approver, or someone who stole one person's phone and passkey) | Give one seal; deny anything; freeze; read everything the team reads | Approve a held action alone; count twice (a second passkey, a second browser, two confirmations at once); seal what their own token or guard key asked for when self-approval is off; pre-approve irreversible calls or set money caps; lower the quorum or turn self-approval on without 24 hours' notice to every member; give a new or promoted approver a seal that counts in those 24 hours |
+| A team member with a lower role (member or viewer) | A member: make tokens, guard keys and keys for their agents. A viewer: read and deny | Seal, change roles, invite, remove others, change the quorum, delete vault keys, switch receipts, delete the account (checked on the server on every request) |
+| Someone holding a stolen or forwarded invite link | Join the team once, with the invited role, within the invite's life (2 hours by default, 24 at most), with a passkey of their own | Join twice, join after it was used, revoked or expired or after its owner stopped being an owner, join from the old host, join quietly (every member's devices are woken), have their seal count for 24 hours while two seals are required |
+| A removed team member | Nothing | Sign in (passkeys deleted), use a session or a CLI session (deleted), get alerts (devices deleted), have a seal count, use a token, guard key or receipts key they made (revoked) |
 | A device-code phisher (starts `leashcli login` and sends someone the code) | Get a CLI session in that person's account if they sign in, type the code, ignore the country and network shown, confirm they ran it and approve with their passkey | Put the code in a link the app accepts; reuse a code; keep the session past 7 days or past a revoke; act unseen (audit entry and device alert at sign-in) |
 | Someone holding a receipts API key (`lsr_`) | Record receipts within the account's quotas (public, reported, never `source: "broker"`) | Make a broker receipt; record signed receipts without the signer; replay a signed receipt |
 | A phishing site | Ask for a passkey | Get an assertion the service accepts (origin and RP ID are bound into it) |
@@ -268,6 +272,76 @@ Residual: the guard can be bypassed by an agent that edits its hook settings, wr
 not read, or calls the tool another way; hook runners that time out may fail open unless set to block (the guard's install
 sets that where the agent supports it). Commands not on the map are left to the agent's own permission settings.
 
+### The two-person seal (team, migration 0009, not yet deployed)
+
+An account can have several people (owner, approver, member, viewer), each with their own passkey; a held action can
+require seals from two different owners or approvers. Code: `server/src/team.js`. Tests: `server/test/team.test.js`.
+
+**T1. One person counted twice.** A seal is one row per (hold, member), and the member comes from the passkey used (each
+passkey belongs to one member; the session's member must match it, `401 unknown_passkey`). A second passkey of the same
+person, a second browser, or two confirmations racing each other land on the same row (`409 already_sealed`). The seal
+and the approval run in one transaction, so two approvers confirming at once approve exactly once. A person with two
+authenticators who accepts two invites is two members to the server: the authenticator that already holds one of the
+team's passkeys refuses to make another (`excludeCredentials`), a browser signed in to the account cannot join, every
+join wakes every member's devices and is in the audit log, and while two seals are required a new approver's seal counts
+only 24 hours after joining. Tests: *two seals*, *two confirmations at once*, *joining*.
+
+**T2. A passkey proves presence, not authority.** Roles are read with the session on every request and checked on the
+server for every signed-in route (writes default to `member`); a viewer or member cannot even begin a seal. The seal's
+insert checks the role again in the same statement, so an approver demoted between their passkey prompt and their
+confirmation does not count, and the approval counts only seals whose members may still seal. Tests: *roles on every
+route*, *roles*.
+
+**T3. Separation of duties.** With self-approval off, the member who made the token or guard key that asked
+(`holds.requested_by`) cannot be one of the seals (`403 own_request`). With it on (the default, as for one person), they
+can be one of two, never both. Test: *self-approval off*.
+
+**T4. Lowering protection quietly or at once.** Raising the quorum or turning self-approval off applies at once, to
+waiting holds too (a hold needs `max(the quorum when it was made, the quorum now)`). Lowering it or turning self-approval
+on is stored as a pending change that takes effect 24 hours later, wakes every member's devices (and shows a banner on
+every page of the app), and can be cancelled by any owner or approver with a passkey; a request that loosens nothing
+clears it. The quorum write is a compare-and-set on what was read, so a concurrent raise is never overwritten. The two
+switches that let one person approve in advance, pre-approved irreversible calls and money caps, are paused while two
+seals are required or self-approval is off, and cannot be made then. Tests: *the quorum*, *the quorum change is what
+the passkey approved*, *no one person can get around two seals*, *money caps made at quorum 1*.
+
+**T5. Invite links.** An invite is 32 random bytes, stored as SHA-256, made by an owner with a fresh passkey ceremony
+(the role, label and lifetime are bound into its challenge), single use (consumed in the same transaction that writes the
+member and their passkey), 2 hours by default and 24 at most, 10 an hour, 10 people a team counting open invites, bound
+to the account and dead once its owner is no longer an owner, accepted only on the product's host. It travels in the URL
+fragment and POST bodies only; the app removes it from the address bar at once (also when the link opens in a tab where
+the app already runs). The invite page shows the account, the inviter and the role before anything is made, and warns
+that Counterseal never sends invites itself. The audit log names invites by id, never by token or hash. Residual: anyone
+who gets a live link before its person does can join with that role; every member is alerted and an owner can remove
+them, and while two seals are required their seal does not count for 24 hours. Tests: *invites*, *invites are
+limited*.
+
+**T6. Removing someone.** One transaction marks the member removed (only if the account keeps an owner and enough
+approvers for the quorum), and only then deletes their sessions (web and CLI), passkeys and push devices, drops their
+seals on waiting holds, revokes the tokens, guard keys and receipts keys they made, closes what those asked for, and
+revokes their open invites. The last owner can be neither removed nor demoted, so the account is never left without
+someone who can run it. Test: *removing a member*.
+
+**T7. The owner plane.** Owners can invite, change roles (owners included), remove people and lower the quorum, and an
+owner can delete the account. A rogue owner is a trust problem the two-person seal does not solve: every one of these
+changes needs a fresh passkey ceremony, is in the audit log and wakes every member's devices, and lowering the quorum
+takes 24 hours. Collusion between two approvers is out of scope.
+
+**T8. CSRF and hosts.** Team changes need a web session, the `x-leash` header and an Origin equal to the host they were
+sent to; the public join routes check the Origin and refuse the old host. Test: *CSRF and hosts*.
+
+**T9. Privacy.** Public receipts of an approval that needed two seals carry `meta.quorum` and `meta.votes` (numbers)
+only; a seal that does not complete the quorum is not a receipt. Names, member ids, labels and passkey fingerprints stay
+in the account (the team, the hold cards and the private audit log). Inside a team, every member reads the audit log,
+the holds and the command line sign-ins (with where each started). Test: *receipts*.
+
+**T10. Freeze and seals.** Nothing is sealed or approved while the account is frozen (checked in the seal's statement),
+and freezing drops the seals already on waiting holds, so nothing anyone said yes to before the freeze counts after it.
+Test: *Freeze*.
+
+**T11. Budgets.** The proxy reads the quorum in the token's query (no extra query); a seal, a join, a removal and
+reading the team each stay well under 50 D1 queries. Test: *budgets*.
+
 ### The domain move (two hosts)
 
 **D1. RP ID confusion.** The service answers on counterseal.gautamkhosla.com and leash.gautamkhosla.com. WebAuthn
@@ -298,6 +372,9 @@ redirected there.
 - The coding-agent guard runs on the agent's machine and can be bypassed there (G-section). Mitigation: say so plainly;
   for a hard stop, the agent gets a Counterseal token instead of the real key.
 - The human approves the wrong thing. Mitigation: the approve screen shows method, host, path, rule, reason and a preview.
+- Two people who agree to act together, or one person with two identities their owner invited, can give two seals
+  (T1, T7). Mitigation: every join and role change is announced and audited, a new approver's seal waits 24 hours while
+  two are required, and the authenticator that holds one of the team's passkeys cannot make another.
 - A person approves a CLI sign-in someone sent them (S11). Mitigation: typed codes, context and warnings, 7-day
   sessions, alerts and one-tap revoke of the session and all it made.
 - A compromised agent machine signs for the attacker, and a CLI session on it can mint tokens and register keys. Prove

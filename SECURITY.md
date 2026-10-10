@@ -21,6 +21,7 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | Public receipts leak nothing private | Broker receipts carry the method, the provider host, the decision, rule id, map version, two booleans, the time and the hash of the private audit entry; per-entry salted submitter commitments; never a path, query, body, key, token, account id, name, email or IP (tested) |
 | A coding agent's held command waits for your passkey (guard, not yet deployed) | The guard asks `POST /v1/approvals` with a guard key (`lsg_`) that can ask and read its own approvals, never approve; an approval covers one exact command, its agent and folder name (SHA-256 bound), once, within 10 minutes, consumed atomically. Enforced on the agent's machine: a seatbelt, not a sandbox |
 | An agent stays inside the money you gave it | Stripe refunds and payouts pass unattended only under a token's per-call and per-day caps (set with a passkey, one currency, amounts read by the map's strict form parser and held when anything is ambiguous, the day's total reserved atomically); a breaker holds the writes of a token that makes too many in an hour or repeats one request; Freeze stops every token at once and only a passkey ends it. This covers calls through Counterseal, not LLM tokens and not SQL sent over a database connection |
+| Two different people, each with their own passkey, for an irreversible action (two-person seal, not yet deployed) | A team can require two seals: one row per (hold, member), the member taken from the passkey, so a second passkey, a second browser or two confirmations at once count once; the seal and the approval are one transaction; roles are checked on the server for every request; with self-approval off, the maker of the token or guard key that asked is not one of them. Raising the quorum is immediate; lowering it (or turning self-approval on) takes 24 hours and wakes every member's devices, and any approver can cancel it. While two seals are required, a new approver's seal counts after 24 hours, and pre-approvals and money caps are paused. Public receipts carry only how many seals were required and given. Two people who agree to act together are out of scope |
 | A signed reported receipt was signed by that key | Receipts keys bound to an Ed25519 signer (proof of possession naming the log and the account) accept only receipts that signer signed, with a `ts` within 10 minutes, each signature once; small-order and non-canonical keys and signatures are refused |
 
 ## Controls, mapped to OWASP Top 10 (2025) and OWASP API Security Top 10 (2023)
@@ -35,6 +36,8 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | Two hosts | Each host has its own RP ID, chosen by the request's Origin (or its URL) from that allow list; a client never names one; passkeys and challenges are refused on the other host; host-only cookies; the old host serves `/v1`, `/p` and `/app` and redirects other pages | A01, A07 |
 | Moving an account | One-time link made after a fresh passkey assertion on the old host: 32 random bytes, stored hashed, single use, bound to the account, 10 minutes, 3 an hour, in the URL fragment and POST bodies only, audited; the passkey it adds alerts the owner's devices | A07 |
 | Authorization | Every query is scoped by `account_id`; another account's holds, tokens, credentials, agent keys, receipts keys and receipts return 404 (tested) | A01, API1 |
+| Teams (two-person seal) | Roles (owner, approver, member, viewer) read with the session in one query and checked on the server for every signed-in route, writes defaulting to `member`; every passkey ceremony needs the signed-in person's own passkey; each person sees and removes only their own passkeys. Invites: owner plus a fresh passkey ceremony, 32 random bytes stored as SHA-256, single use, 2 hours by default and 24 at most, 10 an hour, 10 people a team, bound to the account and to an owner who is still an owner, product host only, in the URL fragment and POST bodies only; joining excludes the team's existing credentials and refuses a browser already in the account. Removal revokes sessions, passkeys, devices, tokens, guard keys and receipts keys and drops seals in one transaction; the last owner can be neither removed nor demoted. Every team change is audited and wakes every member's devices | A01, A04, A07, API1, API5 |
+| Privilege separation (teams) | A viewer reads, denies and freezes; a member also makes tokens and keys; an approver also seals, cancels a waiting lowering, unfreezes and resets a breaker; only an owner invites, changes roles, removes others, changes the quorum, deletes vault keys, switches receipts or deletes the account. A CLI session has its member's role | A01, API5 |
 | Privilege separation | CLI sessions can mint tokens (with a breaker if they like), register agent keys, make guard keys, deny holds and freeze the account (stopping is always safe), but cannot approve holds, pre-approve irreversible operations, set money caps, reset a tripped breaker, unfreeze, delete vaulted keys, revoke agent keys, turn receipts on or off, approve, deny or revoke CLI sign-ins, or delete the account | A01, A06 |
 | Secrets | AES-256-GCM per secret, data key wrapped by a master key (Workers secret), AAD binds account, row and provider; tokens, sessions and receipts keys stored as hashes; agent keys public only (a JWK with `d` is refused) | A04 |
 | Input | Parameterized SQL; bodies capped while streaming (16 KB for the API, 256 KB for receipts, 1 MB for the proxy); strict JSON; strict receipt schema; plain-decimal query parameters | A05, API8 |
@@ -68,6 +71,9 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
   held by name (patterns plus reviewed lists), not by an allow list, and are checked against each Shopify release.
 - A compromised agent machine: its agent key signs for whoever controls it, and a CLI session there can mint new
   tokens. Revoke the key; bound tokens stop at once. Approvals still need your passkey.
+- Two people on a team who agree to act together, or an owner who invites a second identity of their own. Two seals mean
+  two passkeys of two members; every join and role change is announced and audited, and while two seals are required a
+  new approver's seal counts only 24 hours later, but the server cannot tell two cooperating people from two careful ones.
 - The truth of reported receipts: they prove what an agent sent, when, and (if signed) with which key.
 - The log operator showing two different histories: anyone comparing checkpoints would catch it, but only external
   witness cosigning (roadmap) prevents it.
@@ -164,3 +170,16 @@ while a freeze can come from any signed-in session. Not covered, and said so: LL
 already in flight when a freeze lands, and a total that can reach twice the daily cap across midnight UTC.
 Tests: `server/test/brakes-money.test.js`, `brakes-breaker.test.js`, `brakes-freeze.test.js`, `brakes-headline.test.js`,
 `brakes-mcp.test.js`, and the migration test.
+
+## Two-person seal, 9 Oct 2026 (branch `feat/two-person`, migration 0009, not deployed)
+
+Team members, invites, roles and quorum votes (threat model T1 to T11; migration 0009, additive: an existing account is one
+person, its owner, and one seal approves, as before). Tests in `server/test/team.test.js`: the same person twice (a second
+passkey, a second browser, two confirmations at once), viewers and members cannot seal, self-approval off, a race
+between two approvers, a demoted or removed member's seal, removal revoking everything at once, invites (single use,
+expiry, revocation, rate limit, team size, hashed, never logged), joining (excluded credentials, a browser already in the
+account, unique names, everyone alerted), the quorum's timing (raising at once, lowering after 24 hours, cancellation, a
+concurrent change), pre-approvals and money caps paused, guard holds, Freeze, receipt privacy, roles on every route, CSRF
+on both hosts, the D1 budgets and account deletion; and the migration test on live-shaped data. Freeze now also drops
+the seals already on waiting holds. Passkey ceremonies of Brakes (unfreeze, breaker reset) also require the signed-in
+person's own passkey.

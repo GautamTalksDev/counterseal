@@ -1,8 +1,8 @@
 # Protocol
 
 Two wire formats are new in the merged service: receipts in the public log, and agent signatures on proxied requests.
-A third, the Approvals API for a coding agent's commands, is below. The broker itself is described in the
-[README](../README.md) and [POLICY.md](POLICY.md).
+A third, the Approvals API for a coding agent's commands, and the team API of the two-person seal are below. The broker
+itself is described in the [README](../README.md) and [POLICY.md](POLICY.md).
 
 ## Receipts
 
@@ -35,6 +35,10 @@ The brakes add rule ids and nothing else: `st.money:capped` (a Stripe refund or 
 `brake.money-per-call`, `brake.money-per-day`, `brake.money-currency` and `brake.money-unreadable` (held by a money cap), and
 `brake.tripped` (held because the token's breaker tripped). A receipt never carries an amount, a currency or a charge id,
 and a freeze, an unfreeze or a breaker reset is not a receipt: those are in the account's private audit log only.
+
+The two-person seal adds two numbers to an `approved` receipt when the team required more than one seal: `meta.quorum`
+(seals required) and `meta.votes` (seals given). Never who sealed, which passkey or when; a seal that does not complete
+the quorum is not a receipt (it is `approve_vote` in the private audit log). See [Team](#team-the-two-person-seal).
 
 `submitter` is a per-entry salted commitment, so entries cannot be grouped by account:
 
@@ -159,7 +163,8 @@ returned as `hash` in every answer. Answers:
 
 ### Wait: `GET /v1/approvals/<id>?wait=<0..20>`
 
-`{id, status, deny_reason, expires_at, hash}` with `status` one of `pending`, `approved`, `denied`, `expired`, `used`.
+`{id, status, deny_reason, expires_at, hash, seals, needs}` with `status` one of `pending`, `approved`, `denied`,
+`expired`, `used`; `seals` and `needs` say how many approvals it has and needs (a guard can print "1 of 2 seals").
 With `wait`, the server re-reads every 2 seconds until the status is not `pending` or the wait is over. A pending or
 approved hold past its time reads as `expired`. No D1 writes (the limit, 30 a minute per key, is kept in memory) and at
 most 12 D1 queries per call. Another key's hold, or a brokered hold, is `404`.
@@ -190,6 +195,136 @@ A guard decision is sealed like a broker decision, with fixed words only:
 `meta.passkey: true`), `denied`, `executed` (the guard used the approval; audit action `run_approved`). `meta.map` is
 the guard's map version when it sent one, else the API map version. Never the command, summary, why, folder, session,
 key label or deny reason.
+
+## Team (the two-person seal)
+
+One account, several people, each signing in with their own passkey. In this repo on branch `feat/two-person`, not yet
+deployed (migration 0009). Code: `server/src/team.js`; tests: `server/test/team.test.js`.
+
+### Members and roles
+
+Every web or CLI session, passkey, push device, token, guard key and receipts key belongs to one member: the person whose
+passkey made the session, or who made the key. The account's founder has the account id as their member id, so every row
+written before teams (`member_id` NULL) is the founder's: the member behind a row is `COALESCE(member_id, account_id)`.
+The founder's `members` row is written with the first invite; until then the founder is the owner without one.
+
+| Role | Can | Cannot |
+|---|---|---|
+| owner | everything below, and: invite, change roles, remove people, change the quorum, delete vault keys, switch receipts, delete the account | be the last owner and leave or be demoted |
+| approver | seal held actions; make tokens, guard keys, agent keys and receipts keys; cancel a waiting lowering; unfreeze; reset a tripped breaker | anything owner-only |
+| member | make tokens, guard keys, agent keys and receipts keys; revoke them | seal, pre-approve, set money caps |
+| viewer | read everything (holds, tokens, audit log, team, command line sign-ins); deny a held action; freeze | anything else |
+
+The role is read with the session on every request (one query, a join) and checked on the server for every signed-in
+route: reads need any role, writes need `member` unless the route says otherwise (`403 role_required`). A removed
+member's sessions are deleted; a session whose member is removed or missing is `401 signed_out`. Every passkey ceremony
+of a signed-in person must use that person's own passkey (`401 unknown_passkey` otherwise). A CLI sign-in gets the role
+of the member who approved it.
+
+### Invites
+
+- `POST /v1/team/invites/begin {role, label, hours?}` and `/finish {challengeId, credential}` (owner, web session, fresh
+  passkey ceremony). `role` is `approver`, `member` or `viewer` (owners are made by promotion); `label` 1 to 60 characters
+  (letters, digits, space and `._:/()',-`); `hours` 1 to 24, default 2. The role, label and hours ride in the
+  challenge: what the passkey approved is what is made. Returns `{id, role, label, expiresAt, url, note}` with
+  `url = <product host>/app#invite=<43 base64url characters>`, shown once. Only `SHA-256(token)` is stored. 10 an hour
+  per account (`429 slow_down`), a team of 10 people counting open invites (`409 team_full`).
+- `DELETE /v1/team/invites/<id>` (owner; revoking only tightens, so a CLI session of an owner may).
+- An invite works once, until it expires, only while the owner who made it is still an owner (it dies when they are
+  demoted or removed), and only on the product's host (`403 invite_on_new_host` on the old one).
+- The token travels only in the URL fragment and POST bodies, so it is never in a request line, a server log or a
+  Referer; the app reads it once and removes it from the address bar at once.
+
+Joining (public, `Origin` checked like every public write):
+- `POST /v1/invites/lookup {token}` returns `{account, inviter, role, label, expires_at}` for the invite page.
+- `POST /v1/invites/begin {token, name}` returns `{challengeId, account, inviter, role, options}`: WebAuthn
+  registration options with `userVerification: "required"`, a resident key, and `excludeCredentials` listing the
+  account's passkeys, so an authenticator that already holds one of them refuses to make another.
+- `POST /v1/invites/finish {token, challengeId, credential}` makes the member, their passkey and a web session in one
+  transaction that consumes the invite only if it is still live, its owner is still an owner, the team has room and the
+  name is free (case-insensitive). A browser already signed in to the account is refused (`409 already_member`).
+- Every member's devices are woken (`member_joined`), and the audit log records who invited whom.
+
+### Seals (votes)
+
+`POST /v1/holds/<id>/approve/begin|finish` keep their shape and are now one seal each. The answer has
+`{ok, approved, seals, needs, note}`. A hold is approved when the seals that still count reach
+`max(holds.needs, quorum in force now)`; `holds.needs` is the quorum when the hold was made, so a raise applies to
+waiting holds at once and a lowering never applies to them.
+
+A seal counts while: its member is an owner or approver and not removed; their `votes_from` has passed (while two seals
+are required, a new or promoted approver's seal counts 24 hours after joining or promotion); with self-approval off,
+they are not the member who made the token or guard key that asked (`holds.requested_by`); the account is not frozen;
+and it was given for the hold's exact request hash (the challenge carries it from `begin` to `finish`, `409
+hold_changed` otherwise). One row per (hold, member): two passkeys or two browsers of one person count once
+(`409 already_sealed`). The seal and the approval are one transaction, so two approvers sealing at the same moment
+approve exactly once. Refusals before the passkey prompt: `403 role_required` or `approver_required` (not an owner or
+approver), `403 seal_not_yet`, `403 own_request`, `409 already_sealed`, `423 account_frozen`.
+
+Any member may deny (`POST /v1/holds/<id>/deny`), a viewer too: one no ends the hold, whatever seals it has. Freezing
+drops the seals already on waiting holds. Removing someone, or demoting them below approver, drops their seals.
+
+`GET /v1/holds` adds `needs`, `self_approve`, `requested_by` and `votes: [{member, name, passkey, at}]` (the seals that
+still count, oldest first; `passkey` is the 16-hex fingerprint). A held API call's `428` adds `seals_needed`.
+
+The audit log has `approve_vote` (a seal that did not complete the quorum: private, no receipt) and `approve` (with
+`quorum` and every seal's member, passkey fingerprint and time when more than one was required). The public receipt
+of the approval carries `meta.quorum` and `meta.votes` only.
+
+### The quorum
+
+- `POST /v1/team/quorum/begin {quorum: 1|2, selfApprove: bool}` and `/finish` (owner, fresh passkey ceremony). Parts
+  that tighten (a higher quorum, self-approval off) apply at once; parts that loosen (a lower quorum, self-approval on)
+  are stored as a pending pair that takes effect 24 hours later (`quorum_effective_at`), and replace any change already
+  waiting; a request that loosens nothing clears a waiting change. There is no cron: the pending pair is applied when
+  read. A lowering wakes every member's devices. The write is a compare-and-set on the values read (`409 try_again`).
+  The team needs at least `quorum` owners or approvers (`409 not_enough_approvers`); `409 same_quorum` if nothing
+  would change.
+- `POST /v1/team/quorum/cancel/begin|finish` (owner or approver, fresh passkey ceremony) cancels a waiting change
+  before it takes effect.
+- While the quorum is 2 or self-approval is off, pre-approved irreversible calls and money caps (one person approving
+  in advance) are paused: those calls are held like any other. Minting a token with either is refused (`409
+  quorum_blocks_preapproval`).
+- `GET /v1/me` has `team: {quorum, selfApprove, pending}`; `GET /v1/team` has the members (with passkey count, last
+  use and when their seal starts counting), the quorum, a pending change, open invites and who you are.
+
+### Roles and removal
+
+- `POST /v1/team/members/<id>/role/begin {role}` and `/finish` (owner, fresh passkey ceremony). Never leaves the account
+  without an owner (`409 last_owner`) or with fewer owners and approvers than the quorum (`409 not_enough_approvers`);
+  the same rules are in the update statement itself. Demoting below approver drops the member's seals on waiting holds;
+  demoting an owner revokes their open invites. Every member's devices are woken.
+- `POST /v1/team/members/<id>/remove/begin|finish` (an owner removes anyone; anyone may remove themselves, which is
+  leaving; fresh passkey ceremony). In one transaction: the member is marked removed (only if the rules still hold), and
+  only then their sessions, passkeys and push devices are deleted, their seals on waiting holds dropped, the tokens,
+  guard keys and receipts keys they made revoked, what those asked for closed, and their open invites revoked. Returns
+  the counts. Every remaining member's devices are woken.
+
+### Alerts
+
+`GET /v1/alerts` adds `team: [{kind, at, ...}]` for the last 15 minutes: `member_joined` (name, role),
+`member_role_changed` (name, from, to), `member_removed` (name, role), `quorum_lowering` (from, to, effective_at) and
+`quorum_lowering_cancelled`. A seal that does not complete the quorum wakes the other members' devices (at most once a
+minute per account, shared with hold alerts).
+
+### Extension points (break-glass windows and team alert channels)
+
+- New tables go in their own additive migration (the next free number), not in 0009, so a database that applied 0009
+  stays consistent. Reference `members(id)` for `opened_by`; scope rows by `account_id`.
+- Roles: add the route with its least role as the fifth element of `ROUTES` (`ANY`, `MEMBER`, `APPROVER`, `OWNER`);
+  check `sess.role` or `Team.requireLevel(sess, level)` inside handlers that need more.
+- Passkey ceremonies: pass the session to `checkAssertion(env, credential, challenge, sess)` so the passkey must be the
+  signed-in member's own.
+- Hold creation: set `needs` from `Team.effective(accountRow).quorum` and `requested_by` from the maker
+  (`Team.memberOf(row)`); a hold without them still needs the quorum in force (`max` above), but has no requester to
+  exclude. A break-glass window check belongs next to the hold decision in `broker.proxy` and `approvals.create`,
+  before a hold is inserted.
+- Seals: who may seal is one SQL rule (`ELIGIBLE` in `team.js`), used by the seal, the approval and the hold card.
+  A window that lets holds through without seals is one person loosening protection while two seals are required:
+  this branch builds no windows; when they come, audit each one and announce it to every member and channel.
+- Alerts: `notify(env, accountId, fetch, {exceptMember})` wakes every member's devices but one; team events for the
+  phone come from audit actions listed in `Team.recentEvents`. A channel message can say "n of m seals" from
+  `holds.needs` and the hold's `votes`.
 
 ## Web Bot Auth
 
