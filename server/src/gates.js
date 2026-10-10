@@ -32,6 +32,7 @@ import { GATE_AGENT, GATE_HOST, GATE_METHOD, gateHash, gateContext, factsOf, pre
 import { WAIT_MAX, WAIT_STEP, WAIT_READS, POLLS_PER_MINUTE } from './approvals.js';
 import { BRAND } from './brand.js';
 import * as Team from './team.js';
+import * as Channels from './channels.js';
 
 export const MAX_GATES = 20, HOLDS_PER_HOUR = 30, PENDING_PER_GATE = 10, TOKEN_TTL = 15 * 60_000, GRANT_WINDOW = 11 * 60_000;
 export const DEFAULT_MINUTES = 15, MAX_MINUTES = 60, MAX_SUMMARY = 120;
@@ -242,7 +243,12 @@ export async function request(c) {
       if (seen) c.waitUntil(seen);
       // wake the owner's devices after responding; the push carries nothing. One alert a minute per account for held
       // requests (the same bucket as held API calls and commands).
-      c.waitUntil((async () => { if (await allow(env.DB, 'pushhold:' + g.account_id, 1, 60_000, now())) await notify(env, g.account_id, env.__pushFetch || fetch); })());
+      c.waitUntil((async () => {
+        if (await allow(env.DB, 'pushhold:' + g.account_id, 1, 60_000, now())) {
+          await notify(env, g.account_id, env.__pushFetch || fetch);
+          await Channels.holdAlert(env, g.account_id, { who: g.label, rule, needs, holdId: id });
+        }
+      })());
     } else {
       hold = await env.DB.prepare("SELECT id, status, expires_at FROM holds WHERE token_id = ? AND req_hash = ? AND status IN ('approved','pending') ORDER BY created_at DESC LIMIT 1").bind(tokenId, hash).first();
       if (!hold) throw new HttpError(409, 'try_again', 'Another request for this run was decided just now. Ask again.');

@@ -330,13 +330,6 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   const team = Team.effective(tok);
   const solo = Team.oneSealEnough(team) && (tok.maker_role === 'owner' || tok.maker_role === 'approver');
   if (!solo && d.decision === 'allow' && d.rule.endsWith(':preapproved')) d = { decision: 'hold', rule: d.rule.slice(0, -':preapproved'.length), why: d.why };
-  // Break-glass (src/windows.js): while a window is open for this token, what the irreversible map would hold goes through,
-  // sealed in the log with the window's id. Never what a brake holds, and with self-approval off never the opener's own token.
-  let breakglass = null;
-  if (tok.window_open && d.decision === 'hold' && !d.rule.startsWith('brake.')) {
-    const w = await Windows.matching(env, tok.account_id, tok.id, Team.memberOf(tok), team.selfApprove, now());
-    if (w) { breakglass = w.id; d = { decision: 'allow', rule: d.rule + ':breakglass', why: d.why }; }
-  }
   // An approval binds the exact bytes sent upstream, and the content-type that tells the upstream how to read them.
   const bodyHash = body ? b64u(new Uint8Array(await crypto.subtle.digest('SHA-256', body))) : '';
   const reqHash = await sha256hex(JSON.stringify([method, upHost, path, url.search, request.headers.get('content-type') || '', bodyHash]));
@@ -352,8 +345,22 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   // Brakes (src/brakes.js): a tripped token's writes wait; a Stripe refund or payout under the token's money caps may pass
   // the map; a write that would go upstream is counted against the breaker's limits.
   // (while two seals are required, the money caps are left out: they never let a call through then)
-  const brake = await Brakes.apply(env, { d, tok, policy: solo ? policy : { ...policy, money: null }, provider, method, canon: path, bodyText, search: url.search, contentType: request.headers.get('content-type') || '', reqHash, P, fetcher, secretOf });
+  let brake = await Brakes.apply(env, { d, tok, policy: solo ? policy : { ...policy, money: null }, provider, method, canon: path, bodyText, search: url.search, contentType: request.headers.get('content-type') || '', reqHash, P, fetcher, secretOf });
   d = brake.d;
+  // Break-glass (src/windows.js): while a window is open for this token, what the irreversible map still holds after the brakes
+  // have had their say goes through, sealed in the log with the window's id. Never what a brake holds (a tripped breaker, a rate
+  // limit, a money cap), and with self-approval off never the opener's own token. The brakes then look at the call again as an
+  // allowed write, so it still counts against the breaker's limits.
+  let breakglass = null;
+  if (tok.window_open && d.decision === 'hold' && !d.rule.startsWith('brake.')) {
+    const w = await Windows.matching(env, tok.account_id, tok.id, Team.memberOf(tok), team.selfApprove, now());
+    if (w) {
+      breakglass = w.id;
+      const letThrough = { decision: 'allow', rule: d.rule + ':breakglass', why: d.why };
+      brake = await Brakes.apply(env, { d: letThrough, tok, policy: solo ? policy : { ...policy, money: null }, provider, method, canon: path, bodyText, search: url.search, contentType: request.headers.get('content-type') || '', reqHash, P, fetcher, secretOf });
+      d = brake.d;
+    }
+  }
   if (d.decision === 'hold') {
     // an approved grant for exactly this request? consume it atomically
     const g = await env.DB.prepare("UPDATE holds SET status = 'used' WHERE id = (SELECT id FROM holds WHERE token_id = ? AND req_hash = ? AND status = 'approved' AND expires_at > ? LIMIT 1) RETURNING id")

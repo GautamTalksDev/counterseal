@@ -339,8 +339,8 @@ while two seals may be required, so it is small and loud.
 - `GET /v1/team` and `GET /v1/me` carry the open window: `windows: [{id, opened_by, opened_by_name, reason, opened_at,
   expires_at, scope}]` (`scope` is `null` or `{token_id, label}`). `GET /v1/team` also has `breakglass: {minMinutes, maxMinutes,
   perDay}`.
-- What it does. In `broker.proxy`, when the map would hold a call (and the rule is not a brake's: `brake.*`) and a window is open
-  for the token, the call is allowed with the rule's id plus `:breakglass`; the private log's `proxy` entry carries
+- What it does. In `broker.proxy`, after the brakes have had their say, when the map still holds a call (and the rule is not a brake's: `brake.*`) and a window is open
+  for the token, the call is allowed with the rule's id plus `:breakglass` (and counted against the breaker like any allowed write); the private log's `proxy` entry carries
   `breakglass: <window id>` and the public receipt `meta.breakglass: true`, nothing else about the window. In
   `approvals.create`, a hold for a guard key that a window covers is inserted already approved (use once within 10 minutes,
   `status: "approved"`, `breakglass: true` in the answer); the later `run_approved` entry carries the window's id. The check costs

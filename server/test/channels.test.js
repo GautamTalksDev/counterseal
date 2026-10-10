@@ -255,3 +255,17 @@ test('remove: an owner, at once; the channel hears nothing more; a stranger\'s i
   // 2 owners: the other owner may remove too (any owner may), and a heldCall helper still works with none
   void heldCall;
 });
+
+test('a deploy gate\'s hold tells the channels too: the gate\'s name, the rule and the link; never the repository, commit or run', async () => {
+  const { world, gateId, ask: askGate } = await import('./gate-helpers.js');
+  const { w, gh } = await world();
+  const u = await founder(w);
+  const calls = sink(w);
+  await addOk(w, u, 'slack', SLACK, 'ops');
+  const g = await gateId(w, u, { label: 'prod deploy' });
+  const r = await askGate(w, gh, g, {}, { summary: 'deploy a1b2c3d to production' });
+  assert.equal(r.status, 202, JSON.stringify(r.body));
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].body.text, /^Counterseal: prod deploy needs approval for gate\.bind\. Approve with your passkey: https:\/\/leash\.test\/app#hold=[0-9a-f]{24}$/);
+  for (const s of ['acme', 'a1b2c3d', 'octocat', '812', 'production', 'refs/heads']) assert.ok(!calls[0].body.text.includes(s), s);
+});

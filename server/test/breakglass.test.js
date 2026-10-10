@@ -293,3 +293,27 @@ test('quorum 2: a window lets one approver\'s emergency through, announced to ev
   assert.equal(db(w).prepare('SELECT status FROM holds WHERE id = ?').get(h.hold).status, 'pending');
   assert.equal((await seal(w, ben, h.hold)).body.approved, true);
 });
+
+test('the brakes still apply inside a window: a money cap holds an over-cap payout, a call it lets through still counts against the breaker', async () => {
+  const { stripeWorld, account, mintPre, mint, payout, MONEY, posts } = await import('./brakes-helpers.js');
+  const w = stripeWorld();
+  const u = await account(w);
+  const capped = await mintPre(w, u, { money: MONEY });
+  const uncapped = await mint(w, u, undefined, 'no caps');
+  assert.equal((await payout(w, uncapped.token, 'amount=5001&currency=usd')).status, 428, 'a payout with no caps is held by the map');
+  const win = await openWindow(w, u);
+  assert.equal(win.status, 200, JSON.stringify(win.body));
+  // the token with caps: over the per-call cap is a brake, and a window does not lift it
+  const over = await payout(w, capped.token, 'amount=5001&currency=usd');
+  assert.equal(over.status, 428); assert.equal(over.body.rule, 'brake.money-per-call');
+  // a token with no caps: the map's hold is what the window lifts
+  const before = posts(w).length;
+  assert.equal((await payout(w, uncapped.token, 'amount=5001&currency=usd')).status, 200);
+  assert.equal(posts(w).length, before + 1);
+  // the breaker: a call a window let through is counted, so a token with a limit of one write an hour trips on the second
+  const limited = await mint(w, u, { limits: { writesPerHour: 1 } }, 'limited');
+  assert.equal((await w.req('DELETE', '/p/stripe/v1/customers/cus_1', { bearer: limited.token, ...anon })).status, 200);
+  const second = await w.req('DELETE', '/p/stripe/v1/customers/cus_2', { bearer: limited.token, ...anon });
+  assert.equal(second.status, 428); assert.equal(second.body.rule, 'brake.tripped');
+  assert.ok(db(w).prepare('SELECT tripped_at FROM tokens WHERE id = ?').get(limited.id).tripped_at, 'the token tripped');
+});
