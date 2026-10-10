@@ -8,9 +8,27 @@
 
 [Website](https://counterseal.gautamkhosla.com) · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Limits](#honest-limits) · [Security](SECURITY.md) · [Self-hosting](docs/DEPLOY.md) · [Full guide](docs/GUIDE.md)
 
-[![npm](https://img.shields.io/npm/v/counterseal)](https://www.npmjs.com/package/counterseal) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![ci](https://github.com/GautamTalksDev/counterseal/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GautamTalksDev/counterseal/actions/workflows/ci.yml) [![CodeQL](https://github.com/GautamTalksDev/counterseal/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/GautamTalksDev/counterseal/actions/workflows/codeql.yml) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/GautamTalksDev/counterseal/badge)](https://scorecard.dev/viewer/?uri=github.com/GautamTalksDev/counterseal) [![npm](https://img.shields.io/npm/v/counterseal)](https://www.npmjs.com/package/counterseal) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
+<img src="docs/assets/demo.gif" alt="An AI agent sends a DELETE through Counterseal and gets 428 held_for_approval. The owner approves with a passkey, the agent retries the same request once, and it goes through. Illustrated flow with an example repository." width="830">
+
+<sub>Illustrated flow: the repository name is an example. The 428 response, the rule id and the approve link are what the server returns.</sub>
 
 </div>
+
+## Quickstart
+
+Three commands (the CLI is the [`counterseal`](https://www.npmjs.com/package/counterseal) package, Node 20 or later, zero dependencies):
+
+```bash
+npx counterseal login                                    # prints a code; type it at /app#device, check where it started, approve with your passkey
+npx counterseal add github                               # paste the key once; it goes into the vault
+npx counterseal token --label "coding agent, laptop"     # a proxy token for the agent (with one key in the vault no id is needed)
+```
+
+Prefer no terminal? Create an account at [/app](https://counterseal.gautamkhosla.com/app) (a name and a passkey) and press
+**Try a held call**: a pretend call you approve with your passkey (nothing real is called and nothing is made public).
+Then [connect your agent](#connect-your-agent).
 
 ---
 
@@ -32,18 +50,9 @@ A prompt is not a permission system. Counterseal moves the decision out of the m
 
 The agent's signed request is the seal. Your passkey approval is the counterseal. The public log keeps the impression.
 
-## Quickstart
+## Connect your agent
 
-The CLI is the [`counterseal`](https://www.npmjs.com/package/counterseal) package (0.3.0, Node 20 or later, zero
-dependencies).
-
-```bash
-npx counterseal login                                    # prints a code; type it at /app#device, check where it started, approve with your passkey
-npx counterseal add github                               # paste the key once; it goes into the vault
-npx counterseal token --label "coding agent, laptop"     # a proxy token for the agent (with one key in the vault no id is needed)
-```
-
-Give the token to your agent as an MCP server (the `leash_request` tool calls the APIs through Counterseal):
+After the three commands in the [quickstart](#quickstart), give the token to your agent as an MCP server (the `leash_request` tool calls the APIs through Counterseal):
 
 ```json
 {
@@ -59,9 +68,6 @@ Give the token to your agent as an MCP server (the `leash_request` tool calls th
 
 Or point any SDK at `https://counterseal.gautamkhosla.com/p/github` with the token as its bearer. When the agent tries
 something irreversible it gets `428 held_for_approval` and an approve link, and your phone or browser asks for a passkey.
-
-Prefer no terminal? Create an account at [/app](https://counterseal.gautamkhosla.com/app) (a name and a passkey) and press
-**Try a held call**: a pretend call you approve with your passkey (nothing real is called and nothing is made public).
 
 All commands: `login`, `logout`, `add`, `creds`, `tokens`, `token`, `revoke`, `freeze`, `holds`, `watch`, `agent-key`,
 `agent-keys`, `mcp`, `mcp wrap|pin|unpin|status`, `guard install|uninstall|status|check|map`. Run `npx counterseal help`.

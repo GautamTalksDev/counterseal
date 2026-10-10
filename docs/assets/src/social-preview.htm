@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><style>
+@font-face{font-family:"Geist";src:url(../../../site/public/fonts/geist.woff2) format("woff2");font-weight:100 900}
+@font-face{font-family:"Geist Mono";src:url(../../../site/public/fonts/geist-mono.woff2) format("woff2");font-weight:100 900}
+@font-face{font-family:"Instrument Serif";src:url(../../../site/public/fonts/instrument-serif-italic.woff2) format("woff2");font-style:italic}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1280px;height:640px;overflow:hidden}
+body{position:relative;background:
+  radial-gradient(760px 560px at 84% 56%,rgba(31,110,74,.55),transparent 66%),
+  radial-gradient(1100px 700px at 0% 0%,rgba(200,245,96,.05),transparent 60%),
+  linear-gradient(180deg,#08090b,#0a100d);color:#f5f6f7;font-family:"Geist",sans-serif}
+.seal{position:absolute;right:-70px;top:86px;width:760px;filter:drop-shadow(0 40px 50px rgba(0,0,0,.55))}
+.wrap{position:absolute;left:80px;top:64px;bottom:60px;width:640px;display:flex;flex-direction:column}
+.brand{font:600 22px "Geist Mono",monospace;letter-spacing:.2em;color:#c8f560}
+h1{margin-top:44px;font-weight:700;font-size:80px;line-height:.98;letter-spacing:-.045em}
+h1 .d{color:#a1a5ad}
+h1 em{font-family:"Instrument Serif",serif;font-style:italic;font-weight:400;color:#c8f560;letter-spacing:-.02em;font-size:92px}
+.sub{margin-top:34px;font-size:27px;line-height:1.32;color:#c9ccd2;letter-spacing:-.01em;max-width:600px}
+.foot{margin-top:auto;display:flex;gap:22px;align-items:center;font:500 20px "Geist Mono",monospace;color:#80848d;letter-spacing:.04em}
+.foot b{color:#a1a5ad;font-weight:500}
+.dot{width:5px;height:5px;border-radius:50%;background:#3a3e46}
+</style></head><body>
+<img class="seal" src="../../../site/public/img/seal-rest.webp">
+<div class="wrap">
+  <div class="brand">COUNTERSEAL</div>
+  <h1>Every irreversible <span class="d">action gets a second</span> <em>seal.</em></h1>
+  <div class="sub">Your AI agent never holds a real API key. Deletes, refunds and force pushes wait for your passkey.</div>
+  <div class="foot"><b>Open source</b><span class="dot"></span><span>Apache-2.0</span><span class="dot"></span><span>CLI + MCP</span></div>
+</div>
+</body></html>
