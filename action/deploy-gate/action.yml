@@ -1,0 +1,35 @@
+name: Counterseal Deploy Gate
+description: Hold this job until the gate's owner approves it with a passkey. The approval is bound to the repository, workflow, commit and run in GitHub's signed OIDC token.
+author: Gautam Khosla
+inputs:
+  gate:
+    description: The gate's id, from the Deploy gates page in the Counterseal app (gate_ and 24 characters). It is not a secret.
+    required: true
+  summary:
+    description: One line shown to the approver under "Text from the workflow (not verified)", for example "deploy to production". 120 characters at most.
+    required: false
+    default: ''
+  timeout-minutes:
+    description: How long to wait for a decision, from 1 to 60. The request expires then and the step fails.
+    required: false
+    default: '15'
+  server:
+    description: Where Counterseal runs. Leave it alone unless you host your own.
+    required: false
+    default: 'https://counterseal.gautamkhosla.com'
+outputs:
+  decision:
+    description: approved, denied, expired, timeout, cancelled or refused. The step fails for everything but approved.
+  hold:
+    description: The id of the request, as it appears in the app.
+  token:
+    description: Only for a gate that names a key (phase 2). A Counterseal token for that key, valid 15 minutes, masked in the log.
+  base-url:
+    description: Only with token. The proxy address for the key's provider (use it instead of the provider's own address).
+  provider:
+    description: Only with token. The provider the key belongs to.
+  token-expires-at:
+    description: Only with token. When the token ends, in milliseconds since 1970.
+runs:
+  using: node24
+  main: index.mjs

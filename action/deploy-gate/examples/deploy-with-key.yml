@@ -1,0 +1,37 @@
+# No approval, no key. The deploy key is not in this repository's secrets. It stays in your Counterseal vault, and the gate hands
+# this job a Counterseal token for it (valid 15 minutes, under the policy you gave the gate) only after you approve with a
+# passkey. Until then the job has nothing to deploy with, even if someone edits this file to skip the gate.
+#
+# Make the gate in the Counterseal app with "Hand out a key" set to the vaulted key and a policy for what the deploy may do.
+# The token goes through Counterseal's proxy, which adds the real key: use the base-url output instead of the provider's address.
+name: Deploy with a key from the gate
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - id: gate
+        uses: ./.github/actions/counterseal-gate
+        with:
+          gate: gate_0123456789abcdef01234567
+          summary: create a deployment for ${{ github.sha }}
+
+      # The token output is masked in the log. Keep it in an environment variable of the step that uses it.
+      - name: Create the deployment through Counterseal
+        env:
+          BASE_URL: ${{ steps.gate.outputs.base-url }}   # for a GitHub key: https://counterseal.gautamkhosla.com/p/github
+          TOKEN: ${{ steps.gate.outputs.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          curl --fail-with-body -sS -X POST "$BASE_URL/repos/${GITHUB_REPOSITORY}/deployments" \
+            -H "authorization: Bearer $TOKEN" -H "content-type: application/json" \
+            -d "{\"ref\":\"$SHA\",\"auto_merge\":false,\"required_contexts\":[],\"environment\":\"production\"}"

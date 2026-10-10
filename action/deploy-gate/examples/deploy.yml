@@ -1,0 +1,45 @@
+# A deploy that waits for a passkey approval on Counterseal. Copy it to .github/workflows/deploy.yml.
+#
+# Before it works you need a gate: in the Counterseal app, Deploy gates, "New gate" (it asks for your passkey). Give it this
+# repository, this workflow file (.github/workflows/deploy.yml) and the branch it deploys from (refs/heads/main), then paste the
+# gate id below. The gate id is not a secret.
+#
+# Copy action/deploy-gate from the Counterseal repository to .github/actions/counterseal-gate in your repository (the action is
+# not on the Marketplace). Or, to use it from the Counterseal repository directly, pin a full commit:
+#   uses: GautamTalksDev/leash/action/deploy-gate@<full commit sha>
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Optional: if the gate lists "production" under environments, the job must run in that environment.
+    environment: production
+    permissions:
+      id-token: write   # lets this job ask GitHub for the OIDC token the gate checks; it grants nothing else
+      contents: read
+    steps:
+      - uses: ./.github/actions/counterseal-gate
+        with:
+          gate: gate_0123456789abcdef01234567
+          # Shown to the approver as "Text from the workflow (not verified)". Use only values you trust, such as the commit
+          # hash, never a commit message or a branch name from someone else.
+          summary: deploy ${{ github.sha }} to production
+          timeout-minutes: 15
+
+  deploy:
+    # Runs only if the gate step passed. Anyone who can edit this file can take that line out: protect the file with branch
+    # protection or CODEOWNERS, or use deploy-with-key.yml, where the job has nothing to deploy with until a human approves.
+    needs: approve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: ./scripts/deploy.sh
