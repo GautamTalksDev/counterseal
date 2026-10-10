@@ -140,6 +140,65 @@ await measure('POST /v1/receipts, 1 unsigned', (i) => request('POST', '/v1/recei
 await measure('GET /v1/stats (cached head)', () => request('GET', '/v1/stats'));
 await measure('GET /v1/log/proof/inclusion', () => request('GET', '/v1/log/proof/inclusion?index=3'));
 
+// ---- Deploy Gate: GitHub's OIDC token (RS256, WebCrypto) and the gate's own paths. The stand-in issuer signs real RSA-2048
+// tokens outside the timing; the Worker's fetch of GitHub's key set is a stub (no network), as in the tests.
+const { makeGithub } = await import('../test/gh.js');
+const { audienceFor } = await import('../src/gates.js');
+const { verifyGithubToken, _resetOidc } = await import('../src/oidc.js');
+const gh = await makeGithub();
+w.env.__oidcFetch = gh.fetch;
+{
+  // the signature and claims check alone, with GitHub's key already imported (the steady state: once per isolate and key)
+  const aud = 'https://leash.test/gate/gate_bench';
+  const toks = []; for (let i = 0; i < N; i++) toks.push(await gh.token(gh.claims({ aud, run_id: String(i) })));
+  const time = async (fn) => { const c0 = process.cpuUsage(); await fn(); const c = process.cpuUsage(c0); return (c.user + c.system) / 1000; };
+  _resetOidc(); await verifyGithubToken(w.env, toks[0], { audience: aud });
+  const warm = []; for (const t of toks) warm.push(await time(() => verifyGithubToken(w.env, t, { audience: aud })));
+  console.log(`${'verify a GitHub OIDC token (RS256, claims; key cached)'.padEnd(58)} worker median ${median(warm).toFixed(2)} ms, p95 ${p95(warm).toFixed(2)} ms`);
+  // the first token of an isolate: key set fetched (a stub here) and the RSA key imported, then verified
+  const cold = []; for (let i = 0; i < Math.min(N, 30); i++) { _resetOidc(); cold.push(await time(() => verifyGithubToken(w.env, toks[i], { audience: aud }))); }
+  console.log(`${'verify the first token (key set parsed, RSA key imported)'.padEnd(58)} worker median ${median(cold).toFixed(2)} ms, p95 ${p95(cold).toFixed(2)} ms`);
+  // WebCrypto's RSASSA-PKCS1-v1_5 verify by itself, for comparison
+  const k = [...gh.keys.values()][0];
+  const pub = await crypto.subtle.importKey('jwk', k.jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+  const [h, p, s] = toks[0].split('.'), sig = Uint8Array.from(Buffer.from(s, 'base64url')), msg = new TextEncoder().encode(`${h}.${p}`);
+  const raw = []; for (let i = 0; i < N; i++) raw.push(await time(() => crypto.subtle.verify({ name: 'RSASSA-PKCS1-v1_5' }, pub, sig, msg)));
+  console.log(`${'crypto.subtle.verify, RSA-2048 PKCS1 v1.5, alone'.padEnd(58)} worker median ${median(raw).toFixed(2)} ms, p95 ${p95(raw).toFixed(2)} ms`);
+}
+_resetOidc();
+const mkGate = async (over = {}) => {
+  const b = await w.req('POST', '/v1/gates/passkey/begin', { cookie: u.cookie, body: {} });
+  const r = await w.req('POST', '/v1/gates/passkey/finish', { cookie: u.cookie, body: { challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options), label: 'bench gate', repository: 'acme/app', workflows: ['.github/workflows/deploy.yml'], refs: ['refs/heads/main'], ...over } });
+  if (r.status !== 200) throw new Error('gate: ' + JSON.stringify(r.body));
+  return r.body.id;
+};
+const gate1 = await mkGate(), gate2 = await mkGate({ credentialId: cred, policy: { perMinute: 600 } });
+const jwtFor = async (g, over = {}) => gh.token(gh.claims({ aud: audienceFor(w.env, g), ...over }));
+// outside the timing: close earlier holds and reset the limits (10 waiting a gate, 30 new holds an hour a gate)
+const clearGate = () => { w.env.DB.raw.prepare("UPDATE holds SET status = 'expired' WHERE status = 'pending'").run(); w.env.DB.raw.prepare("DELETE FROM ratelimits WHERE bucket LIKE 'gate:%' OR bucket LIKE 'pushhold:%' OR bucket LIKE 'acct:%'").run(); };
+const askGate = async (g, over, extra = {}) => request('POST', '/v1/gate/request', { bearer: await jwtFor(g, over), body: { gate: g, summary: 'deploy to production', ...extra } });
+await measure('POST /v1/gate/request, new hold (verify + jti + held + push check + sealed)', (i) => { clearGate(); return askGate(gate1, { run_id: String(10_000 + i) }); }, (st) => st === 202);
+clearGate();
+const waiting = (await w.req('POST', '/v1/gate/request', { bearer: await jwtFor(gate1, { run_id: '99' }), origin: null, xleash: false, body: { gate: gate1 } })).body;
+await measure('POST /v1/gate/request, the same run asked again (verify + jti + poll secret)', () => askGate(gate1, { run_id: '99' }), (st) => st === 202);
+await measure('GET /v1/gate/status/:id (poll, no wait)', () => request('GET', `/v1/gate/status/${waiting.id}`, { bearer: waiting.poll }));
+// a full 20 s long poll: 11 reads; the 2 s timer is stubbed (waiting costs no CPU on Workers)
+w.env.__sleep = async () => {};
+await measure('GET /v1/gate/status/:id?wait=20 (11 reads, timer stubbed)', () => request('GET', `/v1/gate/status/${waiting.id}?wait=20`, { bearer: waiting.poll }));
+delete w.env.__sleep;
+const approvedGate = async (g, i) => {
+  clearGate();
+  const r = (await w.req('POST', '/v1/gate/request', { bearer: await jwtFor(g, { run_id: String(50_000 + i) }), origin: null, xleash: false, body: { gate: g } })).body;
+  const bb = await w.req('POST', `/v1/holds/${r.id}/approve/begin`, { cookie: u.cookie, body: {} });
+  const ok = await w.req('POST', `/v1/holds/${r.id}/approve/finish`, { cookie: u.cookie, body: { challengeId: bb.body.challengeId, credential: await u.auth.get(bb.body.options) } });
+  if (ok.status !== 200) throw new Error('approve failed: ' + JSON.stringify([r, ok.body]).slice(0, 400));
+  return r;
+};
+await measure('GET /v1/gate/status/:id, approved (spend once + bind + sealed)', async (i) => { const r = await approvedGate(gate1, i); return request('GET', `/v1/gate/status/${r.id}`, { bearer: r.poll }); });
+await measure('GET /v1/gate/status/:id, approved, phase 2 (+ a 15 minute token)', async (i) => { const r = await approvedGate(gate2, 100_000 + i); return request('GET', `/v1/gate/status/${r.id}`, { bearer: r.poll }); });
+await measure('POST /v1/gate/cancel/:id', async (i) => { clearGate(); const r = (await w.req('POST', '/v1/gate/request', { bearer: await jwtFor(gate1, { run_id: String(70_000 + i) }), origin: null, xleash: false, body: { gate: gate1 } })).body; return request('POST', `/v1/gate/cancel/${r.id}`, { bearer: r.poll, body: {} }); });
+clearGate();
+
 // ---- Brakes: the breaker's counters, money caps (a Stripe lookup stub, no network), Freeze and a reset
 const stripeCred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'stripe', secret: 'sk_test_' + 'B'.repeat(24) } })).body.id;
 const CHG = 'ch_3NbenchChargeABCDEF01';
