@@ -152,23 +152,57 @@ const mintFor = async (credentialId, policy) => (await w.req('POST', '/v1/tokens
 const limited = await mintFor(cred, { perMinute: 600, limits: { writesPerHour: 5000, repeatsPer5Min: 100 } });
 const capped = (await ceremony('/v1/tokens/passkey/begin', '/v1/tokens/passkey/finish', { credentialId: stripeCred, label: 'support agent', policy: { perMinute: 600, money: { currency: 'usd', perCall: 100000, perDay: 99999999999 }, limits: { writesPerHour: 5000, repeatsPer5Min: 100 } } })).body.token;
 const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
-const fresh = () => w.env.DB.raw.prepare('DELETE FROM ratelimits').run(); // the account limit (300 writes a minute) is not what is measured
+// (named apart from the approvals section's fresh(): two branches each declared one, and the merged file did not parse)
+const clearLimits = () => w.env.DB.raw.prepare('DELETE FROM ratelimits').run(); // the account limit (300 writes a minute) is not what is measured
 await measure('proxy POST, both breaker limits (counted + allowed + sealed)', (i) => request('POST', url('/repos/a/b/issues'), { bearer: limited, body: { title: 'brakes', i } }));
 await measure('proxy POST /v1/refunds, under the caps (lookup, reserve, count, sealed)', (i) => request('POST', 'https://leash.test/p/stripe/v1/refunds', { bearer: capped, raw: `charge=${CHG}&amount=${100 + i}`, headers: FORM }));
 await measure('proxy POST /v1/refunds, over the cap (lookup + held + push check + sealed)', (i) => { w.env.DB.raw.prepare("UPDATE holds SET status = 'denied' WHERE status = 'pending'").run(); return request('POST', 'https://leash.test/p/stripe/v1/refunds', { bearer: capped, raw: `charge=${CHG}&amount=${200000 + i}`, headers: FORM }); }, (st) => st === 428);
-await measure('freeze (any signed-in session)', async () => { fresh(); if (w.env.DB.raw.prepare('SELECT frozen_at FROM accounts').get().frozen_at) await ceremony('/v1/me/unfreeze/begin', '/v1/me/unfreeze/finish'); return request('POST', '/v1/me/freeze', { cookie: u.cookie, body: {} }); });
+await measure('freeze (any signed-in session)', async () => { clearLimits(); if (w.env.DB.raw.prepare('SELECT frozen_at FROM accounts').get().frozen_at) await ceremony('/v1/me/unfreeze/begin', '/v1/me/unfreeze/finish'); return request('POST', '/v1/me/freeze', { cookie: u.cookie, body: {} }); });
 await measure('proxy GET, frozen account (423, nothing else read or written)', () => request('GET', url('/repos/a/b'), { bearer: plain }), (st) => st === 423);
 await measure('unfreeze (passkey verify)', async () => {
-  fresh();
+  clearLimits();
   await w.req('POST', '/v1/me/freeze', { cookie: u.cookie, body: {} });
   const b = await w.req('POST', '/v1/me/unfreeze/begin', { cookie: u.cookie, body: {} });
   return request('POST', '/v1/me/unfreeze/finish', { cookie: u.cookie, body: { challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) } });
 });
 await measure('reset a tripped token (passkey verify)', async (i) => {
-  fresh();
+  clearLimits();
   const t = await w.req('POST', '/v1/tokens', { cookie: u.cookie, body: { credentialId: cred, label: 'trips ' + i, policy: { limits: { writesPerHour: 1 } } } });
   await w.req('POST', '/p/github/repos/a/b/issues', { bearer: t.body.token, ...anon, body: { n: 1 } });
   await w.req('POST', '/p/github/repos/a/b/issues', { bearer: t.body.token, ...anon, body: { n: 2 } }); // trips it
   const b = await w.req('POST', `/v1/tokens/${t.body.id}/reset/begin`, { cookie: u.cookie, body: {} });
   return request('POST', `/v1/tokens/${t.body.id}/reset/finish`, { cookie: u.cookie, body: { challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) } });
+});
+
+// the two-person seal (team): a second approver joins through an invite and the quorum goes to 2. The setup of each
+// sample (a fresh hold, the first seal, a fresh invite) is outside the measurement.
+const { Authenticator, ORIGIN, RP_ID } = await import('../test/helpers.js');
+const inviteFor = async (name) => {
+  clearLimits();
+  const ib = await w.req('POST', '/v1/team/invites/begin', { cookie: u.cookie, body: { role: 'approver', label: 'bench' } });
+  const inv = await w.req('POST', '/v1/team/invites/finish', { cookie: u.cookie, body: { challengeId: ib.body.challengeId, credential: await u.auth.get(ib.body.options) } });
+  const token = inv.body.url.split('#invite=')[1], auth = new Authenticator(ORIGIN, RP_ID);
+  const jb = await w.req('POST', '/v1/invites/begin', { body: { token, name } });
+  return { token, auth, jb };
+};
+const first = await inviteFor('Bench Approver');
+const joined = await w.req('POST', '/v1/invites/finish', { body: { token: first.token, challengeId: first.jb.body.challengeId, credential: await first.auth.create(first.jb.body.options) } });
+const second = { cookie: joined.headers.get('set-cookie').split(';')[0], auth: first.auth };
+await ceremony('/v1/team/quorum/begin', '/v1/team/quorum/finish', { quorum: 2, selfApprove: true });
+await measure('GET /v1/team (members, passkeys, invites)', () => request('GET', '/v1/team', { cookie: u.cookie }));
+const heldNow = async (i) => { clearLimits(); w.env.DB.raw.prepare("UPDATE holds SET status = 'denied' WHERE status = 'pending'").run(); return (await w.req('DELETE', url('/repos/seal/r' + i), { bearer: plain, ...anon })).body.hold_id; };
+const sealStep = async (who, id) => { const b = await w.req('POST', `/v1/holds/${id}/approve/begin`, { cookie: who.cookie, body: {} }); return { challengeId: b.body.challengeId, credential: await who.auth.get(b.body.options) }; };
+await measure('approve, two seals: the first (passkey verify, seal, nudge check)', async (i) => {
+  const id = await heldNow('a' + i);
+  return request('POST', `/v1/holds/${id}/approve/finish`, { cookie: u.cookie, body: await sealStep(u, id) });
+});
+await measure('approve, two seals: the second (passkey verify, seal, approved + sealed)', async (i) => {
+  const id = await heldNow('b' + i);
+  await w.req('POST', `/v1/holds/${id}/approve/finish`, { cookie: u.cookie, body: await sealStep(u, id) });
+  return request('POST', `/v1/holds/${id}/approve/finish`, { cookie: second.cookie, body: await sealStep(second, id) });
+});
+await measure('join a team (registration verify, invite used, member + passkey, alert check)', async (i) => {
+  w.env.DB.raw.prepare("UPDATE members SET removed_at = 1 WHERE name LIKE 'Joiner%'").run(); // keep the team under 10 people
+  const j = await inviteFor('Joiner ' + i);
+  return request('POST', '/v1/invites/finish', { body: { token: j.token, challengeId: j.jb.body.challengeId, credential: await j.auth.create(j.jb.body.options) }, headers: { origin: 'https://leash.test' } });
 });

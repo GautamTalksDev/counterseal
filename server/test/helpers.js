@@ -96,7 +96,9 @@ export class Authenticator {
   }
   async get(options, { origin = this.origin, flags = 0x05 } = {}) {
     this.count++;
-    const ad = cat(await sha256(this.rpId), Uint8Array.of(flags), Uint8Array.of(0, 0, 0, this.count));
+    // the signature counter is 4 bytes, big-endian (one byte wrapped after 255 ceremonies and read as a replay)
+    const c = this.count;
+    const ad = cat(await sha256(this.rpId), Uint8Array.of(flags), Uint8Array.of((c >>> 24) & 255, (c >>> 16) & 255, (c >>> 8) & 255, c & 255));
     const cd = new TextEncoder().encode(JSON.stringify({ type: 'webauthn.get', challenge: options.challenge, origin }));
     const raw = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, this.kp.privateKey, cat(ad, await sha256(cd))));
     return { id: b64u(this.credId), authenticatorData: b64u(ad), clientDataJSON: b64u(cd), signature: b64u(rawToDer(raw)) };
