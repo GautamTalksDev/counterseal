@@ -80,7 +80,7 @@ export async function openFinish(env, sess, body) {
   if (!ins.meta.changes) throw new HttpError(409, 'try_again', 'The team or the account changed while you confirmed. Look again and retry.');
   await audit(env, sess.accountId, 'web', 'breakglass_opened', { id, by: sess.memberId, minutes: p.minutes, scope: scope ? scope.holdToken : 'all', reason: p.reason });
   // everyone else is told at once, with no rate limit (each took a passkey, and the daily cap bounds them), and so is every channel
-  await Team.alertTeam(env, sess.accountId, sess.memberId, { channel: 'Counterseal: break glass is open. Held actions are being let through for up to ' + p.minutes + ' minutes, and every call is on the record. Review it in the app.' });
+  await Team.alertTeam(env, sess.accountId, sess.memberId, { channel: 'Counterseal: break glass is open. Held actions are being let through for up to ' + p.minutes + ' minutes, and every call it lets through is on the record. Review it in the app.' });
   return { id, expires_at: t + p.minutes * 60_000, scope: scope ? { token_id: scope.holdToken, label: scope.label } : null };
 }
 

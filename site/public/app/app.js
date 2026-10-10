@@ -808,7 +808,7 @@ $('bgNew').onclick = async () => {
   try {
     const reason = $('bgReason').value.trim();
     if (reason.length < 3) return toast('Say why, in a few words. The whole team is told.');
-    if (!confirm('Open break glass? Held actions it covers will go through without a second approver, every member and channel is told, and every call is on the record.')) return;
+    if (!confirm('Open break glass? Held actions it covers will go through without a second approver, every member and channel is told, and every call it lets through is on the record.')) return;
     const body = { minutes: Number($('bgMinutes').value), reason };
     if ($('bgScope').value) body.tokenId = $('bgScope').value;
     await ceremony('/v1/team/breakglass/begin', '/v1/team/breakglass/finish', body);

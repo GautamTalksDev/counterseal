@@ -217,8 +217,9 @@ npx counterseal token <credentialId> --agent-key <agentKeyId>
 # MCP env: { "LEASH_TOKENS": "github=lsh_...", "LEASH_AGENT_KEY": "/path/to/agent-key.json" }
 ```
 
-Signing from the MCP server needs CLI 0.3.0 too: `npx counterseal` still runs 0.1.1 from npm, which cannot sign, so a
-bound token would refuse its calls. Until 0.3.0 is published, run `cli/leash.mjs` from this repository.
+Signing from the MCP server needs CLI 0.3.0 too. The only CLI on npm today is the `leashcli` package, version 0.1.1, which
+cannot sign, so a bound token would refuse its calls; the `counterseal` package (0.3.0) is not published yet. Until it is, run
+`cli/leash.mjs` from this repository.
 
 ### Approvals for what Counterseal does not proxy (a coding agent's commands)
 

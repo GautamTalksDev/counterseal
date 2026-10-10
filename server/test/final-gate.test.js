@@ -191,3 +191,17 @@ test('a guard key cannot write text of its own choosing into the permanent publi
   assert.ok(rs.some((x) => x.meta.rule === 'sh.rm'), 'a rule Counterseal ships still is');
   assert.equal(db(w).prepare("SELECT rule FROM holds WHERE rule LIKE 'sh.db-host%'").get().rule, 'sh.db-host-10.0.4.12-pw-hunter2', 'the owner still sees it on the card');
 });
+
+test('what a break-glass window tells the team is true: the calls it lets through are on the record (allowed reads are not)', async () => {
+  const w = new World();
+  const sent = [];
+  w.env.__channelFetch = async (url, init) => { sent.push(JSON.parse(init.body)); return new Response('ok'); };
+  const u = await founder(w);
+  const ch = await ceremony(w, u, '/v1/team/channels', { kind: 'slack', url: 'https://hooks.slack.com/services/T0123ABCD/B0456EFGH/abcdEFGH1234ijklMNOP5678', label: 'ops room' });
+  assert.equal(ch.status, 200, JSON.stringify(ch.body));
+  assert.equal((await openWindow(w, u)).status, 200);
+  const text = sent.map((b) => b.text).find((t) => /break glass is open/.test(t));
+  assert.ok(text, JSON.stringify(sent));
+  assert.match(text, /every call it lets through is on the record/);
+  assert.ok(!/every call is on the record/.test(text));
+});

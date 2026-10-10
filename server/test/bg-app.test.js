@@ -146,7 +146,7 @@ test('the phone says what happened: break glass opened or closed, a channel conn
   const sw = serviceWorker(() => ({ ok: true, status: 200, json: async () => ({ holds: [], signins: [], passkeys: [], frozen_at: null, team }) }));
   await sw.fire('push', {});
   assert.equal(sw.shown.at(-1).title, 'Counterseal: break glass is open');
-  assert.match(sw.shown.at(-1).body, /for up to 30 minutes, and every call is on the record\. Not expected\? Tap to close it\./);
+  assert.match(sw.shown.at(-1).body, /for up to 30 minutes, and every call it lets through is on the record\. Not expected\? Tap to close it\./);
   assert.equal(sw.shown.at(-1).data.url, '/app#team');
   team = [{ kind: 'breakglass_closed', at: 6 }]; await sw.fire('push', {});
   assert.equal(sw.shown.at(-1).title, 'Counterseal: break glass was closed');

@@ -20,7 +20,7 @@ function live(w, u, over = {}) {
   return { ...r, ...over };
 }
 /** wait for the page's own async work (a real Worker answers behind it; the full suite can be slow) */
-const until = async (p, ok) => { for (let i = 0; i < 300 && !ok(); i++) await new Promise((r) => setTimeout(r, 10)); await p.settle(); };
+const until = async (p, ok) => { for (let i = 0; i < 1000 && !ok(); i++) await new Promise((r) => setTimeout(r, 10)); await p.settle(); };
 const find = (root, text) => root.all((c) => c.tag === 'button' && c.textContent === text)[0];
 
 test('first run: the checklist counts what the account has done; Try a held call makes a demo hold; approving it lets the demo agent retry once', async () => {
@@ -34,8 +34,8 @@ test('first run: the checklist counts what the account has done; Try a held call
   assert.equal(p0.byId('firstRun').hidden, false);
   assert.equal(p0.byId('frCount').textContent, '1 of 6 done');
   p0.byId('demoBtn').click();
-  for (let i = 0; i < 50 && !p0.byId('holds').children.length; i++) await new Promise((r) => setTimeout(r, 20));
-  await p0.settle();
+  // waits on what it needs, up to 10 s (a fixed count of short sleeps flaked under the full suite's load)
+  await until(p0, () => p0.byId('holds').children.length);
   assert.ok(p0.calls.some((c) => c.method === 'POST' && c.path === '/v1/demo/call'));
   const card = p0.byId('holds').children[0];
   assert.ok(card && card.className.includes('hold-demo'), 'the demo card is on the list');
@@ -50,8 +50,7 @@ test('first run: the checklist counts what the account has done; Try a held call
   });
   await until(p, () => p.byId('holds').children.length);
   find(p.byId('holds'), 'Approve with passkey').click();
-  for (let i = 0; i < 20 && !p.calls.some((c) => c.body && c.body.hold === id); i++) await new Promise((r) => setTimeout(r, 20));
-  await p.settle();
+  await until(p, () => p.calls.some((c) => c.body && c.body.hold === id) && /demo provider answered/.test(p.byId('demoResult').textContent));
   const retry = p.calls.find((c) => c.method === 'POST' && c.path === '/v1/demo/call' && c.body && c.body.hold === id);
   assert.ok(retry, 'the app played the agent and retried once: ' + p.toast() + ' ' + JSON.stringify(p.calls.filter((c) => c.method === 'POST')));
   assert.match(p.byId('demoResult').textContent, /demo provider answered 204/);

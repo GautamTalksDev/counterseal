@@ -117,7 +117,7 @@ self.addEventListener('push', (e) => {
             body = `From ${new Date(t.effective_at).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}, held actions will need ${seals(t.to.quorum, t.to.selfApprove)}. Not expected? Tap to cancel it with your passkey.`;
           } else if (t.kind === 'breakglass_opened') {
             title = 'Counterseal: break glass is open';
-            body = `Held actions are being let through${Number.isFinite(t.minutes) ? ` for up to ${t.minutes} minutes` : ''}, and every call is on the record. Not expected? Tap to close it.`;
+            body = `Held actions are being let through${Number.isFinite(t.minutes) ? ` for up to ${t.minutes} minutes` : ''}, and every call it lets through is on the record. Not expected? Tap to close it.`;
             tag = 'leash-breakglass'; actions = undefined;
           } else if (t.kind === 'breakglass_closed') { title = 'Counterseal: break glass was closed'; body = 'Held actions wait for approval again.'; actions = undefined; }
           else if (t.kind === 'channel_added') { title = 'A channel now hears your Counterseal alerts'; body = `${t.channel === 'slack' ? 'Slack' : t.channel === 'discord' ? 'Discord' : t.channel === 'gchat' ? 'Google Chat' : 'A chat service'} was connected. It is only told: nobody can approve from it. Not expected? Tap to review.`; actions = undefined; }
