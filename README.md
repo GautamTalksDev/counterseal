@@ -213,7 +213,7 @@ bound token would refuse its calls. Until 0.2.1 is published, run `cli/leash.mjs
 
 Some irreversible actions never pass through an API Counterseal brokers: `terraform destroy`, `railway volume delete`,
 `gh repo delete`, `prisma migrate reset`, `DROP TABLE` through `psql`, `git push --force`. For those, a hook on the
-agent's machine (the `leashcli guard` hook, in progress) holds a **guard key** (`lsg_`) and asks the Approvals API:
+agent's machine (`leashcli guard`, in the next section) holds a **guard key** (`lsg_`) and asks the Approvals API:
 
 ```bash
 # ask (Bearer lsg_): the exact command, why it is held, and the folder it runs in
@@ -234,6 +234,68 @@ curl -s -X POST "https://counterseal.gautamkhosla.com/v1/approvals/$ID/use" -H "
   command, folder or label.
 
 The full contract (request fields, errors, budgets) is in [docs/PROTOCOL.md](docs/PROTOCOL.md#approvals-for-what-the-broker-does-not-proxy).
+
+### Guard your coding agent (`leashcli guard`)
+
+`leashcli guard` is the hook that does the asking for you. It reads each shell command your coding agent is about to
+run the way a shell does (quotes, `&&` and pipes, `sh -c`, `sudo`, `xargs`, `ssh`, `docker exec`, `package.json` scripts and
+more) and holds the ones on the **shell map** (version `2026-10-10.1`, 27 rules: `terraform destroy`, `git push --force`,
+`DROP TABLE` through `psql`, `railway volume delete`, `gh repo delete`, `rm -rf` outside the project, `kubectl delete`,
+`docker volume prune`, cloud CLI deletes, `curl` to a brokered API with a write method, and more) until you approve that
+exact command, once, with a passkey. Everything not on the map is left to the agent's own permission settings.
+
+It needs CLI 0.2.1, which is in this repository and not on npm yet; until it is, run `node cli/leash.mjs guard ...` from a
+clone instead of `npx leashcli guard ...`.
+
+```bash
+npx leashcli login                                  # a guard key made through this ends with the sign-in (7 days at most)
+npx leashcli guard install                          # finds Claude Code, Codex and Cursor; or --agents claude-code,codex,cursor
+npx leashcli guard check -- terraform destroy       # what the map says about a command, offline
+npx leashcli guard status                           # what is installed, whether the key works, whether the account is frozen
+npx leashcli guard uninstall                        # removes only its own hooks, revokes the key
+```
+
+`install` makes a guard key, saves it in `~/.config/leash/guard.json` (mode 600, never printed), copies the guard next to
+it, and adds hook entries to `~/.claude/settings.json`, `~/.codex/hooks.json` and `~/.cursor/hooks.json` without touching
+anything else (it saves a backup, shows the diff, and `--dry-run` shows it without writing). For a key that lasts, make one
+in the app (Account, Guard keys) and run `npx leashcli guard install --paste-key`.
+
+**Claude Code plugin** (the same hook, from this repository's marketplace file, no form):
+
+```bash
+claude plugin marketplace add GautamTalksDev/leash
+claude plugin install counterseal@counterseal
+npx leashcli guard install --agents none            # makes the key the plugin's hook uses
+```
+
+The plugin runs its own pinned copy of the guard (never `npx` at hook time) and needs `node` on your PATH. Claude Code
+2.1.295 or later blocks the command when the hook crashes or times out; older versions let it through. With the plugin
+switched on, `guard install` adds no second hook to Claude Code.
+
+- **A held command waits for you.** The agent's tool call pauses for up to 9 minutes while your phone shows the exact
+  command; approve and it runs, deny (with a reason) and the agent is told, with your words quoted as text. Agents whose
+  hooks cannot wait (or `"mode": "retry"`) get the answer at once with the link and run the same command again after you
+  approve.
+- **Fail closed.** If the server cannot be reached, the key is no longer valid, you are rate limited, or the account is
+  frozen, a command on the map is denied with the reason and the fix; every other command runs as before. Set
+  `"onUnavailable": "allow"` in `guard.json` to let commands through when the server cannot be reached (a revoked key, a
+  rate limit and a freeze still deny). A request times out after 10 seconds.
+- **What leaves your machine.** The command with credentials removed (connection strings, bearer tokens, key-shaped
+  values, `PASSWORD=` style variables), the rule, why, the name of the folder (not its path) and the session id. Held
+  commands are shown on your devices and may appear on the lock screen.
+- **What it does not see.** Aliases and functions defined outside the command line; the contents of script files and
+  Makefiles; code in other languages (`python -c`, `node -e`); PowerShell and `cmd`; encoded payloads (a decoder piped
+  into a shell is held, not read); globs; symlinks. An agent that edits its own hook settings, the guard's files or its
+  config, or runs the same effect through a script, is not stopped: **a seatbelt, not a sandbox**. For a hard stop, give
+  the agent a Counterseal token instead of the real key.
+- **How far each agent is tested.** The hook is tested against the real Approvals API code over HTTP
+  (`cli/test/guard-server.test.mjs`) and against each agent's documented hook format. Claude Code: the plugin passes
+  `claude plugin validate --strict` and installs from the marketplace file with Claude Code 2.1.293; it has not been seen
+  firing in a live session. Codex and Cursor: written to their documented formats, not tested in the apps. Copilot CLI,
+  Gemini CLI and Antigravity are not supported yet.
+
+The shell map (`sdk/shellmap.mjs`, tests in `sdk/shellmap.test.mjs` with about a thousand commands in
+`sdk/shellmap.vectors.txt`) is documented rule by rule in the [docs](https://counterseal.gautamkhosla.com/docs/#guard-cli).
 
 ### Any SDK or script
 
@@ -287,8 +349,11 @@ server/        Cloudflare Worker: API, proxy, vault, WebAuthn, policy, audit, th
   test/              node:test suite: virtual passkeys, fake upstream, migration on data from the live code
   bench/cpu.mjs      CPU of the hot paths
   dev/local.js       full local server on node:sqlite
-cli/           leash CLI and MCP server (zero dependencies), sign.mjs for agent keys
-sdk/           receipts (record + verify offline) and websig (Web Bot Auth sign + verify), zero dependencies
+cli/           leash CLI and MCP server (zero dependencies), sign.mjs for agent keys, guard.mjs (the coding-agent guard)
+  test/              the guard against a stand-in and against the real server code over HTTP; the plugin files
+sdk/           receipts (record + verify offline), websig (Web Bot Auth sign + verify) and shellmap (the shell map), zero dependencies
+plugins/       the Claude Code plugin (hook, skill, pinned scripts); .claude-plugin/marketplace.json at the root lists it
+scripts/       rebrand.mjs, sync-guard.mjs (keeps the guard copies, the SQL block and the API map in step with the server)
 site/public/   website and dashboard (strict CSP, Trusted Types, no third-party code)
 docs/          threat model, protocol, policy reference, deployment
 ```
@@ -297,7 +362,8 @@ docs/          threat model, protocol, policy reference, deployment
 
 ```bash
 cd server
-node --test test/*.test.js ../sdk/*.test.mjs   # the whole suite
+node --test test/*.test.js ../sdk/*.test.mjs ../cli/test/*.test.mjs   # the whole suite
+node ../scripts/sync-guard.mjs                  # after changing the shell map, the CLI or the server map: rewrite the generated copies
 node bench/cpu.mjs                              # CPU per hot path
 node dev/local.js 8790                          # http://localhost:8790 (passkeys work on localhost)
 ```
@@ -310,7 +376,8 @@ See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), six additi
 
 Brokers GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify; phone and desktop alerts for held calls (Web Push,
 payload-free); public receipts; agent keys; money caps, a breaker and Freeze. In this repo, not yet deployed: the Approvals API and guard keys for a
-coding agent's commands, and the two-person seal (team members, invites, roles, quorum votes). Next: AWS (SigV4
+coding agent's commands, `leashcli guard` with its shell map and Claude Code plugin (CLI 0.2.1, not yet on npm), and the
+two-person seal (team members, invites, roles, quorum votes). Next: AWS (SigV4
 re-signing), PlanetScale; break-glass windows and Slack, Discord and Google Chat alerts for teams; SSO for teams; external
 witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
 

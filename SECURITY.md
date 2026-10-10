@@ -57,7 +57,9 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
   whole command (up to 4,096 characters, never cut) with hidden characters made visible.
 - An agent getting around its guard. The coding-agent guard runs on the agent's machine and matches a map of commands: an
   agent that edits its hook settings, wraps a command in a script, or runs something the map does not know is not
-  stopped by it. It is a seatbelt, not a sandbox; for a hard stop, give the agent a Counterseal token, not the real key.
+  stopped by it. The map does not read aliases, script files, code in other languages, PowerShell or `cmd`, and does not
+  decode encoded payloads (it holds a decoder piped into a shell without reading it). It is a seatbelt, not a sandbox; for
+  a hard stop, give the agent a Counterseal token, not the real key.
 - A person who approves a CLI sign-in someone sent them. The screen shows where it started and asks whether they ran it,
   and the alert and one-tap revoke limit the damage (a CLI session cannot approve holds), but a person who approves
   anyway has signed that command line in for up to 7 days. Country and network checks can be fooled by a VPN.
@@ -183,3 +185,17 @@ concurrent change), pre-approvals and money caps paused, guard holds, Freeze, re
 on both hosts, the D1 budgets and account deletion; and the migration test on live-shaped data. Freeze now also drops
 the seals already on waiting holds. Passkey ceremonies of Brakes (unfreeze, breaker reset) also require the signed-in
 person's own passkey.
+
+## The coding-agent guard, 10 Oct 2026 (branch `feat/guard-cli`, not deployed; no server change)
+
+`leashcli guard` (CLI 0.2.1), the shell map (`sdk/shellmap.mjs`, version `2026-10-10.1`) and the Claude Code plugin. It runs
+on the agent's machine and uses the Approvals API above; threat model G9 to G17. The hook fails closed (a command on the
+map is denied when the server cannot be reached, the key is bad, a limit is hit or the account is frozen), removes
+credentials it recognises before sending a command, never prints its key, sends the key only over HTTPS or to the same
+machine, and its installer merges into the agents' settings with a backup and a diff and never overwrites them. Not
+covered, and said so: an agent that edits its own settings, the guard's files or its config; commands the map does not
+read (aliases, script files, other languages, PowerShell, encoded payloads); and agents whose hook has not been tested
+here (Codex and Cursor are written to their documented formats and not run in the apps; Claude Code's plugin passes
+`claude plugin validate --strict` but has not been seen firing in a live session). Tests: `sdk/shellmap.test.mjs` (about a
+thousand commands in `sdk/shellmap.vectors.txt`), `cli/test/guard.test.mjs` (against a strict stand-in of the contract),
+`cli/test/guard-server.test.mjs` (against the real server code over HTTP), `cli/test/plugin.test.mjs`.

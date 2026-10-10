@@ -28,7 +28,7 @@ export function files() {
       if (statSync(p).isDirectory()) walk(p); else if (TEXT.test(n)) out.push(p);
     }
   };
-  for (const d of ['site/public', 'docs', 'cli', 'sdk']) walk(join(ROOT, d));
+  for (const d of ['site/public', 'docs', 'cli', 'sdk', 'plugins']) walk(join(ROOT, d));
   for (const f of ['README.md', 'SECURITY.md']) if (existsSync(join(ROOT, f))) out.push(join(ROOT, f));
   return out.filter((p) => !GENERATED.has(relative(ROOT, p).replaceAll('\\', '/')));
 }

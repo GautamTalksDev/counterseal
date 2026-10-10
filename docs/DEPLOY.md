@@ -231,3 +231,21 @@ identical on both.
 ```bash
 cd cli && npm publish --access public      # leashcli 0.2.1 (agent keys, the typed sign-in code; its default server is counterseal); the planned new name is "counterseal"
 ```
+
+## The coding-agent guard (nothing to deploy on the Worker)
+
+`leashcli guard` is a client of the Approvals API (migration 0006), so the Worker needs nothing beyond that. What makes it
+available to people:
+
+1. **Publish the CLI** (above): `guard.mjs` and `shellmap.mjs` are in the package's `files`. Until 0.2.1 is on npm, `npx leashcli guard`
+   runs nothing (0.1.1 has no such command); the docs and README say so.
+2. **The plugin needs the repository to be readable by the people who add it.** `claude plugin marketplace add GautamTalksDev/leash`
+   reads `.claude-plugin/marketplace.json` from the default branch, so the files must be on the branch people get (not only on
+   a feature branch) and the repository must be public. No form and no store is involved. Submitting to Anthropic's directory
+   is a separate, optional step with its own review (their portal), not done here.
+3. **Keep the copies in step** whenever the map, the CLI or the server's irreversible map changes: `node scripts/sync-guard.mjs`
+   rewrites the generated API map block in `sdk/shellmap.mjs` and the copies in `cli/` and `plugins/counterseal/scripts/`;
+   CI runs it with `--check`. A new plugin version (`plugins/counterseal/.claude-plugin/plugin.json`) is what makes Claude Code
+   offer an update, because the scripts are pinned inside the plugin.
+4. **Nothing is tested in the agents' own apps yet** (see the README): try `leashcli guard status` and one held command in each
+   agent you intend to name in public copy before naming it.

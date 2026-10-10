@@ -20,7 +20,7 @@ jobs:
         run: find site/public -name '*.js' -not -path '*/fonts/*' -print0 | xargs -0 -n1 node --check
       - name: Site copies of the SDK are current
         run: tail -n +2 sdk/receipts.mjs | diff - site/public/receipts-sdk.js && diff sdk/websig.mjs site/public/websig.js
-      - name: Guard copies are current (shell map SQL block, CLI copy, plugin scripts)
+      - name: Guard copies are current (shell map SQL block and API map from the server, CLI copy, plugin scripts)
         run: node scripts/sync-guard.mjs --check
       - name: Brand in step (server/src/brand.js)
         run: node scripts/rebrand.mjs --check
@@ -28,7 +28,7 @@ jobs:
         run: if node sdk/receipts.mjs; then exit 1; fi
       - name: No em or en dashes in user-facing text
         run: |
-          if grep -rnP "[\x{2013}\x{2014}]" site/public README.md SECURITY.md docs cli/*.mjs sdk/shellmap.mjs sdk/shellmap.vectors.txt plugins .claude-plugin --include=*.html --include=*.js --include=*.md --include=*.mjs --include=*.css --include=*.webmanifest --include=*.json --include=*.txt | grep -v 'receipts-sdk.js' | grep -v "DASH = "; then echo "Use a period, colon or comma instead."; exit 1; fi
+          if grep -rnP "[\x{2013}\x{2014}]" site/public README.md SECURITY.md docs cli/*.mjs cli/test scripts sdk/shellmap.mjs sdk/shellmap.test.mjs sdk/shellmap.vectors.txt plugins .claude-plugin --include=*.html --include=*.js --include=*.md --include=*.mjs --include=*.css --include=*.webmanifest --include=*.json --include=*.txt | grep -v 'receipts-sdk.js' | grep -v "DASH = "; then echo "Use a period, colon or comma instead."; exit 1; fi
       - name: No innerHTML (Trusted Types)
         run: |
           if grep -rnE "\.(innerHTML|outerHTML)\s*=|insertAdjacentHTML\(|document\.write\(" site/public --include=*.js; then exit 1; fi

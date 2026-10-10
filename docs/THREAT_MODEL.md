@@ -268,9 +268,77 @@ the public log or its storage.
 **G8. Waiting must not cost the free plan.** A long poll re-reads every 2 seconds for at most 20 seconds: at most 12 D1
 queries and no writes (its limit is in memory). Test: *the long poll*.
 
+**The guard itself (`leashcli guard`, `sdk/shellmap.mjs`, the Claude Code plugin; on branch `feat/guard-cli`, not yet
+deployed).** Everything below runs on the agent's machine, as the agent's user.
+
+**G9. The agent switches the guard off.** It can edit the hook settings (`~/.claude/settings.json`, `~/.codex/hooks.json`,
+`~/.cursor/hooks.json`), `~/.config/leash/guard.json` (which holds `disableRules` and `onUnavailable`), the guard's
+scripts, or run the same effect through something the map does not read. This is not prevented, and every page that
+describes the guard says so. What exists: `leashcli guard status` compares the installed scripts with the hashes it
+recorded at install and flags a changed one (noticed, not stopped); the plugin's skill tells the agent not to touch any of
+it; the plugin's scripts are pinned copies in the plugin cache. For a hard stop, give the agent a Counterseal token, not the
+real key (S1). Test: *status flags a changed script*.
+
+**G10. A command the map does not read.** The map reads shell text with a real parser (quotes, escapes, `;` `&&` `|`,
+groups, loops, here-documents, substitutions, brace expansion, simple variables on the line, `cd`, `sudo` `env` `xargs`
+`find -exec` `sh -c` `eval` `ssh` `docker exec` `kubectl exec` `npx` and `package.json` scripts). Its documented gaps are
+aliases and functions defined elsewhere, script files and Makefiles, code in other languages, PowerShell and `cmd`, encoded
+payloads, globs, symlinks and shells nested deeper than three; each one is a `GAP` vector in `sdk/shellmap.vectors.txt`
+and is listed in the docs. A decoder piped into a shell or `eval` is held unread (`sh.decode-exec`); a program name built
+at run time inside a command that has a dangerous word in it is held (`sh.dynamic-program`); text that does not parse is
+scanned piece by piece, and `"unreadable": "hold"` holds what that scan finds nothing in. Tests: the vector table (about a
+thousand commands, with quoting, escape, wrapper and substitution evasions for every rule), *random shell soup* (never
+throws, never hangs), the limits test.
+
+**G11. The hook fails open.** Hook runners differ. Claude Code lets a hook that crashes or times out through unless
+`onFailure` is `block` (2.1.295 or later; the install and the plugin set it); Cursor unless `failClosed` is true (set);
+what Codex does with a crashed hook is not documented. Inside the hook: a command on the map is denied when the server
+cannot be reached, answers something unexpected, rejects the key, rate limits, or the account is frozen (`423`), and only
+the first two cases follow `onUnavailable: "allow"`. A bug in one rule cannot switch the guard off (the other rules still
+run, and text that breaks the parser falls back to a plain scan). Every request has a 10 second timeout and the wait is
+shorter than the runner's own. Residual: where the runner fails open, a missing `node` lets commands through; under
+`onFailure: "block"` it blocks every Bash command, which is loud rather than silent. Tests: *fail closed*, *fail open
+only when the settings say so*, *a server that hangs*, *odd answers*, *a frozen account*.
+
+**G12. Prompt injection through what the guard says.** The guard's own words to the agent are fixed text. The only
+server-supplied pieces are the approver's reason and the approve link: both are cleaned (control, invisible and line-break
+characters removed, length capped), and the reason is quoted and labelled as the human's words, not an instruction. What
+the guard sends the server (`detail`, `summary`) is data; the app shows it under G4. Test: *a denial reaches the agent with
+the human's words quoted as text*.
+
+**G13. Secrets in a command.** Before anything is sent, shown or hashed the guard removes the credentials it recognises
+(passwords in URLs, bearer and basic tokens, values with known key prefixes, `PASSWORD=` and `TOKEN=` style variables,
+`--password` style flags, private key blocks, MySQL `-p`) and, in tool calls, the values of arguments whose names say
+password, token, secret, API key, private key, credential, authorization or cookie. It cannot recognise every secret; what remains is G7. The approval
+covers the cleaned text, so two commands that differ only in a recognised secret are one request. Tests: *secrets in the
+command never go to the server* (also against the real server), *redact*.
+
+**G14. The key on the agent's machine.** `guard.json` (mode 600) holds the guard key and the agent can read it. The key
+can only ask and read its own approvals (G1) and is limited (G3); one made by a CLI sign-in ends with it (G6). The hook,
+`install` and `status` never print it; it is sent only over HTTPS, or to this machine over HTTP (any other address is
+refused before a byte is sent); installing again revokes the key it replaces. Test: *the guard key is never printed*, *the
+key is never sent to a server that is not https or this machine*.
+
+**G15. A server that is not ours.** The hook's server address comes from `LEASH_URL` or `guard.json`. Whoever can set the
+hook's environment or write that file (an agent that can is G9) can point it at any HTTPS address, and a server the guard
+is pointed at can answer "approved" to anything: the guard trusts its server the way it trusts its key, which is what
+makes self-hosting possible. What it does: the key is never sent over plain HTTP except to this machine (G14), and the
+`curl` rules use an API map downloaded from the same server (only the fields they need) with a generated fallback bundled
+in the code, so a hostile server could also make the guard hold more or fewer `curl` commands. With the real server a
+guard key still cannot approve anything: approving needs the passkey (G1).
+
+**G16. Two hooks, one command.** If the plugin and a settings hook both ran, the second `use` would get `409` and deny a
+command the human approved. `install` adds no Claude Code hook while the plugin is enabled, and `uninstall` says to
+disable the plugin. Test: *with the plugin switched on, install adds no second hook*.
+
+**G17. Installing must not damage the agent's settings.** `install` merges and never overwrites: it refuses a file that is
+not valid JSON, saves a backup, shows the diff, writes through a temporary file, and replaces only its own entries (found
+by the script name and `--agent`); `uninstall` removes only those. Tests: *install ... never clobbers*, *refuses to touch a
+settings file that is not valid JSON*, *uninstall removes only our hooks*.
+
 Residual: the guard can be bypassed by an agent that edits its hook settings, wraps the command in a script the map does
-not read, or calls the tool another way; hook runners that time out may fail open unless set to block (the guard's install
-sets that where the agent supports it). Commands not on the map are left to the agent's own permission settings.
+not read, or calls the tool another way (G9, G10); hook runners that time out may fail open unless set to block (G11).
+Commands not on the map are left to the agent's own permission settings.
 
 ### The two-person seal (team, migration 0009, not yet deployed)
 

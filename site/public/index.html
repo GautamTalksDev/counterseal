@@ -236,6 +236,22 @@
   </div>
 </section>
 
+<!-- ============================================================ GUARD -->
+<section class="sec" id="guard" aria-labelledby="gd-h">
+  <div class="wrap">
+    <p class="kicker">Guard your coding agent</p>
+    <h2 id="gd-h" class="h2">The command waits. <em>Your phone decides.</em></h2>
+    <p class="sub">A hook for your coding agent holds the commands that cannot be taken back (<code>terraform destroy</code>, <code>git push --force</code>, <code>DROP TABLE</code> through <code>psql</code>, <code>railway volume delete</code>, <code>gh repo delete</code>, <code>rm -rf</code> outside the project and more) until you approve that exact command, once, with a passkey. Everything else is left to the agent's own permission settings.</p>
+    <ol class="setup">
+      <li class="rv"><span class="sn">1</span><h3>Install the hook</h3><p>One command finds your coding agents and adds the hook without touching the rest of their settings. It needs leashcli 0.2.1, coming to npm.</p><pre class="mono">npx leashcli guard install</pre></li>
+      <li class="rv"><span class="sn">2</span><h3>Or add the plugin</h3><p>The same hook as a plugin, from this repository's marketplace file. No form, no store.</p><pre class="mono">claude plugin marketplace add GautamTalksDev/leash
+claude plugin install counterseal@counterseal</pre></li>
+      <li class="rv"><span class="sn">3</span><h3>See what it would hold</h3><p>Ask the map about any command. It works offline and sends nothing.</p><pre class="mono">npx leashcli guard check -- terraform destroy</pre></li>
+    </ol>
+    <p class="fine">A seatbelt, not a sandbox: it runs on your machine and matches a map of commands, so an agent that edits its own hook settings or runs a script around it is not stopped. For a hard stop, give the agent a Counterseal token instead of your real key. <a href="/docs/#guard-cli">Which agents, how far each is tested, and what it does not see</a>.</p>
+  </div>
+</section>
+
 <!-- ============================================================ SETUP -->
 <section class="sec" id="setup" aria-labelledby="su-h">
   <div class="wrap">
