@@ -212,8 +212,8 @@ The founder's `members` row is written with the first invite; until then the fou
 |---|---|---|
 | owner | everything below, and: invite, change roles, remove people, change the quorum, delete vault keys, switch receipts, delete the account | be the last owner and leave or be demoted |
 | approver | seal held actions; make tokens, guard keys, agent keys and receipts keys; cancel a waiting lowering; unfreeze; reset a tripped breaker | anything owner-only |
-| member | make tokens, guard keys, agent keys and receipts keys; revoke them | seal, pre-approve, set money caps |
-| viewer | read everything (holds, tokens, audit log, team, command line sign-ins); deny a held action; freeze | anything else |
+| member | add vault keys; make tokens, guard keys, agent keys and receipts keys; revoke them | seal, pre-approve, set money caps |
+| viewer | read everything (holds, tokens, audit log, team, command line sign-ins); deny a held action; freeze; and, like everyone, manage their own passkeys and alert devices, sign in their own command line and leave the team | anything else |
 
 The role is read with the session on every request (one query, a join) and checked on the server for every signed-in
 route: reads need any role, writes need `member` unless the route says otherwise (`403 role_required`). A removed

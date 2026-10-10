@@ -108,10 +108,11 @@ async function confirm(env, sess, body, kind) {
 }
 const founderRow = (db, accountId) => db.prepare("INSERT OR IGNORE INTO members (id, account_id, name, role, created_at, votes_from) SELECT id, id, name, 'owner', created_at, 0 FROM accounts WHERE id = ?").bind(accountId);
 
-/** wake every member's devices (the push carries nothing; the phone reads /v1/alerts), optionally not one member's */
+/** wake every member's devices (the push carries nothing; the phone reads /v1/alerts), optionally not one member's;
+ *  after the response on Workers (ctx.waitUntil), so nobody waits for the push services */
 function alertTeam(env, accountId, exceptMember, bucket = 'pushteam:') {
   const p = (async () => { if (await allow(env.DB, bucket + accountId, 1, 60_000, now())) await notify(env, accountId, env.__pushFetch || fetch, { exceptMember }); })().catch(() => {});
-  if (env.__ctx && env.__ctx.waitUntil) env.__ctx.waitUntil(p);
+  if (env.__ctx && env.__ctx.waitUntil) { env.__ctx.waitUntil(p); return undefined; }
   return p;
 }
 
