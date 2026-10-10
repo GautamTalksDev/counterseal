@@ -539,6 +539,61 @@ unfreeze. Tests: `test/gates-freeze.test.js`.
 Residual: the gate has not yet been run against real GitHub tokens (it follows GitHub's documentation, its discovery document
 and a real token shown in a third-party README); the signed facts say what GitHub says, so a compromised workflow in the
 allowed repository gets a real token and asks truthfully; a job that waits uses Actions minutes.
+### MCP gateway mode (`leashcli mcp wrap`, CLI only)
+
+The wrapper sits in the stdio stream between an MCP client and a local server, reads newline-delimited JSON-RPC both ways
+(batches too, 4 MB a line), and passes on the original bytes of whatever it lets through. A held tool call is answered at
+once with a tool result (`isError: true`) and asked for through the Approvals API; after the passkey the identical retry
+runs, once. **Enforced on the agent's machine: a seatbelt, not a sandbox.**
+
+**W1. A server changes a tool after you approved it (a rug pull).** The first complete tool list is pinned by mcp-pin's
+tool definition hash (RFC 8785, every member counts). A changed or new tool is replaced in the list by a stub that says it
+is blocked, a call to it is held (`mcp.changed`), and the person reviews a member by member diff before `leashcli mcp pin`.
+Looked at: every list the client asks for, the wrapper's own look when the server says `tools/list_changed`, and before a
+call when its last look is a minute old (`LEASH_MCP_RECHECK_MS`). A pinned tool the server stops listing is held too.
+Tests: *pins across sessions*, *tools that change during a session*, and the in-process cases (pages, a list that starts in
+the middle is never pinned, a definition or a tool name listed twice).
+
+**W2. Injection through new text.** The new description of a changed tool, a new tool and changed `instructions` never reach
+the model; they are kept in a file for the person. The review text is escaped: control, invisible, direction and line-break
+characters are shown as `<U+XXXX>` or `\n`, so a description cannot clear the screen or forge a line of the review.
+Test: *text from a server is shown to a person with every control ... character made visible*.
+
+**W3. The wrapper and the server read a message differently.** JSON parsers disagree about a repeated member name (first
+or last copy wins), Go's `encoding/json` matches names without regard to case, some servers match method names without
+regard to case. The wrapper reads strictly and refuses, before anything is passed on: a repeated name anywhere in a message,
+member names that differ only by case where they matter (protocol names, a SQL argument name), a protocol name written in
+another case, a `tools/call` spelled in another case or with spaces, an id written twice, anything that is not one JSON
+value, and a line that is not UTF-8. The end to end test runs the same lines through a server that folds case and shows the
+destructive call would run without the wrapper. Held calls with no id (a notification) are held silently.
+
+**W4. A server reply the client reads differently.** A tool list or initialize reply with a repeated or oddly cased `tools`,
+`result` or `instructions`, a reply whose id is written twice, and a message that is both a request and a reply are not
+passed on (the client gets an error so it does not wait). Tool definitions that repeat a member name inside them have no
+single reading: they are not pinned and are stubbed, while the tools next to them are left alone.
+
+**W5. Approval stretching.** An approval is bound to `SHA-256(["v1","tool","mcp", detail, folder])` where `detail` is the
+tool and its arguments in canonical JSON (members sorted; `_meta` left out; any other parameter included). Arguments longer
+than 4,096 characters are shown by their start with their length and SHA-256, and the hash covers all of it. Another tool
+or other arguments is another approval; the approval is used once.
+
+**W6. A server asks for approvals itself.** The guard key is removed from the environment of the wrapped server. A guard key
+can only ask anyway (S2, G1), but a server that spammed approvals would wear the human down (G3 limits it).
+
+**W7. Failing open.** No guard key, no network, a revoked key, a frozen account (423), a reply the wrapper does not
+understand, or a failure inside the wrapper: the call is not run and the model is told why in plain words (and, for Freeze,
+not to retry). Calls that are not held never wait for Counterseal.
+
+**W8. Privacy.** The tool and its arguments are on the approval card (as for a command, G7); the summary (`<server>: <tool>`)
+can appear on a phone lock screen. Public receipts carry only `CALL mcp`, the decision, the rule id and the map version.
+Test: *the public log learns nothing of it*.
+
+Residual: the wrapper runs as the agent's user, so an agent that starts the server another way, edits the client's MCP
+configuration, or rewrites the pin or policy files is not stopped; the first pin is trust on first use; names and arguments
+are matched against lists (`write_file` or `create_issue` is not held unless the policy says so; a free text `query`
+argument that starts with a SQL word is held, a documented false positive that `sqlArgs: []` turns off); prompts, resources
+and tool results are not pinned or inspected; remote (HTTP) servers and the elicitation URL mode are not supported; a change
+between two looks, at most a minute apart, is caught at the next one.
 
 ### The domain move (two hosts)
 

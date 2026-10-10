@@ -84,6 +84,7 @@
     <li><strong>Invites are one-time and short-lived.</strong> Made by an owner with a passkey, stored only as a hash, single use, 2 hours by default, sent only in the link's fragment; the page shows who invites you to what before anything is made, and the team is told when someone joins.</li>
     <li><strong>Removal is total and immediate.</strong> Sessions, passkeys, alert devices, the keys and tokens they made, and their seals, in one step. The last owner can never be removed.</li>
     <li><strong>What it does not stop:</strong> two people who agree to act together.</li>
+  </ul>
   <h3 id="deploy-gate">A GitHub Actions deploy</h3>
   <ul>
     <li><strong>GitHub signs who is asking.</strong> A deploy gate holds a job until you approve with your passkey. The job sends the OIDC token GitHub signs for it. Counterseal pins the algorithm (RS256), takes the key only from GitHub's own key set, checks the signature before it reads any claim, and checks the issuer, an audience that names the gate, the times (60 seconds of skew) and that the token was not used before.</li>
@@ -92,6 +93,13 @@
     <li><strong>No approval, no key (optional).</strong> A gate can hand the job a 15 minute Counterseal token for a vaulted key only after you approve; before that the job has no deploy key, and the real key never leaves the vault.</li>
     <li><strong>A pause the job asks for.</strong> A person who can edit the workflow can remove the step. Protect the workflow file, or use the key option. Every step of an approved job shares the job's identity.</li>
     <li><strong>Not yet run against real GitHub.</strong> The checks follow GitHub's documentation and are tested with a stand-in that signs like GitHub.</li>
+  </ul>
+  <h3 id="mcp-wrap">An MCP server behind <code>leashcli mcp wrap</code></h3>
+  <ul>
+    <li><strong>Held, then approved exactly.</strong> A destructive tool call is answered at once as held and asked for with a guard key; after your passkey the same call with the same arguments runs once. A failure, a missing key, no network or a frozen account never lets it through.</li>
+    <li><strong>Pinned definitions.</strong> A tool the server changes after you pinned it, a new tool and changed instructions never reach the model; they are shown to you, with hidden characters made visible, before you accept them.</li>
+    <li><strong>One reading only.</strong> A message that could be read two ways (a repeated name, a name in another case, an id written twice) is not passed on in either direction.</li>
+    <li><strong>A seatbelt, not a sandbox.</strong> It runs on the agent's machine as the same user and matches tool names and arguments against lists. An agent that starts the server another way or edits your MCP configuration is not stopped by it.</li>
   </ul>
 
   <h2 id="brakes">Money caps, the breaker and Freeze</h2>

@@ -306,6 +306,62 @@ switched on, `guard install` adds no second hook to Claude Code.
 The shell map (`sdk/shellmap.mjs`, tests in `sdk/shellmap.test.mjs` with about a thousand commands in
 `sdk/shellmap.vectors.txt`, and `sdk/shellmap.bash.test.mjs`, which compares it with real bash on generated commands: the words
 a command comes to, and whether a stub `terraform destroy` really runs where the map says "not held") is documented rule by rule in the [docs](https://counterseal.gautamkhosla.com/docs/#guard-cli).
+### Put an MCP server behind Counterseal (`leashcli mcp wrap`)
+
+Many MCP servers can delete, send, pay or deploy with the key you gave them. `leashcli mcp wrap` sits between your MCP
+client and any local (stdio) MCP server. It holds the destructive tool calls until you approve them with your passkey,
+and it pins the server's tool definitions, so a server that changes a tool after you approved it is hidden until you
+look. Put it in front of the server's own command in your client's MCP configuration (CLI 0.3.0, in this repo, not yet
+published; until then run `cli/leash.mjs`):
+
+```json
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": ["-y", "leashcli", "mcp", "wrap", "--name", "supabase", "--", "npx", "-y", "@supabase/mcp-server-supabase@latest"],
+      "env": { "LEASH_GUARD_KEY": "lsg_...", "SUPABASE_ACCESS_TOKEN": "the server's own settings stay as they were" }
+    }
+  }
+}
+```
+
+- **What is held.** A call whose tool name says it deletes, destroys, removes, truncates, refunds, transfers, pays out,
+  sends, publishes, deploys, revokes, cancels, archives, terminates, wipes, purges, merges, drops, resets or forces
+  something; a tool that runs a command (`run_command`, `bash`, `apply_migration`); a SQL argument (`query`, `sql`,
+  `statement`) that is not one plain read (`SELECT`, `WITH ... SELECT`, `EXPLAIN`, `SHOW`), the same check the broker
+  applies to SQL; and anything your policy file lists. Reads such as `list_tables` or `get_project` go straight through.
+- **How a hold works.** The wrapper answers at once with a tool result that says the call is held and gives the approval
+  link, so no client timeout runs. You approve in the app with your passkey; the agent calls the same tool with the same
+  arguments again and that call goes through, once, within 10 minutes. Other arguments are another approval. Public
+  receipts say only `CALL mcp`, the decision, the rule and the map version, never the tool, the arguments or the server.
+- **Pinning.** The first complete tool list your client asks for is pinned (trust on first use). After that a changed or
+  new tool is shown to the model as a stub that says it is blocked, its new text never reaches the model, and calls to it
+  are held (rule `mcp.changed`) until you run `leashcli mcp pin --name supabase`, which shows what changed, member by
+  member, and asks you to type `pin`. The server's `instructions` are pinned the same way. The wrapper checks when your
+  client lists tools, when the server says its tools changed, and before a call if its last look is a minute old. The
+  hash is mcp-pin's published tool definition hash (version 1, RFC 8785), so a pin means the same thing to other tools.
+  `leashcli mcp status --name supabase [--check]` shows the pin, what waits for review and whether Counterseal answers;
+  `leashcli mcp unpin --name supabase` forgets the pin.
+- **Policy file** (`~/.config/leash/mcp/<name>.json`, optional, strict JSON, a typo stops the wrapper before it starts):
+  `{"hold": ["send_*"], "allow": ["get_merge_status"], "sqlArgs": ["query", "sql"], "trustAnnotations": false, "repin": "terminal"}`.
+  `hold` adds tool name patterns; `allow` lifts the name rule for those tools but never the SQL rule; `sqlArgs` names the
+  arguments that are SQL (`[]` turns the check off); `trustAnnotations: true` also holds a tool whose definition says
+  `destructiveHint: true`; `repin: "passkey"` makes `leashcli mcp pin` itself wait for your passkey.
+- **A guard key is needed to ask.** Make one in the app (Account, Guard keys) and set `LEASH_GUARD_KEY`, or put
+  `{"key": "lsg_..."}` in `~/.config/leash/guard.json`, the file the coding-agent guard uses. Without one, a held call is
+  refused with a message that says why; calls that are not held never touch Counterseal. A frozen account (Freeze)
+  answers every held call with "Counterseal is frozen" and the agent is told not to retry. The wrapped server does not
+  receive the guard key. `--require-pin` refuses to start a server that has no pin yet.
+- **A seatbelt, not a sandbox.** The wrapper runs on the machine of the agent it guards, as the same user. It only sees
+  what the client sends through it: an agent that can start the server another way, edit your client's MCP
+  configuration, rewrite the pin or policy files, or call a tool the lists do not name is not stopped. Tool names and
+  arguments are matched against lists, not understood (`write_file` and `create_issue` are not held unless you say so).
+  Prompts and resources are not pinned, tool results are not inspected, and only stdio servers are supported. For a hard
+  stop, give the agent a Counterseal token instead of the real key.
+- Advanced: `LEASH_MCP_RECHECK_MS` (how old the wrapper's last look at the tools may be before a call; default 60000,
+  `0` looks before every call), `LEASH_MCP_TIMEOUT_MS` (how long to wait for Counterseal), `LEASH_MCP_DIR` (where pins and
+  policies live).
 
 ### Deploy Gate for GitHub Actions
 
@@ -408,7 +464,8 @@ server/        Cloudflare Worker: API, proxy, vault, WebAuthn, policy, audit, th
   bench/cpu.mjs      CPU of the hot paths
   dev/local.js       full local server on node:sqlite
 action/        GitHub Action (deploy-gate, zero dependencies) and sample workflows; not on the Marketplace
-cli/           leash CLI and MCP server (zero dependencies), sign.mjs for agent keys, guard.mjs (the coding-agent guard)
+cli/           leash CLI and MCP server (zero dependencies), sign.mjs for agent keys, guard.mjs (the coding-agent guard),
+               mcp-wrap.mjs and the mcp-*.mjs files (mcp wrap: hold destructive MCP tool calls, pin tool definitions)
   test/              the guard against a stand-in and against the real server code over HTTP; the plugin files
 sdk/           receipts (record + verify offline), websig (Web Bot Auth sign + verify) and shellmap (the shell map), zero dependencies
 plugins/       the Claude Code plugin (hook, skill, pinned scripts); .claude-plugin/marketplace.json at the root lists it

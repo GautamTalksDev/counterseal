@@ -33,6 +33,7 @@
   <a href="#guard">Approvals for commands</a>
   <a href="#guard-cli">Guard your coding agent</a>
   <a href="#deploy-gate">Deploy gates (GitHub Actions)</a>
+  <a href="#mcp-wrap">Any MCP server behind Counterseal</a>
   <a href="#policy">Token policies</a>
   <a href="#brakes">Brakes</a>
   <a href="#team">Teams: two seals</a>
@@ -241,6 +242,21 @@ steps:
     <li><strong>Not yet run against real GitHub tokens.</strong> The action is in the Counterseal repository (<code>action/deploy-gate</code>), not on the Marketplace, and its tests use a stand-in that signs like GitHub.</li>
   </ul>
   <p>Usage, what is checked, limits and errors: <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/DEPLOY_GATE.md">docs/DEPLOY_GATE.md</a>. The contract is in <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
+  <h2 id="mcp-wrap">Any MCP server behind Counterseal</h2>
+  <p><code>leashcli mcp wrap</code> sits between your MCP client and a local (stdio) MCP server. Destructive tool calls wait for your passkey, and the server's tool definitions are pinned, so a tool the server changes after you approved it is hidden until you look. It is in the repository and not yet published (CLI 0.3.0). Put it in front of the server's own command:</p>
+  <pre>{ "mcpServers": { "supabase": {
+    "command": "npx",
+    "args": ["-y", "leashcli", "mcp", "wrap", "--name", "supabase", "--",
+             "npx", "-y", "@supabase/mcp-server-supabase@latest"],
+    "env": { "LEASH_GUARD_KEY": "lsg_..." } } } }</pre>
+  <ul>
+    <li><strong>What is held.</strong> A tool whose name says it deletes, sends, pays, deploys, drops, resets or forces something; a tool that runs a command; a SQL argument that is not one plain read; anything your policy file lists. Reads go straight through.</li>
+    <li><strong>How it works.</strong> The wrapper answers a held call at once, with the approval link. You approve with your passkey; the agent calls the same tool with the same arguments again and it goes through, once. Other arguments are another approval. Public receipts say only <code>CALL mcp</code>, the decision, the rule and the map version.</li>
+    <li><strong>Pinning.</strong> The first tool list your client asks for is pinned (trust on first use), with mcp-pin's published tool definition hash. A changed or new tool, or changed instructions, never reach the model: the tool shows as blocked, calls to it are held, and <code>leashcli mcp pin --name supabase</code> shows you what changed before you accept it. <code>leashcli mcp status</code> and <code>leashcli mcp unpin</code> show and forget the pin.</li>
+    <li><strong>Policy file</strong> <code>~/.config/leash/mcp/&lt;name&gt;.json</code>: <code>hold</code> and <code>allow</code> (tool name patterns; allow never lifts the SQL rule), <code>sqlArgs</code>, <code>trustAnnotations</code> and <code>repin</code> (<code>terminal</code> or <code>passkey</code>). A typo stops the wrapper before it starts.</li>
+    <li><strong>Needs a guard key</strong> (Account, Guard keys) in <code>LEASH_GUARD_KEY</code> or <code>guard.json</code>. Without one, or with no network, a revoked key or a frozen account, a held call is refused and the agent is told why; it never runs. The server you wrap does not get the key.</li>
+    <li><strong>A seatbelt, not a sandbox.</strong> It runs on the agent's machine and sees only what the client sends through it. An agent that starts the server another way, edits your MCP configuration or the pin and policy files, or calls a tool the lists do not name is not stopped. Names and arguments are matched against lists, not understood. Prompts, resources and tool results are not checked, and remote (HTTP) servers are not supported. For a hard stop, give your agent a Counterseal token instead of the real key.</li>
+  </ul>
 
   <h2 id="policy">Token policies</h2>
   <p>Each token can carry a policy that narrows what its key can do. A policy can never widen it.</p>

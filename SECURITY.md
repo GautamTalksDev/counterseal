@@ -62,6 +62,10 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
   stopped by it. The map does not read aliases, script files, code in other languages, PowerShell or `cmd`, and does not
   decode encoded payloads (it holds a decoder piped into a shell without reading it). It is a seatbelt, not a sandbox; for
   a hard stop, give the agent a Counterseal token, not the real key.
+- The same for the MCP gateway (`leashcli mcp wrap`): it sees only what an MCP client sends through it, matches tool names
+  and arguments against lists (it does not understand them), does not pin prompts or resources, does not inspect tool
+  results, and supports stdio servers only. A server that behaves well when it is pinned and badly later, between two of
+  the wrapper's looks (at most a minute apart), is not caught until the next look. The first pin is trust on first use.
 - A person who approves a CLI sign-in someone sent them. The screen shows where it started and asks whether they ran it,
   and the alert and one-tap revoke limit the damage (a CLI session cannot approve holds), but a person who approves
   anyway has signed that command line in for up to 7 days. Country and network checks can be fooled by a VPN.
@@ -177,6 +181,24 @@ validation, the exact command on the card, the long poll's zero writes, limits, 
 and with the CLI session that made it, D1 budgets) and the migration test on live-shaped data. Guard keys follow the
 second pass: they end with the CLI session that made them and are revoked with it even after it signed out, guard holds
 share the account's 100 waiting holds and its one alert a minute, and guard key events are in the audit log.
+
+## MCP gateway mode, 10 Oct 2026 (branch `feat/mcp-wrap`, CLI only, no server change)
+
+`leashcli mcp wrap` holds destructive MCP tool calls through the Approvals API (kind `tool`, agent `mcp`) and pins the
+server's tool definitions with mcp-pin's published hash. Threat model section W; zero runtime dependencies. Tests:
+`server/test/mcp-wrap-units.test.js` (mcp-pin's hash vectors, the strict JSON reader, the SQL check held line for line to
+the server's, the policy, the pin files, the text an approval is bound to), `mcp-wrap-gateway.test.js` (the protocol corner
+cases against a fake server, in process) and `mcp-wrap-e2e.test.js` (the real command, a fake MCP server, the real worker
+code and a virtual passkey: reads pass, a destructive call is held, runs once after approval and only as approved, a
+changed tool is hidden and held, a message that a different parser would read as another call never reaches the server,
+fail closed with no key, no network, a revoked key and a frozen account, receipts carry no tool name or argument).
+
+What it refuses to pass on, whichever way it is written: a repeated member name anywhere in a client message, member names
+that differ only by case where they matter (`NAME`, `Params`, a SQL argument in two cases, the long s), a `tools/call`
+spelled in another case, an id written twice, and the same defects in a server's reply to a tool list or to initialize.
+A server cannot make the model read tool text the person did not pin: a changed definition, a new tool and changed
+instructions are replaced by a stub or cut out, and kept for you to review with control and direction characters made
+visible. A failure inside the wrapper never lets a call through.
 
 ## Brakes, 9 Oct 2026
 
