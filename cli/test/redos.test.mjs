@@ -56,7 +56,7 @@ test('looksLikeSql: same answers as the old regex', () => {
     for (let k = Math.floor(r() * 8); k >= 0; k--) s += pick(r, parts);
     assert.equal(looksLikeSql(s), OLD_SQL_START.test(s), JSON.stringify(s));
   }
-});
+}); 
 
 test('escapeArgument: linear on long runs of backslashes, same quoting as before', () => {
   const n = 500_000;
