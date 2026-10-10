@@ -297,7 +297,8 @@ switched on, `guard install` adds no second hook to Claude Code.
   Gemini CLI and Antigravity are not supported yet.
 
 The shell map (`sdk/shellmap.mjs`, tests in `sdk/shellmap.test.mjs` with about a thousand commands in
-`sdk/shellmap.vectors.txt`) is documented rule by rule in the [docs](https://counterseal.gautamkhosla.com/docs/#guard-cli).
+`sdk/shellmap.vectors.txt`, and `sdk/shellmap.bash.test.mjs`, which compares it with real bash on generated commands: the words
+a command comes to, and whether a stub `terraform destroy` really runs where the map says "not held") is documented rule by rule in the [docs](https://counterseal.gautamkhosla.com/docs/#guard-cli).
 
 ### Any SDK or script
 

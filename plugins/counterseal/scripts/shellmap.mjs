@@ -890,6 +890,7 @@ function paramExpand(p, st) {
     const rep = chunkText(wordChunks(repText, st, true));
     if (!re || unknownText(rep) || rep.includes('&')) return SENT;
     const n = val.length;
+    if (n === 0) return re.test('') ? rep : val; // a pattern like * matches an empty value
     // the longest match that starts at i (and, for the % form, ends at the end of the value); -1 when there is none
     const matchAt = (i) => { for (let e = n; e > i; e--) { if (mode === '%' && e !== n) continue; if (re.test(val.slice(i, e))) return e; } return -1; };
     let out = '', i = 0;
