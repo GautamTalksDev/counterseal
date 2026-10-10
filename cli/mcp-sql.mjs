@@ -1,4 +1,4 @@
-// Is this SQL plainly a read? For the MCP wrapper (leashcli mcp wrap): a tool call whose SQL argument is anything else waits for
+// Is this SQL plainly a read? For the MCP wrapper (counterseal mcp wrap): a tool call whose SQL argument is anything else waits for
 // your passkey. Zero dependencies.
 //
 // This is a copy of the tokenizer and the read-only check in server/src/providers.js (sqlTokens, sqlReadOnly and the word lists

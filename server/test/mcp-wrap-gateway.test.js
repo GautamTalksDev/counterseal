@@ -484,14 +484,14 @@ test('a tool that changed since it was pinned is hidden from the model, its new 
     assert.deepEqual(tools.map((t) => t.name), ['list_tables', 'delete_project', 'execute_sql', 'echo', 'exfiltrate']);
     for (const name of ['list_tables', 'exfiltrate']) {
       const t = tools.find((x) => x.name === name);
-      assert.match(t.description, /^Counterseal has blocked this tool: its definition changed since it was pinned, or it was never pinned\. Do not call it\. Ask your human to run: leashcli mcp pin --name srv$/);
+      assert.match(t.description, /^Counterseal has blocked this tool: its definition changed since it was pinned, or it was never pinned\. Do not call it\. Ask your human to run: (?:leashcli|counterseal) mcp pin --name srv$/);
       assert.deepEqual(t.inputSchema, { type: 'object', additionalProperties: false });
       assert.deepEqual(Object.keys(t).sort(), ['description', 'inputSchema', 'name']);
     }
     // the others are exactly what the server sent
     const sentTools = JSON.parse(r.serverRaw[r.serverRaw.length - 1]).result.tools;
     for (const n of ['delete_project', 'execute_sql', 'echo']) assert.deepEqual(tools.find((x) => x.name === n), sentTools.find((x) => x.name === n));
-    assert.match(r.logs.join('\n'), /2 tool definitions of "srv" changed or are new since you pinned them \(list_tables, exfiltrate\)\. They are hidden from the model and calls to them wait for your passkey\. Review and pin: leashcli mcp pin --name srv/);
+    assert.match(r.logs.join('\n'), /2 tool definitions of "srv" changed or are new since you pinned them \(list_tables, exfiltrate\)\. They are hidden from the model and calls to them wait for your passkey\. Review and pin: (?:leashcli|counterseal) mcp pin --name srv/);
     // what waits for review
     const seen = Store.readSeen('srv', env);
     assert.deepEqual([...seen.tools.keys()].sort(), ['delete_project', 'echo', 'execute_sql', 'exfiltrate', 'list_tables']);

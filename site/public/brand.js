@@ -9,6 +9,7 @@ export const BRAND = {
   "legacyDomain": "leash.gautamkhosla.com",
   "cli": "leashcli",
   "cliPlanned": "counterseal",
+  "cliInstall": "counterseal",
   "sdk": "counterseal-sdk",
   "repo": "https://github.com/GautamTalksDev/leash",
   "owner": "Gautam Khosla",

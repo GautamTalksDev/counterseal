@@ -41,3 +41,21 @@ test('user-facing text carries the brand and none of the three old product names
   }
   assert.deepEqual(bad, []);
 });
+
+test('install lines name one CLI package, BRAND.cliInstall, everywhere; the switch rewrites only command lines', async () => {
+  const { rewrite } = await import('../../scripts/cli-name.mjs');
+  assert.ok(['counterseal', 'leashcli'].includes(BRAND.cliInstall));
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL('scripts/cli-name.mjs', ROOT)), '--check'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const text = 'npx leashcli login; npx -y counterseal mcp; "args": ["-y", "leashcli", "mcp"]; run leashcli guard install; the published leashcli 0.1.1; Counterseal login page; const PKG = \'counterseal\';';
+  assert.equal(rewrite(text, 'leashcli'), 'npx leashcli login; npx -y leashcli mcp; "args": ["-y", "leashcli", "mcp"]; run leashcli guard install; the published leashcli 0.1.1; Counterseal login page; const PKG = \'leashcli\';');
+  assert.equal(rewrite(text, 'counterseal'), 'npx counterseal login; npx -y counterseal mcp; "args": ["-y", "counterseal", "mcp"]; run counterseal guard install; the published leashcli 0.1.1; Counterseal login page; const PKG = \'counterseal\';');
+  // the packages: counterseal runs the CLI under its own name, leashcli is a thin alias pinned to the same version
+  const cli = JSON.parse(read('cli/package.json')), alias = JSON.parse(read('packages/leashcli/package.json'));
+  assert.equal(cli.name, 'counterseal'); assert.equal(cli.bin.counterseal, 'leash.mjs');
+  assert.equal(alias.name, 'leashcli'); assert.equal(alias.bin.leashcli, 'leash.mjs');
+  assert.deepEqual(alias.dependencies, { counterseal: cli.version }); assert.equal(alias.version, cli.version);
+  assert.equal(cli.dependencies, undefined, 'the CLI keeps zero dependencies');
+  assert.match(read('packages/leashcli/leash.mjs'), /^#!\/usr\/bin\/env node\n(\/\/.*\n)*import 'counterseal\/leash\.mjs';\n$/);
+  assert.equal(cli.exports['./leash.mjs'], './leash.mjs');
+});

@@ -1,9 +1,9 @@
-// What the MCP wrapper (leashcli mcp wrap) keeps on disk, and how it shows a server's definitions to a person. Zero dependencies.
+// What the MCP wrapper (counterseal mcp wrap) keeps on disk, and how it shows a server's definitions to a person. Zero dependencies.
 //
 // Per wrapped server, under ~/.config/leash/mcp/ (or $XDG_CONFIG_HOME/leash/mcp, or $LEASH_MCP_DIR):
 //   <name>.json       your policy (optional; see mcp-policy.mjs)
 //   <name>.pin.json   the pin: the hash of every tool definition you approved, and the definitions themselves (up to 512 KB)
-//   <name>.seen.json  what the server showed last, when that differs from the pin: it waits here for `leashcli mcp pin`
+//   <name>.seen.json  what the server showed last, when that differs from the pin: it waits here for `counterseal mcp pin`
 // A pin file that exists but cannot be read is an error, never a fresh start: a damaged pin must not turn into "trust whatever
 // the server says now". All files are written 0600 in a 0700 folder. Anything here can be edited by the agent if it runs as you:
 // the pin is a seatbelt, not a sandbox.

@@ -203,7 +203,7 @@ test('server errors: 5xx on create is unavailable; 429 and 401 always deny with 
   for (const k of t2.stub.state.keys.values()) k.revoked = true;
   const r = await hook(t2, 'claude-code', claude('terraform destroy'));
   assert.match(denied(r), /guard key is no longer valid/);
-  assert.match(denied(r), /leashcli guard install/);
+  assert.match(denied(r), /(?:leashcli|counterseal) guard install/);
   assert.match(denied(r), /Account, Guard keys/);
 });
 
@@ -302,7 +302,7 @@ test('an expired key (made by a CLI sign-in that ended) fails closed with the sa
 test('no key configured: commands on the map are denied with the fix, other commands pass', async () => {
   const t = await setup();
   writeFileSync(t.cfgPath, JSON.stringify({ version: 1, server: t.stub.url }));
-  assert.match(denied(await hook(t, 'claude-code', claude('terraform destroy'))), /has no key.*leashcli guard install/);
+  assert.match(denied(await hook(t, 'claude-code', claude('terraform destroy'))), /has no key.*(?:leashcli|counterseal) guard install/);
   assert.equal((await hook(t, 'claude-code', claude('ls'))).stdout, '');
   writeFileSync(t.cfgPath, '{not json');
   assert.match(denied(await hook(t, 'claude-code', claude('terraform destroy'))), /has no key/);
@@ -664,7 +664,7 @@ test('install without a sign-in explains both ways to get a key', async () => {
   rmSync(join(t.xdg, 'leash', 'config.json'));
   const r = await cli(t, ['install', '--agents', 'claude-code']);
   assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /leashcli login/);
+  assert.match(r.stderr, /(?:leashcli|counterseal) login/);
   assert.match(r.stderr, /--paste-key/);
 });
 
@@ -743,7 +743,7 @@ test('map lists every rule', async () => {
   assert.equal(j.version, SHELL_MAP_VERSION);
   assert.ok(j.rules.length >= 20);
   assert.match((await cli(t, ['map'])).stdout, /sh\.terraform-destroy/);
-  assert.match((await cli(t, [])).stdout, /leashcli guard/);
+  assert.match((await cli(t, [])).stdout, /(?:leashcli|counterseal) guard/);
 });
 
 test('a reader that closes the pipe early (guard map | head) is not an error', async () => {

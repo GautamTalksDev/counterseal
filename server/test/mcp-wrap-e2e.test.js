@@ -483,7 +483,7 @@ test('end to end: --require-pin and a damaged pin stop the wrapper before the se
     const a = new Wrapped(t, { flags: ['--require-pin'] });
     const ra = await a.exited;
     assert.equal(ra.code, 3);
-    assert.match(a.err, /"fake" has no pin and --require-pin is set\. Pin it first: leashcli mcp pin --name fake -- /);
+    assert.match(a.err, /"fake" has no pin and --require-pin is set\. Pin it first: (?:leashcli|counterseal) mcp pin --name fake -- /);
     assert.deepEqual(t.serverLines(), []);
     // pin it, then it is fine
     assert.equal(cli(t, ['pin', '--name', 'fake', '--yes', '--', process.execPath, FAKE]).status, 0);
@@ -497,7 +497,7 @@ test('end to end: --require-pin and a damaged pin stop the wrapper before the se
     const c = new Wrapped(t);
     const rc = await c.exited;
     assert.equal(rc.code, 3);
-    assert.match(c.err, /the pin for "fake" cannot be used \(the pin file is damaged.*Nothing was started\. To start again from scratch: leashcli mcp unpin --name fake/);
+    assert.match(c.err, /the pin for "fake" cannot be used \(the pin file is damaged.*Nothing was started\. To start again from scratch: (?:leashcli|counterseal) mcp unpin --name fake/);
     assert.deepEqual(t.serverLines(), []);
     for (const args of [['wrap', '--name', 'bad name', '--', 'x'], ['wrap', '--name', 'ok'], ['wrap', '--', 'x'], ['pin'], ['unpin', '--name', '../x']]) {
       const r = cli(t, args);

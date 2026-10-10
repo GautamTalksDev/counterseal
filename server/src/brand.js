@@ -21,10 +21,16 @@ export const BRAND = {
   domain: 'counterseal.gautamkhosla.com',
   origin: 'https://counterseal.gautamkhosla.com',
   legacyDomain: 'leash.gautamkhosla.com',
-  // npm. The CLI is published as leashcli; "counterseal" is the planned name (free on npm on 9 Oct 2026, not published).
-  // Keep cli at the published name until the new package exists, or every install line on the site breaks.
+  // npm. The CLI was published as leashcli (0.1.1); from 0.3.0 it is the counterseal package (not published yet).
+  // cli and cliPlanned are rebrand keys (whole-value text replacement); install lines follow cliInstall below.
   cli: 'leashcli',
   cliPlanned: 'counterseal',
+  // The package every install line and command example names (npx <cliInstall> login, the MCP config, the CLI's own
+  // messages). "counterseal" from CLI 0.3.0 (cli/package.json; packages/leashcli is the thin alias that keeps the old
+  // name working). Publish the counterseal package BEFORE deploying a site that says it. To deploy first, set this to
+  // "leashcli" and run `node scripts/cli-name.mjs` (docs/DEPLOY.md). Not a rebrand key: changing it rewrites only
+  // command lines, never the product name.
+  cliInstall: 'counterseal',
   sdk: 'counterseal-sdk',
   repo: 'https://github.com/GautamTalksDev/leash',
   owner: 'Gautam Khosla',

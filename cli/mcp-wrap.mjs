@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// leashcli mcp wrap: put a local MCP server (stdio) behind Counterseal. Zero dependencies, Node 20+.
+// counterseal mcp wrap: put a local MCP server (stdio) behind Counterseal. Zero dependencies, Node 20+.
 //
-//   leashcli mcp wrap --name <id> [--policy <file>] [--require-pin] -- <command> [args...]
+//   counterseal mcp wrap --name <id> [--policy <file>] [--require-pin] -- <command> [args...]
 //        what your MCP client runs instead of the server. Destructive tool calls wait for your passkey; the server's tool
 //        definitions are pinned and a changed one is hidden from the model and held until you pin it again.
-//   leashcli mcp pin --name <id> [--yes] [-- <command> [args...]]     pin (or pin again) what the server shows now
-//   leashcli mcp unpin --name <id>                                     forget the pin: the next run pins afresh
-//   leashcli mcp status --name <id> [--check]                          the pin, what waits for review, the policy
+//   counterseal mcp pin --name <id> [--yes] [-- <command> [args...]]     pin (or pin again) what the server shows now
+//   counterseal mcp unpin --name <id>                                     forget the pin: the next run pins afresh
+//   counterseal mcp status --name <id> [--check]                          the pin, what waits for review, the policy
 //
 // The wrapper sits in the stream between your client and the server, reads newline-delimited JSON-RPC both ways (batches
 // too, up to 4 MB a line), and forwards the original bytes of everything it lets through. A held tool call is answered at
@@ -505,13 +505,13 @@ export class Gateway {
     if (!odd && (variants.length === 0 || (h !== null && h === this.pin.instructions))) return text; // nothing said, or what was pinned
     // new, changed or unclear: text the person has not approved is never passed on to the model
     this.notice(odd ? `"${this.name}" answered with instructions that could be read two ways (a repeated or oddly cased name). They were not passed on.`
-      : `"${this.name}" changed what it tells the model about itself (its instructions) since you pinned them. That text was not passed on. Review and pin: leashcli mcp pin --name ${this.name}`);
+      : `"${this.name}" changed what it tells the model about itself (its instructions) since you pinned them. That text was not passed on. Review and pin: counterseal mcp pin --name ${this.name}`);
     if (!rs) return text;
     return text.slice(0, rs.start) + withoutFolded(text, rs, 'instructions') + text.slice(rs.end);
   }
 
   #stub(name) {
-    return JSON.stringify({ name, description: `Counterseal has blocked this tool: its definition changed since it was pinned, or it was never pinned. Do not call it. Ask your human to run: leashcli mcp pin --name ${this.name}`, inputSchema: STUB_SCHEMA });
+    return JSON.stringify({ name, description: `Counterseal has blocked this tool: its definition changed since it was pinned, or it was never pinned. Do not call it. Ask your human to run: counterseal mcp pin --name ${this.name}`, inputSchema: STUB_SCHEMA });
   }
 
   #toolsList(text, p, m, ent) {
@@ -568,7 +568,7 @@ export class Gateway {
       try {
         const doc = this.store.writePin({ tools: L.tools, setHash: setHashOf([...L.tools.values()].map((e) => e.def)), instructions: insH });
         this.pin = { ...doc, tools: Object.assign(Object.create(null), doc.tools) };
-        this.log(`first run of "${this.name}": pinned ${L.tools.size} tool definition${L.tools.size === 1 ? '' : 's'}. From now on a changed or new tool is hidden from the model and held until you run: leashcli mcp pin --name ${this.name}`);
+        this.log(`first run of "${this.name}": pinned ${L.tools.size} tool definition${L.tools.size === 1 ? '' : 's'}. From now on a changed or new tool is hidden from the model and held until you run: counterseal mcp pin --name ${this.name}`);
       } catch (e) { this.notice(`could not save the pin for "${this.name}" (${String(e.message).slice(0, 120)}); nothing is checked this time`); }
       return;
     }
@@ -577,7 +577,7 @@ export class Gateway {
     const bad = cmp.added.length || cmp.changed.length || cmp.instructions === 'added' || cmp.instructions === 'changed' || L.unreadable;
     if (!bad) { if (!L.partial) { try { this.store.clearSeen(); } catch { /* nothing to clear */ } this.changedNames.clear(); } return; }
     const names = [...cmp.changed, ...cmp.added].slice(0, 5).map((n) => safeName(n));
-    this.notice(`${cmp.changed.length + cmp.added.length || 'some'} tool definition${cmp.changed.length + cmp.added.length === 1 ? '' : 's'} of "${this.name}" changed or are new since you pinned them${names.length ? ` (${names.join(', ')}${cmp.changed.length + cmp.added.length > 5 ? ', ...' : ''})` : ''}. They are hidden from the model and calls to them wait for your passkey. Review and pin: leashcli mcp pin --name ${this.name}`);
+    this.notice(`${cmp.changed.length + cmp.added.length || 'some'} tool definition${cmp.changed.length + cmp.added.length === 1 ? '' : 's'} of "${this.name}" changed or are new since you pinned them${names.length ? ` (${names.join(', ')}${cmp.changed.length + cmp.added.length > 5 ? ', ...' : ''})` : ''}. They are hidden from the model and calls to them wait for your passkey. Review and pin: counterseal mcp pin --name ${this.name}`);
     try { this.store.writeSeen({ tools: new Map([...L.tools].filter(([, e]) => e.h !== 'unreadable')), setHash: null, instructions: obs.instructions }); } catch (e) { this.log(`could not save what was seen: ${String(e.message).slice(0, 120)}`); }
   }
 
@@ -633,7 +633,7 @@ export class Gateway {
       if (this.pin) {
         const odd = [];
         for (const [n, h] of view) { const e = this.pin.tools[n]; if (!e || e.h !== h) odd.push(n); }
-        if (odd.length) this.notice(`"${this.name}" now shows ${odd.length} tool definition${odd.length === 1 ? '' : 's'} that differ from the pin (${odd.slice(0, 5).map(safeName).join(', ')}${odd.length > 5 ? ', ...' : ''}). Calls to them wait for your passkey. Review and pin: leashcli mcp pin --name ${this.name}`);
+        if (odd.length) this.notice(`"${this.name}" now shows ${odd.length} tool definition${odd.length === 1 ? '' : 's'} that differ from the pin (${odd.slice(0, 5).map(safeName).join(', ')}${odd.length > 5 ? ', ...' : ''}). Calls to them wait for your passkey. Review and pin: counterseal mcp pin --name ${this.name}`);
       }
     })().finally(() => { this.refreshing = null; });
     return this.refreshing;
@@ -648,10 +648,10 @@ const flag = (a, n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : unde
 const has = (a, n) => a.includes(n);
 
 const USAGE = `usage:
-  leashcli mcp wrap --name <id> [--policy <file>] [--require-pin] -- <command> [args...]
-  leashcli mcp pin --name <id> [--yes] [-- <command> [args...]]
-  leashcli mcp unpin --name <id>
-  leashcli mcp status --name <id> [--check]
+  counterseal mcp wrap --name <id> [--policy <file>] [--require-pin] -- <command> [args...]
+  counterseal mcp pin --name <id> [--yes] [-- <command> [args...]]
+  counterseal mcp unpin --name <id>
+  counterseal mcp status --name <id> [--check]
 The first form is what your MCP client runs in place of the server (put "leashcli" in its command and the rest in its args).`;
 
 function loadPolicy(name, file, env) {
@@ -674,8 +674,8 @@ async function wrap(a, env) {
   if (!Store.validName(name) || !cmd.length) fail(USAGE, 2);
   let policy, pin;
   try { policy = loadPolicy(name, flag(flags, '--policy'), env); } catch (e) { fail(`Counterseal: the policy for "${name}" cannot be used (${e.message}). Nothing was started.`, 2); }
-  try { pin = Store.readPin(name, env); } catch (e) { fail(`Counterseal: the pin for "${name}" cannot be used (${e.message}). Nothing was started. To start again from scratch: leashcli mcp unpin --name ${name}`, 3); }
-  if (!pin && has(flags, '--require-pin')) fail(`Counterseal: "${name}" has no pin and --require-pin is set. Pin it first: leashcli mcp pin --name ${name} -- ${cmd.join(' ')}`, 3);
+  try { pin = Store.readPin(name, env); } catch (e) { fail(`Counterseal: the pin for "${name}" cannot be used (${e.message}). Nothing was started. To start again from scratch: counterseal mcp unpin --name ${name}`, 3); }
+  if (!pin && has(flags, '--require-pin')) fail(`Counterseal: "${name}" has no pin and --require-pin is set. Pin it first: counterseal mcp pin --name ${name} -- ${cmd.join(' ')}`, 3);
   const guard = loadGuard(env);
   const ask = guard.key ? makeAsk({ server: guard.server, key: guard.key, version: WRAP_VERSION, timeoutMs: Number(env.LEASH_MCP_TIMEOUT_MS) || 10000 }) : null;
   let child;
@@ -818,7 +818,7 @@ async function pinCommand(a, env) {
     try { obs = await introspect(cmd, env); } catch (e) { fail(`Counterseal: ${e.message}. Nothing was pinned.`, 5); }
   } else {
     let seen; try { seen = Store.readSeen(name, env); } catch (e) { fail(`Counterseal: ${e.message}`, 3); }
-    if (!seen) fail(`Counterseal: nothing waits for review. Run the server through "leashcli mcp wrap" first, or give the command: leashcli mcp pin --name ${name} -- <command> [args...]`, 5);
+    if (!seen) fail(`Counterseal: nothing waits for review. Run the server through "counterseal mcp wrap" first, or give the command: counterseal mcp pin --name ${name} -- <command> [args...]`, 5);
     obs = { tools: seen.tools, instructions: seen.instructions, setHash: seen.setHash };
     for (const e of obs.tools.values()) if (e.h === 'unreadable') fail('Counterseal: the server showed definitions that cannot be read one way, so they cannot be pinned.', 5);
   }
@@ -845,7 +845,7 @@ async function statusCommand(a, env) {
   try { pin = Store.readPin(name, env); seen = Store.readSeen(name, env); policy = loadPolicy(name, flag(a, '--policy'), env); } catch (e) { fail(`Counterseal: ${e.message}`, 3); }
   out(`${name}`);
   out(pin ? `  pinned: ${Object.keys(pin.tools).length} tools${pin.pinnedAt ? ' on ' + pin.pinnedAt : ''}; set ${pin.setHash ? pin.setHash.slice(0, 16) : 'n/a'}; instructions ${pin.instructions ? 'pinned' : 'none'}   (${p.pin})` : `  not pinned yet (the first complete tool list a client asks for through the wrapper is pinned)   (${p.pin})`);
-  if (seen) { const cmp = Store.compare(pin, { tools: seen.tools, instructions: seen.instructions }); out(`  waiting for review: ${cmp.added.length} new, ${cmp.changed.length} changed${cmp.instructions ? `, instructions ${cmp.instructions}` : ''}   (leashcli mcp pin --name ${name})`); }
+  if (seen) { const cmp = Store.compare(pin, { tools: seen.tools, instructions: seen.instructions }); out(`  waiting for review: ${cmp.added.length} new, ${cmp.changed.length} changed${cmp.instructions ? `, instructions ${cmp.instructions}` : ''}   (counterseal mcp pin --name ${name})`); }
   out(`  policy: ${existsSync(p.policy) ? p.policy : 'default'}; hold ${policy.hold.length} pattern${policy.hold.length === 1 ? '' : 's'}, allow ${policy.allow.length}, SQL arguments ${policy.sqlArgs.length ? policy.sqlArgs.join(', ') : 'not checked'}, trustAnnotations ${policy.trustAnnotations}, repin ${policy.repin}`);
   const g = loadGuard(env);
   out(g.key ? `  guard key: set; asks ${g.server}` : `  guard key: NOT SET. ${g.problem}`);

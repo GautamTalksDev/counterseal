@@ -1,4 +1,4 @@
-// What the MCP wrapper (leashcli mcp wrap) holds, and why. Zero dependencies. Pure functions: no files, no network.
+// What the MCP wrapper (counterseal mcp wrap) holds, and why. Zero dependencies. Pure functions: no files, no network.
 //
 // A tool call is held when (1) its name says it destroys, sends, pays or deploys, (2) your policy file asks for it, (3) a SQL
 // argument is not plainly a read, (4) the tool calls itself destructive and your policy trusts that, or (5) the tool's

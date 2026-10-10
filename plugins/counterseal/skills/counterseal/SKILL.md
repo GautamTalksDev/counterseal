@@ -32,7 +32,7 @@ The tool call is denied with a message that starts "Counterseal held this comman
 
 - "Your human denied this command": do not run it. Ask what they want instead.
 - "Counterseal could not reach its server": the command is held until it can. Tell the human.
-- "Counterseal's guard key is no longer valid": tell the human to run `leashcli guard install` or make a lasting key
+- "Counterseal's guard key is no longer valid": tell the human to run `counterseal guard install` or make a lasting key
   in the app (Account, Guard keys).
 
 ## What is held (the shell map)

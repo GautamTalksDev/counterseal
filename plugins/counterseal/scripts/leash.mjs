@@ -22,7 +22,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
-const VERSION = '0.2.1';
+const VERSION = '0.3.0';
+// the npm package that runs this CLI (published as counterseal; leashcli is the old name, a thin alias that runs this one)
+const PKG = 'counterseal';
 const CFG_DIR = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'leash');
 const CFG = join(CFG_DIR, 'config.json');
 const cfg = () => (existsSync(CFG) ? JSON.parse(readFileSync(CFG, 'utf8')) : {});
@@ -199,10 +201,17 @@ try {
     case 'token': {
       const p = flag(args, '--policy');
       const ak = flag(args, '--agent-key');
-      const r = await api('POST', '/v1/tokens', { credentialId: args[0], label: flag(args, '--label'), ttlHours: flag(args, '--ttl') ? Number(flag(args, '--ttl')) : undefined, policy: p ? JSON.parse(readFileSync(p, 'utf8')) : undefined, agentKeyId: ak });
+      let credentialId = args[0] && !args[0].startsWith('--') ? args[0] : null;
+      if (!credentialId) {
+        const cs = (await api('GET', '/v1/credentials')).credentials;
+        if (cs.length !== 1) die(cs.length ? `Which key? You have ${cs.length}: run "leash creds" and then "leash token <id>".` : 'Your vault is empty. Add a key first: leash add github');
+        credentialId = cs[0].id;
+        process.stderr.write(`Using your only key: ${cs[0].label} (${cs[0].provider}).\n`);
+      }
+      const r = await api('POST', '/v1/tokens', { credentialId, label: flag(args, '--label'), ttlHours: flag(args, '--ttl') ? Number(flag(args, '--ttl')) : undefined, policy: p ? JSON.parse(readFileSync(p, 'utf8')) : undefined, agentKeyId: ak });
       const env = { LEASH_TOKENS: `${r.provider}=${r.token}`, ...(ak ? { LEASH_AGENT_KEY: '<path to your agent key file>' } : {}) };
       console.log(`${r.token}\n\nBase URL: ${r.baseUrl}\nExpires:  ${new Date(r.expiresAt).toISOString()}${r.agentKey ? `\nBound to agent key ${r.agentKey}: every request must be signed with it.` : ''}\n${r.note}\n\nMCP server config for your agent:
-${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli', 'mcp'], env } } }, null, 2)}`);
+${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp'], env } } }, null, 2)}`);
       break;
     }
     case 'revoke': await api('DELETE', `/v1/tokens/${args[0]}`); console.log('Revoked.'); break;
@@ -239,7 +248,7 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli
     case 'guard': await (await import('./guard.mjs')).main(args); break;
     case '--version': case '-v': console.log(VERSION); break;
     default:
-      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token <credentialId> [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | mcp wrap|pin|unpin|status --name <id> | guard install|uninstall|status|check|map');
+      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token [credentialId] [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | mcp wrap|pin|unpin|status --name <id> | guard install|uninstall|status|check|map');
   }
 } catch (e) {
   die(`leash: ${e.message}`);

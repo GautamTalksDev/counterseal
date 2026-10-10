@@ -1,4 +1,4 @@
-// A strict JSON reader for the MCP wrapper (leashcli mcp wrap). Zero dependencies.
+// A strict JSON reader for the MCP wrapper (counterseal mcp wrap). Zero dependencies.
 //
 // The wrapper decides about a message from what it reads, and forwards the original bytes. That is only safe if every other
 // reader of those bytes sees the same thing, and JSON parsers disagree: some keep the first copy of a repeated member name,

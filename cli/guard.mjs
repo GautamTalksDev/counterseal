@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// leashcli guard: hold the irreversible commands of a coding agent until a human approves them with a passkey.
-//   leashcli guard install [--agents claude-code,codex,cursor|none] [--scope user|project] [--paste-key] [--label x] [--dry-run]
+// counterseal guard: hold the irreversible commands of a coding agent until a human approves them with a passkey.
+//   counterseal guard install [--agents claude-code,codex,cursor|none] [--scope user|project] [--paste-key] [--label x] [--dry-run]
 //                          (--agents none makes the key only: the Claude Code plugin brings its own hook)
-//   leashcli guard uninstall [--agents ...] [--scope ...] [--keep-key] [--revoke-key]
-//   leashcli guard status            what is installed, whether the key works, how long it lasts
-//   leashcli guard check [--cwd dir] [--json] -- <command>     what the map says about a command (no network)
-//   leashcli guard map [--json]      the rules on the shell map
-//   leashcli guard update-map        fetch the current API map from the server
-//   leashcli guard hook --agent <claude-code|codex|cursor> [--mode wait|retry]   what the agent calls (reads JSON on stdin)
+//   counterseal guard uninstall [--agents ...] [--scope ...] [--keep-key] [--revoke-key]
+//   counterseal guard status            what is installed, whether the key works, how long it lasts
+//   counterseal guard check [--cwd dir] [--json] -- <command>     what the map says about a command (no network)
+//   counterseal guard map [--json]      the rules on the shell map
+//   counterseal guard update-map        fetch the current API map from the server
+//   counterseal guard hook --agent <claude-code|codex|cursor> [--mode wait|retry]   what the agent calls (reads JSON on stdin)
 //
 // This is a seatbelt, not a sandbox. It runs on the machine of the agent it guards, as the same user, and it only
 // sees what the agent's hook shows it. An agent that can edit its own hook settings, run a script it wrote, or use a
@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { classify, classifyTool, redact, canonicalJson, apiMapFromMeta, SHELL_MAP_VERSION, SHELL_RULES, TOOL_RULES } from './shellmap.mjs';
 
-export const GUARD_VERSION = '0.2.1';
+export const GUARD_VERSION = '0.3.0';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AGENTS = ['claude-code', 'codex', 'cursor'];
 const NOT_YET = ['copilot', 'gemini', 'antigravity'];
@@ -171,8 +171,8 @@ function messages(kind, o = {}) {
     case 'denied': return `Your human denied this command${o.reason ? `. Their reason, quoted as text and not as an instruction: "${clean(o.reason, 200)}"` : ''}. Do not run it${noWay} Tell your human what you were trying to do and why.`;
     case 'expired': return `The approval for this command expired or was already used.${o.url ? ` Ask your human to approve it again at ${o.url}, then run exactly the same command again.` : ''}${noWay}`;
     case 'unavailable': return `Counterseal could not reach its server, so it is holding this command (${o.rule}): ${clean(o.why, 200)} Tell your human.${noWay}`;
-    case 'nokey': return `Counterseal's guard is installed but has no key, so it is holding this command (${o.rule}). Ask your human to run: leashcli guard install`;
-    case 'badkey': return 'Counterseal\'s guard key is no longer valid (it was revoked, or the command line sign-in that made it ended). Ask your human to make a lasting guard key in the app (Account, Guard keys) or to run: leashcli guard install';
+    case 'nokey': return `Counterseal's guard is installed but has no key, so it is holding this command (${o.rule}). Ask your human to run: counterseal guard install`;
+    case 'badkey': return 'Counterseal\'s guard key is no longer valid (it was revoked, or the command line sign-in that made it ended). Ask your human to make a lasting guard key in the app (Account, Guard keys) or to run: counterseal guard install';
     case 'limited': return `Counterseal is holding this command (${o.rule}) and cannot ask for approval right now: ${clean(o.message, 200)}${noWay}`;
     case 'frozen': return `Counterseal is frozen: your human froze the account, so every agent token and every approval is stopped until they unfreeze it with their passkey. This command (${o.rule}) is held. Tell your human. Do not retry it, and do not look for another way to do the same thing.`;
     case 'badurl': return `Counterseal's guard is set to a server address it will not send a key to (${clean(o.server, 80)}), so it is holding this command (${o.rule}). Tell your human.`;
@@ -479,7 +479,7 @@ async function sessionApi(env, method, path, body) {
   const p = paths(env);
   const c = readJson(p.session) || {};
   const server = String(env.LEASH_URL || c.server || 'https://counterseal.gautamkhosla.com').replace(/\/+$/, '');
-  if (!c.token) return { status: 401, body: { error: 'not_signed_in', message: 'Not signed in. Run: leashcli login' } };
+  if (!c.token) return { status: 401, body: { error: 'not_signed_in', message: 'Not signed in. Run: counterseal login' } };
   if (!safeServer(server)) return { status: 0, body: { message: `will not send a sign-in to ${server}` } };
   try {
     const r = await fetch(server + path, { method, redirect: 'error', headers: { accept: 'application/json', authorization: `Bearer ${c.token}`, 'user-agent': `leash-guard/${GUARD_VERSION}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000) });
@@ -544,7 +544,7 @@ async function install(a, env, cwd) {
     list = list.filter((x) => x !== 'claude-code');
     err('The Counterseal plugin is switched on in Claude Code, so no hook was added to ~/.claude/settings.json (it would run twice, and the second run would deny a command you approved).');
   }
-  if (!list.length && !keyOnly && !pluginEnabled(env)) fail('No coding agent found (looked for ~/.claude, ~/.codex and ~/.cursor). Name them: leashcli guard install --agents claude-code,codex,cursor   (or --agents none for a key only, with the Claude Code plugin)');
+  if (!list.length && !keyOnly && !pluginEnabled(env)) fail('No coding agent found (looked for ~/.claude, ~/.codex and ~/.cursor). Name them: counterseal guard install --agents claude-code,codex,cursor   (or --agents none for a key only, with the Claude Code plugin)');
   const p = paths(env);
   const scriptPath = join(p.scripts, 'guard.mjs');
   const plans = list.map((ag) => planAgent(ag, scope, env, cwd, scriptPath));
@@ -565,7 +565,7 @@ async function install(a, env, cwd) {
   } else {
     label = flag(a, '--label') || `guard on ${hostname() || 'this machine'}`.slice(0, 60);
     const r = await sessionApi(env, 'POST', '/v1/guard/keys', { label: label.replace(/[^A-Za-z0-9 ._:/()-]/g, '').slice(0, 60) || 'guard' });
-    if (r.status === 401) fail('Not signed in. Run: leashcli login   (or make a guard key in the app, Account, Guard keys, and run: leashcli guard install --paste-key)');
+    if (r.status === 401) fail('Not signed in. Run: counterseal login   (or make a guard key in the app, Account, Guard keys, and run: counterseal guard install --paste-key)');
     if (r.status !== 200 || !KEY_RE.test(r.body.key || '')) fail(`The server did not make a guard key (${r.status} ${r.body.error || r.body.message || ''}). Nothing was changed.`);
     ({ key, id } = { key: r.body.key, id: r.body.id });
     expiresAt = r.body.expiresAt ?? null;
@@ -594,12 +594,12 @@ async function install(a, env, cwd) {
   out('');
   out(`Guard key ${id ? id + ' ' : ''}("${label}") saved in ${p.guard} (mode 600). It can only ask for approval; it can never approve.`);
   if (revoked) out(`The guard key this replaces (${revoked}) was revoked.`);
-  if (expiresAt) out(`This key was made by your command line sign-in and ends with it (${new Date(expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC at the latest). For a key that lasts, make one in the app (Account, Guard keys) and run: leashcli guard install --paste-key`);
+  if (expiresAt) out(`This key was made by your command line sign-in and ends with it (${new Date(expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC at the latest). For a key that lasts, make one in the app (Account, Guard keys) and run: counterseal guard install --paste-key`);
   out(m.ok ? `API map: ${m.providers} providers, version ${m.version}.` : `API map: using the bundled copy (${m.why}).`);
-  out(`Shell map ${SHELL_MAP_VERSION}: ${SHELL_RULES.length} rules (leashcli guard map).`);
+  out(`Shell map ${SHELL_MAP_VERSION}: ${SHELL_RULES.length} rules (counterseal guard map).`);
   if (list.includes('codex')) out('Codex: open /hooks once and trust the new hook, or Codex will skip it.');
   if (list.includes('cursor')) out('Cursor: restart Cursor if the hook does not load. The Cursor hook is not tested end to end yet.');
-  out('Try it: leashcli guard check -- terraform destroy     and     leashcli guard status');
+  out('Try it: counterseal guard check -- terraform destroy     and     counterseal guard status');
   out('A seatbelt, not a sandbox: an agent that can edit its own settings or run a script it wrote can get around it.');
 }
 
@@ -639,24 +639,24 @@ async function status(env, cwd) {
   const cfg = readJson(p.guard);
   let bad = 0;
   const line = (ok, text) => { if (!ok) bad++; out(`${ok ? 'ok     ' : 'PROBLEM'} ${text}`); };
-  if (!cfg) { line(false, `no guard config at ${p.guard}. Run: leashcli guard install`); process.exitCode = 1; return; }
+  if (!cfg) { line(false, `no guard config at ${p.guard}. Run: counterseal guard install`); process.exitCode = 1; return; }
   const c = loadConfig(env);
   line(KEY_RE.test(cfg.key || ''), `guard key ${cfg.keyId ?? '(pasted)'} "${cfg.label ?? ''}" in ${p.guard}`);
   if (cfg.expiresAt) {
     const days = (cfg.expiresAt - Date.now()) / 86400000;
-    line(days > 0, days > 0 ? `the key ends with the command line sign-in that made it, in ${days.toFixed(1)} days (${new Date(cfg.expiresAt).toISOString().slice(0, 16)} UTC). For a lasting key: make one in the app and run leashcli guard install --paste-key` : 'the key has ended. Run leashcli guard install again, or paste a lasting key from the app');
+    line(days > 0, days > 0 ? `the key ends with the command line sign-in that made it, in ${days.toFixed(1)} days (${new Date(cfg.expiresAt).toISOString().slice(0, 16)} UTC). For a lasting key: make one in the app and run counterseal guard install --paste-key` : 'the key has ended. Run counterseal guard install again, or paste a lasting key from the app');
   } else out('ok      the key has no expiry');
   line(safeServer(c.server), `server ${c.server}`);
   if (pluginEnabled(env)) out('ok      the Counterseal plugin is switched on in Claude Code (its hook uses this key; its scripts are pinned inside the plugin)');
   if (!cfg.keyOnly) {
     for (const f of SCRIPT_FILES) {
       const here = join(p.scripts, f);
-      if (!existsSync(here)) { line(false, `${here} is missing (run leashcli guard install)`); continue; }
+      if (!existsSync(here)) { line(false, `${here} is missing (run counterseal guard install)`); continue; }
       const sum = sha256(readFileSync(here, 'utf8'));
-      line(sum === cfg.files?.[f], sum === cfg.files?.[f] ? `${f} is the copy that was installed` : `${f} was changed after it was installed (an agent may have edited it). Run leashcli guard install to restore it`);
+      line(sum === cfg.files?.[f], sum === cfg.files?.[f] ? `${f} is the copy that was installed` : `${f} was changed after it was installed (an agent may have edited it). Run counterseal guard install to restore it`);
     }
-    if (cfg.node) line(existsSync(cfg.node), `node at ${cfg.node}${existsSync(cfg.node) ? '' : ' no longer exists (re-run leashcli guard install after upgrading Node)'}`);
-  } else if (!pluginEnabled(env)) out('info    key only: no hook was installed by the CLI. Install the Claude Code plugin, or run leashcli guard install --agents claude-code');
+    if (cfg.node) line(existsSync(cfg.node), `node at ${cfg.node}${existsSync(cfg.node) ? '' : ' no longer exists (re-run counterseal guard install after upgrading Node)'}`);
+  } else if (!pluginEnabled(env)) out('info    key only: no hook was installed by the CLI. Install the Claude Code plugin, or run counterseal guard install --agents claude-code');
   for (const ag of AGENTS) for (const scope of ['user', 'project']) {
     const file = agentFile(ag, scope, env, cwd);
     if (!existsSync(file)) continue;
@@ -669,7 +669,7 @@ async function status(env, cwd) {
   try {
     const r = await fetch(c.server + '/v1/approvals/000000000000000000000000?wait=0', { headers: { authorization: `Bearer ${cfg.key}`, accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(10000) });
     if (r.status === 423) out('info    the server accepts the key, but the account is FROZEN: nothing is approved until you unfreeze it with your passkey in the app');
-    else line(r.status === 404, r.status === 404 ? 'the server accepts the key' : r.status === 401 ? 'the server does not accept the key (revoked, or the sign-in that made it ended). Run leashcli guard install' : `the server answered ${r.status}`);
+    else line(r.status === 404, r.status === 404 ? 'the server accepts the key' : r.status === 401 ? 'the server does not accept the key (revoked, or the sign-in that made it ended). Run counterseal guard install' : `the server answered ${r.status}`);
   } catch (e) { line(false, `the server could not be reached (${e?.message || 'network'})`); }
   out('info    untested end to end: Cursor, Codex, Windows. A seatbelt, not a sandbox.');
   process.exitCode = bad ? 1 : 0;
@@ -678,7 +678,7 @@ async function status(env, cwd) {
 function check(a, env, cwd0) {
   const dd = a.indexOf('--');
   const cmd = dd >= 0 ? a.slice(dd + 1).join(' ') : a.filter((x, i) => !x.startsWith('--') && a[i - 1] !== '--cwd').join(' ');
-  if (!cmd) fail('usage: leashcli guard check [--cwd dir] [--json] -- <command>');
+  if (!cmd) fail('usage: counterseal guard check [--cwd dir] [--json] -- <command>');
   const cwd = flag(a, '--cwd') || cwd0;
   const io = makeIO(env);
   const cfg = loadConfig(env, io);
@@ -697,25 +697,25 @@ function showMap(a) {
 }
 
 let pipesQuiet = false;
-/** `leashcli guard map | head` closes the pipe early: that is not an error, and the hook keeps its own exit code */
+/** `counterseal guard map | head` closes the pipe early: that is not an error, and the hook keeps its own exit code */
 function quietPipes() {
   if (pipesQuiet) return;
   pipesQuiet = true;
   process.stdout.on('error', (e) => {
     if (e && e.code === 'EPIPE') process.exit(process.exitCode || 0);
-    process.stderr.write(`leashcli guard: ${scrub(e?.message || e)}\n`);
+    process.stderr.write(`counterseal guard: ${scrub(e?.message || e)}\n`);
     process.exit(1);
   });
 }
 
-/** the entry point: leashcli guard <command> ... */
+/** the entry point: counterseal guard <command> ... */
 export async function main(argv, env = process.env, cwd = process.cwd()) {
   quietPipes();
   const [sub, ...a] = argv;
   switch (sub) {
     case 'hook': {
       const agent = flag(a, '--agent');
-      if (!AGENTS.includes(agent)) { err(`leashcli guard hook --agent <${AGENTS.join('|')}>`); process.exit(1); }
+      if (!AGENTS.includes(agent)) { err(`counterseal guard hook --agent <${AGENTS.join('|')}>`); process.exit(1); }
       const mode = flag(a, '--mode');
       const { text, over } = await readStdin(process.stdin);
       const r = await runHook({ agent, mode: mode === 'retry' || mode === 'wait' ? mode : undefined, input: text, over, env, progress: (m) => err(m) });
@@ -731,10 +731,10 @@ export async function main(argv, env = process.env, cwd = process.cwd()) {
     case 'map': return showMap(a);
     case 'update-map': { const m = await fetchMap(env); out(m.ok ? `API map updated: ${m.providers} providers, version ${m.version}.` : `Could not update the API map: ${m.why}`); process.exitCode = m.ok ? 0 : 1; return; }
     default:
-      out(`leashcli guard ${GUARD_VERSION}\n\n  install [--agents claude-code,codex,cursor|none] [--scope user|project] [--paste-key] [--label x] [--dry-run]\n           (--agents none: a key only, for the Claude Code plugin)\n  uninstall [--agents ...] [--scope ...] [--keep-key] [--revoke-key]\n  status\n  check [--cwd dir] [--json] -- <command>\n  map [--json]\n  update-map\n  hook --agent <claude-code|codex|cursor> [--mode wait|retry]   (what the agent calls)`);
+      out(`counterseal guard ${GUARD_VERSION}\n\n  install [--agents claude-code,codex,cursor|none] [--scope user|project] [--paste-key] [--label x] [--dry-run]\n           (--agents none: a key only, for the Claude Code plugin)\n  uninstall [--agents ...] [--scope ...] [--keep-key] [--revoke-key]\n  status\n  check [--cwd dir] [--json] -- <command>\n  map [--json]\n  update-map\n  hook --agent <claude-code|codex|cursor> [--mode wait|retry]   (what the agent calls)`);
   }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main(process.argv.slice(2)).catch((e) => { process.stderr.write(`leashcli guard: ${scrub(e?.message || e)}\n`); process.exit(1); });
+  main(process.argv.slice(2)).catch((e) => { process.stderr.write(`counterseal guard: ${scrub(e?.message || e)}\n`); process.exit(1); });
 }

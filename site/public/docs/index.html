@@ -59,15 +59,15 @@
   <ol>
     <li><strong>Create an account</strong> at <a href="/app">/app</a> with a passkey. No password or email.</li>
     <li><strong>Sign in the CLI.</strong> It shows a code; open <a href="/app#device">/app#device</a>, type the code, check where the sign-in started, and approve with your passkey. Never type a code someone sent you:
-      <pre>npx leashcli login</pre></li>
+      <pre>npx counterseal login</pre></li>
     <li><strong>Vault a key.</strong> Paste it once; it is encrypted in the vault and never saved on your machine:
-      <pre>npx leashcli add github prod</pre></li>
+      <pre>npx counterseal add github prod</pre></li>
     <li><strong>Mint a token</strong> for your agent (or do it in the app under Agent tokens):
-      <pre>npx leashcli creds                      # find the key id
-npx leashcli token &lt;key-id&gt; --label coding-agent</pre></li>
+      <pre>npx counterseal creds                      # find the key id
+npx counterseal token &lt;key-id&gt; --label coding-agent</pre></li>
     <li><strong>Connect your agent.</strong> Add the MCP server to your agent's config (see <a href="#mcp">below</a>).</li>
   </ol>
-  <div class="callout">You can also do all of this in the app without the CLI. The CLI is just faster. The CLI package is called <code>leashcli</code> (the product's earlier name); it is the same service.</div>
+  <div class="callout">You can also do all of this in the app without the CLI. The CLI is just faster. From version 0.3.0 the CLI package is called <code>counterseal</code>; <code>leashcli</code>, the product's earlier name, keeps working as an alias that runs it; it is the same service.</div>
   <div class="callout">Counterseal used to live at leash.gautamkhosla.com. That host still answers the API and the proxy exactly as before, so existing tokens, agents and <code>leashcli</code> 0.1.1 keep working, and its <code>/app</code> still signs in with passkeys made there. If your account was made there, sign in on the old host, open Account and choose <strong>Move with passkey</strong>: a one-time link (10 minutes) opens this host, where you make a passkey for the same account. Your old passkey keeps working on the old host until you remove it.</div>
 
   <h2 id="concepts">Concepts</h2>
@@ -85,17 +85,17 @@ npx leashcli token &lt;key-id&gt; --label coding-agent</pre></li>
   </table>
 
   <h2 id="mcp">Connecting your agent (MCP)</h2>
-  <p><code>npx leashcli mcp</code> runs a local MCP server that gives your agent one request tool, <code>leash_request</code>, that can call every provider in <code>LEASH_TOKENS</code>. Add it to any MCP client's server config. List several providers separated by commas:</p>
+  <p><code>npx counterseal mcp</code> runs a local MCP server that gives your agent one request tool, <code>leash_request</code>, that can call every provider in <code>LEASH_TOKENS</code>. Add it to any MCP client's server config. List several providers separated by commas:</p>
   <pre>{
   "mcpServers": {
     "leash": {
       "command": "npx",
-      "args": ["-y", "leashcli", "mcp"],
+      "args": ["-y", "counterseal", "mcp"],
       "env": { "LEASH_TOKENS": "github=lsh_aaa,stripe=lsh_bbb" }
     }
   }
 }</pre>
-  <p>The tool tells the agent that held calls need a human, so a well-behaved agent stops and gives you the approval link instead of looking for another way in. For an API that takes a form instead of JSON (Stripe), the tool has a <code>form</code> field next to <code>body</code>: <code>{"charge": "ch_...", "amount": 2500}</code> is sent as <code>application/x-www-form-urlencoded</code> (from leashcli 0.2.1).</p>
+  <p>The tool tells the agent that held calls need a human, so a well-behaved agent stops and gives you the approval link instead of looking for another way in. For an API that takes a form instead of JSON (Stripe), the tool has a <code>form</code> field next to <code>body</code>: <code>{"charge": "ch_...", "amount": 2500}</code> is sent as <code>application/x-www-form-urlencoded</code> (from leashcli 0.3.0).</p>
 
   <h2 id="proxy">Calling through the proxy</h2>
   <p>Any agent, script or SDK can call the broker directly. Swap the provider's base URL for the proxy and the real key for your token:</p>
@@ -114,7 +114,7 @@ Authorization: Bearer lsh_...</pre>
   "rule": "rw.mutation",
   "message": "Counterseal held this request because it cannot be undone..."
 }</pre>
-  <p>Open the link, check the method, host, path, reason and the request preview, and approve with your passkey. Then retry the <strong>exact same request</strong> once. Turn on phone alerts in the app, or run <code>npx leashcli watch</code> for a terminal bell and link for every new hold (with leashcli 0.1.1 its links point at leash.gautamkhosla.com; if your account is on counterseal, open the hold from the app or the alert).</p>
+  <p>Open the link, check the method, host, path, reason and the request preview, and approve with your passkey. Then retry the <strong>exact same request</strong> once. Turn on phone alerts in the app, or run <code>npx counterseal watch</code> for a terminal bell and link for every new hold (with leashcli 0.1.1 its links point at leash.gautamkhosla.com; if your account is on counterseal, open the hold from the app or the alert).</p>
 
   <h2 id="guard">Approvals for a coding agent's commands</h2>
   <p>Some irreversible actions never pass through an API the broker holds a key for: <code>terraform destroy</code>, <code>railway volume delete</code>, <code>gh repo delete</code>, <code>prisma migrate reset</code>, <code>DROP TABLE</code> through <code>psql</code>, <code>git push --force</code>. For those, a guard on the agent's machine asks the Approvals API with a guard key and waits for your passkey:</p>
@@ -134,22 +134,22 @@ curl -s https://counterseal.gautamkhosla.com/v1/approvals/&lt;id&gt;/use \
   <ul>
     <li><strong>One exact command, once.</strong> An approval covers that command with its agent and folder name, once, within 10 minutes. Asking again for the same command while it waits does not send a second alert.</li>
     <li><strong>Deny with a reason.</strong> The guard hands your reason back to the agent (200 characters at most), so "not today, use staging" reaches it.</li>
-    <li><strong>Guard keys only ask.</strong> A guard key can ask and read its own approvals; approving always needs your passkey in the app. Make one under Account, Guard keys, or from a signed-in <code>leashcli</code>, where it ends with that sign-in. Each key can ask for 60 new approvals an hour, with 20 waiting at a time.</li>
+    <li><strong>Guard keys only ask.</strong> A guard key can ask and read its own approvals; approving always needs your passkey in the app. Make one under Account, Guard keys, or from a signed-in CLI, where it ends with that sign-in. Each key can ask for 60 new approvals an hour, with 20 waiting at a time.</li>
     <li><strong>A seatbelt, not a sandbox.</strong> The guard runs on the agent's machine and matches a map of commands; an agent that edits its hook settings or wraps a command in a script is not stopped by it. Commands not on the map are left to your agent's own permission settings. For a hard stop, give your agent a Counterseal token instead of the real key.</li>
     <li><strong>Receipts.</strong> A guard decision's public receipt says only <code>RUN claude-code</code> (or <code>CALL mcp</code> for a tool call), the decision, the rule and the map version. Never the command, folder or key label.</li>
   </ul>
   <p>Fields: <code>kind</code> (<code>shell</code> or <code>tool</code>), <code>agent</code> (<code>claude-code</code>, <code>codex</code>, <code>cursor</code>, <code>copilot</code>, <code>gemini</code>, <code>antigravity</code> or <code>mcp</code>), <code>rule</code>, <code>why</code> (up to 300 characters), <code>summary</code> (up to 200), <code>detail</code> (the exact command or canonical tool call, up to 4,096), optional <code>context</code> (<code>cwd</code>, the folder's name only; <code>session</code>) and <code>map</code> (the guard's map version). The full contract is in <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
 
   <h2 id="guard-cli">Guard your coding agent</h2>
-  <p><code>leashcli guard</code> puts a hook in front of your coding agent's shell commands. A command on the shell map waits for your passkey; every other command is left to the agent's own permission settings. It is in this repository (CLI 0.2.1, coming to npm), not on npm yet: until then run <code>node cli/leash.mjs guard ...</code> from a clone.</p>
-  <pre>npx leashcli login                  # type its code at /app#device, check where it started, approve
-npx leashcli guard install          # finds Claude Code, Codex and Cursor; or --agents claude-code,codex,cursor
-npx leashcli guard check -- terraform destroy     # what the map says, offline
-npx leashcli guard status           # what is installed, and whether the key works</pre>
+  <p><code>counterseal guard</code> puts a hook in front of your coding agent's shell commands. A command on the shell map waits for your passkey; every other command is left to the agent's own permission settings. It is in this repository (CLI 0.3.0, coming to npm), not on npm yet: until then run <code>node cli/leash.mjs guard ...</code> from a clone.</p>
+  <pre>npx counterseal login                  # type its code at /app#device, check where it started, approve
+npx counterseal guard install          # finds Claude Code, Codex and Cursor; or --agents claude-code,codex,cursor
+npx counterseal guard check -- terraform destroy     # what the map says, offline
+npx counterseal guard status           # what is installed, and whether the key works</pre>
   <p><strong>Claude Code plugin.</strong> The same hook as a plugin, from this repository's marketplace file (no form):</p>
   <pre>claude plugin marketplace add GautamTalksDev/leash
 claude plugin install counterseal@counterseal
-npx leashcli guard install --agents none     # makes the key the plugin's hook uses</pre>
+npx counterseal guard install --agents none     # makes the key the plugin's hook uses</pre>
   <p>The plugin needs <code>node</code> on your PATH and runs its own pinned copy of the guard, never <code>npx</code>. The plugin sets the hook to block the command if the hook itself crashes or times out; Claude Code 2.1.295 or later honours that, and older versions let such a command through. Claude Code may say one plugin option is not set: it is only for the optional MCP server and can be left empty. If you use the plugin, <code>guard install</code> adds no second hook to Claude Code (two would run, and the second would deny a command you approved).</p>
   <h3>What happens</h3>
   <ol>
@@ -199,10 +199,10 @@ npx leashcli guard install --agents none     # makes the key the plugin's hook u
     <li><strong>Encoded</strong> payloads: a decoder piped into a shell is held, but the payload is not decoded or classified.</li>
     <li>Globs stay unexpanded, symlinks are not followed, and shells nested more than three deep are scanned piece by piece.</li>
     <li>A command it cannot parse is scanned piece by piece. If that finds nothing it passes; set <code>"unreadable": "hold"</code> to hold it.</li>
-    <li>An agent that edits its own hook settings, the guard's files or its config, or runs the same effect through a script, is not stopped. <code>leashcli guard status</code> notices a changed script. For a hard stop, give the agent a Counterseal token instead of the real key.</li>
+    <li>An agent that edits its own hook settings, the guard's files or its config, or runs the same effect through a script, is not stopped. <code>counterseal guard status</code> notices a changed script. For a hard stop, give the agent a Counterseal token instead of the real key.</li>
   </ul>
   <h3>If something goes wrong</h3>
-  <p>By default the guard fails closed: if the server cannot be reached, answers something unexpected, or the key is no longer valid, a command on the map is denied with the fix, and every other command runs as before. A hook request times out after 10 seconds. Set <code>"onUnavailable": "allow"</code> in <code>~/.config/leash/guard.json</code> to let commands on the map through when the server cannot be reached; a revoked key, a rate limit and <a href="#brakes">Freeze</a> still deny. When the account is frozen the server answers <code>423</code> to asking, waiting and using: the agent is told your human froze the account, not to retry and not to look for another way, and a wait already in progress learns of it when its current long poll ends (20 seconds at most). A key made by <code>leashcli guard install</code> ends with that command line sign-in (7 days at most): make a lasting one in the app (Account, Guard keys) and run <code>leashcli guard install --paste-key</code>.</p>
+  <p>By default the guard fails closed: if the server cannot be reached, answers something unexpected, or the key is no longer valid, a command on the map is denied with the fix, and every other command runs as before. A hook request times out after 10 seconds. Set <code>"onUnavailable": "allow"</code> in <code>~/.config/leash/guard.json</code> to let commands on the map through when the server cannot be reached; a revoked key, a rate limit and <a href="#brakes">Freeze</a> still deny. When the account is frozen the server answers <code>423</code> to asking, waiting and using: the agent is told your human froze the account, not to retry and not to look for another way, and a wait already in progress learns of it when its current long poll ends (20 seconds at most). A key made by <code>counterseal guard install</code> ends with that command line sign-in (7 days at most): make a lasting one in the app (Account, Guard keys) and run <code>counterseal guard install --paste-key</code>.</p>
   <table>
     <tr><th>Setting in <code>guard.json</code></th><th>Default</th><th>Meaning</th></tr>
     <tr><td><code>onUnavailable</code></td><td><code>deny</code></td><td><code>deny</code> or <code>allow</code>, when the server cannot be reached</td></tr>
@@ -243,16 +243,16 @@ steps:
   </ul>
   <p>Usage, what is checked, limits and errors: <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/DEPLOY_GATE.md">docs/DEPLOY_GATE.md</a>. The contract is in <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
   <h2 id="mcp-wrap">Any MCP server behind Counterseal</h2>
-  <p><code>leashcli mcp wrap</code> sits between your MCP client and a local (stdio) MCP server. Destructive tool calls wait for your passkey, and the server's tool definitions are pinned, so a tool the server changes after you approved it is hidden until you look. It is in the repository and not yet published (CLI 0.3.0). Put it in front of the server's own command:</p>
+  <p><code>counterseal mcp wrap</code> sits between your MCP client and a local (stdio) MCP server. Destructive tool calls wait for your passkey, and the server's tool definitions are pinned, so a tool the server changes after you approved it is hidden until you look. It is in the repository and not yet published (CLI 0.3.0). Put it in front of the server's own command:</p>
   <pre>{ "mcpServers": { "supabase": {
     "command": "npx",
-    "args": ["-y", "leashcli", "mcp", "wrap", "--name", "supabase", "--",
+    "args": ["-y", "counterseal", "mcp", "wrap", "--name", "supabase", "--",
              "npx", "-y", "@supabase/mcp-server-supabase@latest"],
     "env": { "LEASH_GUARD_KEY": "lsg_..." } } } }</pre>
   <ul>
     <li><strong>What is held.</strong> A tool whose name says it deletes, sends, pays, deploys, drops, resets or forces something; a tool that runs a command; a SQL argument that is not one plain read; anything your policy file lists. Reads go straight through.</li>
     <li><strong>How it works.</strong> The wrapper answers a held call at once, with the approval link. You approve with your passkey; the agent calls the same tool with the same arguments again and it goes through, once. Other arguments are another approval. Public receipts say only <code>CALL mcp</code>, the decision, the rule and the map version.</li>
-    <li><strong>Pinning.</strong> The first tool list your client asks for is pinned (trust on first use), with mcp-pin's published tool definition hash. A changed or new tool, or changed instructions, never reach the model: the tool shows as blocked, calls to it are held, and <code>leashcli mcp pin --name supabase</code> shows you what changed before you accept it. <code>leashcli mcp status</code> and <code>leashcli mcp unpin</code> show and forget the pin.</li>
+    <li><strong>Pinning.</strong> The first tool list your client asks for is pinned (trust on first use), with mcp-pin's published tool definition hash. A changed or new tool, or changed instructions, never reach the model: the tool shows as blocked, calls to it are held, and <code>counterseal mcp pin --name supabase</code> shows you what changed before you accept it. <code>counterseal mcp status</code> and <code>counterseal mcp unpin</code> show and forget the pin.</li>
     <li><strong>Policy file</strong> <code>~/.config/leash/mcp/&lt;name&gt;.json</code>: <code>hold</code> and <code>allow</code> (tool name patterns; allow never lifts the SQL rule), <code>sqlArgs</code>, <code>trustAnnotations</code> and <code>repin</code> (<code>terminal</code> or <code>passkey</code>). A typo stops the wrapper before it starts.</li>
     <li><strong>Needs a guard key</strong> (Account, Guard keys) in <code>LEASH_GUARD_KEY</code> or <code>guard.json</code>. Without one, or with no network, a revoked key or a frozen account, a held call is refused and the agent is told why; it never runs. The server you wrap does not get the key.</li>
     <li><strong>A seatbelt, not a sandbox.</strong> It runs on the agent's machine and sees only what the client sends through it. An agent that starts the server another way, edits your MCP configuration or the pin and policy files, or calls a tool the lists do not name is not stopped. Names and arguments are matched against lists, not understood. Prompts, resources and tool results are not checked, and remote (HTTP) servers are not supported. For a hard stop, give your agent a Counterseal token instead of the real key.</li>
@@ -354,9 +354,9 @@ steps:
 
   <h2 id="agent-keys">Agent keys: prove who</h2>
   <p>Give each agent its own Ed25519 key. You register the public half with a proof of possession; the private half never leaves the agent's machine. A token bound to the key then only works on requests that key signed, so a token copied from a log, a config file or a screen is useless on its own, and every decision on a signed request records which agent key made it.</p>
-  <pre>npx leashcli agent-key agent-key.json --label laptop-agent     # makes the key (file mode 600) and registers it
-npx leashcli token &lt;key-id&gt; --agent-key &lt;agent-key-id&gt;          # a token bound to it</pre>
-  <p>Then run the MCP server of leashcli 0.2.1 with <code>LEASH_AGENT_KEY=agent-key.json</code> next to <code>LEASH_TOKENS</code>; it signs every call. (0.2.1 is in the repository and not yet on npm: <code>npx leashcli</code> still runs 0.1.1, which cannot sign, so a bound token refuses its calls.) You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys arrive in leashcli 0.2.1; until it is published, use the app or the signer in <code>cli/sign.mjs</code>.</p>
+  <pre>npx counterseal agent-key agent-key.json --label laptop-agent     # makes the key (file mode 600) and registers it
+npx counterseal token &lt;key-id&gt; --agent-key &lt;agent-key-id&gt;          # a token bound to it</pre>
+  <p>Then run the MCP server of leashcli 0.3.0 with <code>LEASH_AGENT_KEY=agent-key.json</code> next to <code>LEASH_TOKENS</code>; it signs every call. (0.3.0 is in the repository and not yet on npm: <code>npx counterseal</code> still runs 0.1.1, which cannot sign, so a bound token refuses its calls.) You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys arrive in CLI 0.3.0; until it is published, use the app or the signer in <code>cli/sign.mjs</code>.</p>
   <p>The signature is an RFC 9421 HTTP Message Signature with this profile:</p>
   <pre>Signature-Input: sig1=("@method" "@target-uri" "content-digest" "content-type");created=1791300000;expires=1791300060;keyid="&lt;JWK thumbprint&gt;";alg="ed25519";nonce="&lt;random&gt;";tag="leash-pop"
 Signature: sig1=:&lt;base64 Ed25519 signature&gt;:
@@ -376,19 +376,19 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
   <table>
     <tr><th>Command</th><th>What it does</th></tr>
     <tr><td><code>leash login</code></td><td>Sign in this machine for 7 days. You type the code it shows in the app and approve with your passkey. Tokens it mints end with the sign-in; revoke it in the app under Account.</td></tr>
-    <tr><td><code>leash logout</code></td><td>End the session on the server (0.2.1) and forget it on this machine. Tokens it minted keep working until they end or you revoke the sign-in in the app.</td></tr>
+    <tr><td><code>leash logout</code></td><td>End the session on the server (0.3.0) and forget it on this machine. Tokens it minted keep working until they end or you revoke the sign-in in the app.</td></tr>
     <tr><td><code>leash add &lt;provider&gt; [label]</code></td><td>Vault a key. Prompts for it; encrypted in the vault, never saved on your machine.</td></tr>
     <tr><td><code>leash creds</code></td><td>List vaulted keys (id, provider, label, last four).</td></tr>
-    <tr><td><code>leash token &lt;key-id&gt; [--label x] [--ttl hours] [--policy file.json]</code></td><td>Mint an agent token. 0.2.1 adds <code>--agent-key &lt;id&gt;</code>.</td></tr>
+    <tr><td><code>leash token &lt;key-id&gt; [--label x] [--ttl hours] [--policy file.json]</code></td><td>Mint an agent token. 0.3.0 adds <code>--agent-key &lt;id&gt;</code>.</td></tr>
     <tr><td><code>leash tokens</code></td><td>List active tokens.</td></tr>
     <tr><td><code>leash revoke &lt;token-id&gt;</code></td><td>Revoke a token immediately.</td></tr>
-    <tr><td><code>leash freeze</code></td><td>Stop every agent token on the account at once. Only your passkey, in the app, unfreezes. From 0.2.1.</td></tr>
+    <tr><td><code>leash freeze</code></td><td>Stop every agent token on the account at once. Only your passkey, in the app, unfreezes. From 0.3.0.</td></tr>
     <tr><td><code>leash holds</code></td><td>List calls waiting for you.</td></tr>
     <tr><td><code>leash watch</code></td><td>Print and ring for each new hold.</td></tr>
     <tr><td><code>leash mcp</code></td><td>Run the MCP server for your agent.</td></tr>
-    <tr><td><code>leash agent-key [file]</code>, <code>leash agent-keys</code></td><td>Make and register an agent key; list them. From 0.2.1.</td></tr>
+    <tr><td><code>leash agent-key [file]</code>, <code>leash agent-keys</code></td><td>Make and register an agent key; list them. From 0.3.0.</td></tr>
   </table>
-  <p>Run any command with <code>npx leashcli</code>, or install it globally with <code>npm i -g leashcli</code>.</p>
+  <p>Run any command with <code>npx counterseal</code>, or install it globally with <code>npm i -g leashcli</code>.</p>
 
   <h2 id="api">API</h2>
   <p>Base URL <code>https://counterseal.gautamkhosla.com</code>. Account endpoints use your session (web cookie or CLI bearer). Web writes need the same Origin and an <code>x-leash: 1</code> header. Endpoints marked passkey or web only work from the web app.</p>

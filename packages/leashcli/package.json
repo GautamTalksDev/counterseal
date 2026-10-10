@@ -1,0 +1,30 @@
+{
+  "name": "leashcli",
+  "version": "0.3.0",
+  "description": "The old name of the Counterseal CLI. It runs the counterseal package of the same version; new installs: npx counterseal",
+  "type": "module",
+  "bin": {
+    "leashcli": "leash.mjs",
+    "leash": "leash.mjs"
+  },
+  "files": [
+    "leash.mjs"
+  ],
+  "dependencies": {
+    "counterseal": "0.3.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GautamTalksDev/leash.git",
+    "directory": "packages/leashcli"
+  },
+  "homepage": "https://counterseal.gautamkhosla.com",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

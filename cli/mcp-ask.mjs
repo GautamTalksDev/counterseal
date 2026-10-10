@@ -1,9 +1,9 @@
-// Asking for a passkey approval from the MCP wrapper (leashcli mcp wrap): the client of the Approvals API (POST /v1/approvals,
+// Asking for a passkey approval from the MCP wrapper (counterseal mcp wrap): the client of the Approvals API (POST /v1/approvals,
 // GET /v1/approvals/:id, POST /v1/approvals/:id/use) with a guard key (lsg_). Zero dependencies.
 //
 // A guard key can only ask and read its own approvals. It can never approve: every approval needs a web session and a fresh
 // passkey ceremony in the app. The key is read from $LEASH_GUARD_KEY or from guard.json ({"key": "lsg_...", "server": "..."})
-// next to the CLI's other configuration, the same file `leashcli guard install` writes for the coding-agent guard.
+// next to the CLI's other configuration, the same file `counterseal guard install` writes for the coding-agent guard.
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { cfgDir } from './mcp-store.mjs';

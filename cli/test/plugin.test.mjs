@@ -105,7 +105,7 @@ test('the plugin folder is self-contained: the hook runs from a copy with nothin
     assert.deepEqual([ok.code, ok.out, ok.err], [0, '', '']);
     const held = await run(call('terraform destroy'));
     assert.equal(held.code, 0);
-    assert.match(JSON.parse(held.out).hookSpecificOutput.permissionDecisionReason, /has no key.*leashcli guard install/, 'without a key, a command on the map is denied with the fix');
+    assert.match(JSON.parse(held.out).hookSpecificOutput.permissionDecisionReason, /has no key.*(?:leashcli|counterseal) guard install/, 'without a key, a command on the map is denied with the fix');
     // the MCP script is the existing one and starts
     const mcp = spawnSync('node', [join(copy, 'scripts', 'leash.mjs'), '--version'], { encoding: 'utf8' });
     assert.match(mcp.stdout, /^\d+\.\d+\.\d+/);

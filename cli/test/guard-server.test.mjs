@@ -193,7 +193,7 @@ test('real server: a revoked key is "no longer valid" with the fix, even when th
   assert.equal(d.status, 200);
   const r = await runHook({ agent: 'claude-code', input: claude('terraform destroy'), env: t.env });
   assert.match(reason(r), /guard key is no longer valid/);
-  assert.match(reason(r), /leashcli guard install/);
+  assert.match(reason(r), /(?:leashcli|counterseal) guard install/);
 });
 
 test('real server: Codex, Cursor and tool calls are accepted, and a very long command is cut to what the API allows', async () => {

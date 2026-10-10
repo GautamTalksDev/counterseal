@@ -1,4 +1,4 @@
-// The tool definition hash, version 1, for the MCP wrapper (leashcli mcp wrap). Zero dependencies.
+// The tool definition hash, version 1, for the MCP wrapper (counterseal mcp wrap). Zero dependencies.
 //
 // The recipe is mcp-pin's published TOOL_DEFINITION_HASH (https://github.com/GautamTalksDev/mcp-pin, docs/TOOL_DEFINITION_HASH.md,
 // MIT, version 1): a definition is hashed whole, as the server sent it, under the JSON Canonicalization Scheme (RFC 8785),

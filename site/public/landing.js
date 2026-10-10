@@ -26,7 +26,7 @@ waxLight();
 
 // ------------------------------------------------------------------ small things
 $('copyCmd').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText('npx leashcli login'); $('copyCmd').classList.add('copied'); $('copyCmd').setAttribute('aria-label', 'Copied: npx leashcli login'); setTimeout(() => $('copyCmd').classList.remove('copied'), 1600); } catch { /* clipboard blocked: the command is visible */ }
+  try { await navigator.clipboard.writeText('npx counterseal login'); $('copyCmd').classList.add('copied'); $('copyCmd').setAttribute('aria-label', 'Copied: npx counterseal login'); setTimeout(() => $('copyCmd').classList.remove('copied'), 1600); } catch { /* clipboard blocked: the command is visible */ }
 });
 const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
 document.querySelectorAll('.rv').forEach((n) => io.observe(n));
