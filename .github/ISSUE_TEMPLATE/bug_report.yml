@@ -1,0 +1,39 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report security vulnerabilities here. Use "Report a vulnerability" on the Security tab or see SECURITY.md.
+        Remove tokens, keys and approval links from anything you paste.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The counterseal package version, or the commit of this repository
+    validations:
+      required: true
+  - type: dropdown
+    id: part
+    attributes:
+      label: Which part
+      options: [CLI, MCP server, Guard, MCP wrap, Worker / API, App / site, Deploy Gate action, SDK, Docs, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      render: shell
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Node version, the agent or client you use

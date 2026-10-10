@@ -6,11 +6,11 @@ a person follows it.
 ## One-time setup (before the first release from CI)
 
 1. **The packages exist on npm.** Trusted publishing is configured in each package's settings on npmjs.com, so a package
-   has to exist first. `counterseal` is not published yet (the name was free on 9 Oct 2026); `leashcli` is (0.1.1). For a
+   has to exist first. `counterseal` 0.3.0 is on npm (checked 10 Oct 2026); `leashcli` 0.1.1 was the first name. For a
    brand new package, publish once by hand from a clean checkout with 2FA (`cd cli && npm publish --access public`), or
    check npm's current docs for configuring a trusted publisher before the first publish.
 2. **A trusted publisher for each package** (npmjs.com, the package, Settings, Trusted publishing, GitHub Actions):
-   owner `GautamTalksDev`, repository `leash`, workflow `publish.yml`, environment `npm`. npm does not check this when you
+   owner `GautamTalksDev`, repository `counterseal` (after the GitHub rename), workflow `publish.yml`, environment `npm`. npm does not check this when you
    save it; a mistake shows only when publishing fails. Source: https://docs.npmjs.com/trusted-publishers (read
    9 Oct 2026: npm CLI 11.5.1 or later, Node 22.14.0 or later, GitHub-hosted runners only).
 3. **Provenance needs a public repository and a public package.** If the repository is private, npm cannot show provenance;

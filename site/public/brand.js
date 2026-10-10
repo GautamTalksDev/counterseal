@@ -11,7 +11,7 @@ export const BRAND = {
   "cliPlanned": "counterseal",
   "cliInstall": "counterseal",
   "sdk": "counterseal-sdk",
-  "repo": "https://github.com/GautamTalksDev/leash",
+  "repo": "https://github.com/GautamTalksDev/counterseal",
   "owner": "Gautam Khosla",
   "city": "Ottawa",
   "security": "security@gautamkhosla.com",

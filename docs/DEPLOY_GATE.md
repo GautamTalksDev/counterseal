@@ -43,7 +43,7 @@ A job that waits is a running job: on a private repository it uses Actions minut
    deploys. Nothing is accepted by default; a gate cannot be edited (make a new one and revoke the old).
 2. **Copy the action** into the repository: `action/deploy-gate` from this repository to `.github/actions/counterseal-gate`.
    (The action is not on the Marketplace. To use it from this repository directly, pin a full commit:
-   `uses: GautamTalksDev/leash/action/deploy-gate@<full commit sha>`.)
+   `uses: GautamTalksDev/counterseal/action/deploy-gate@<full commit sha>`.)
 3. **Add the step** the app shows after you make the gate, to a job with `permissions: id-token: write`. Sample workflows:
    [`deploy.yml`](../action/deploy-gate/examples/deploy.yml) (a gate job, then the deploy job) and
    [`deploy-with-key.yml`](../action/deploy-gate/examples/deploy-with-key.yml) (phase 2).

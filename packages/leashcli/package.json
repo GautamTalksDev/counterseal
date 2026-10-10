@@ -18,7 +18,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/GautamTalksDev/leash.git",
+    "url": "git+https://github.com/GautamTalksDev/counterseal.git",
     "directory": "packages/leashcli"
   },
   "homepage": "https://counterseal.gautamkhosla.com",

@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an improvement or a new API for the irreversible map
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to see
+      description: For a new API or rule, link the provider's reference page for the call that cannot be undone.
+  - type: textarea
+    id: alt
+    attributes:
+      label: What you do today instead
