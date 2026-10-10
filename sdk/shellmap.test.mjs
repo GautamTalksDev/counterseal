@@ -78,10 +78,15 @@ test('hits are well formed: the rule id fits the Approvals API, why and text fit
   }
 });
 
-test('GAP vectors are documented limits and must be listed in the docs', () => {
+test('the docs page lists every rule on the map, and the documented limits that the GAP vectors show', () => {
   const docs = readFileSync(new URL('../site/public/docs/index.html', import.meta.url), 'utf8');
-  if (!/id="guard"/.test(docs)) return; // the docs page is written after the map
-  for (const limit of ['aliases', 'script files', 'other languages', 'PowerShell', 'encoded']) assert.ok(docs.includes(limit), `docs mention the limit: ${limit}`);
+  const section = docs.slice(docs.indexOf('id="guard-cli"'), docs.indexOf('id="policy"'));
+  assert.ok(section.length > 5000, 'the guard section exists');
+  for (const r of SHELL_RULES) assert.ok(section.includes(`<code>${r.id}</code>`), `docs list ${r.id}`);
+  for (const limit of ['Aliases', 'script files', 'other languages', 'PowerShell', 'Encoded', 'edits its own hook settings']) assert.ok(section.includes(limit), `docs mention the limit: ${limit}`);
+  assert.ok(section.includes(SHELL_MAP_VERSION), 'docs name the map version');
+  const gaps = vectors().filter((v) => v.kind === 'GAP');
+  assert.ok(gaps.length >= 15);
 });
 
 test('the server map: the bundled API map is a copy of what the server holds, rule by rule', async () => {

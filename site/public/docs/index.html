@@ -31,6 +31,7 @@
   <a href="#proxy">Calling through the proxy</a>
   <a href="#held">When a call is held</a>
   <a href="#guard">Approvals for commands</a>
+  <a href="#guard-cli">Guard your coding agent</a>
   <a href="#policy">Token policies</a>
   <a href="#brakes">Brakes</a>
   <a href="#team">Teams: two seals</a>
@@ -136,6 +137,87 @@ curl -s https://counterseal.gautamkhosla.com/v1/approvals/&lt;id&gt;/use \
     <li><strong>Receipts.</strong> A guard decision's public receipt says only <code>RUN claude-code</code> (or <code>CALL mcp</code> for a tool call), the decision, the rule and the map version. Never the command, folder or key label.</li>
   </ul>
   <p>Fields: <code>kind</code> (<code>shell</code> or <code>tool</code>), <code>agent</code> (<code>claude-code</code>, <code>codex</code>, <code>cursor</code>, <code>copilot</code>, <code>gemini</code>, <code>antigravity</code> or <code>mcp</code>), <code>rule</code>, <code>why</code> (up to 300 characters), <code>summary</code> (up to 200), <code>detail</code> (the exact command or canonical tool call, up to 4,096), optional <code>context</code> (<code>cwd</code>, the folder's name only; <code>session</code>) and <code>map</code> (the guard's map version). The full contract is in <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
+
+  <h2 id="guard-cli">Guard your coding agent</h2>
+  <p><code>leashcli guard</code> puts a hook in front of your coding agent's shell commands. A command on the shell map waits for your passkey; every other command is left to the agent's own permission settings. It is in this repository (CLI 0.2.1, coming to npm), not on npm yet: until then run <code>node cli/leash.mjs guard ...</code> from a clone.</p>
+  <pre>npx leashcli login                  # type its code at /app#device, check where it started, approve
+npx leashcli guard install          # finds Claude Code, Codex and Cursor; or --agents claude-code,codex,cursor
+npx leashcli guard check -- terraform destroy     # what the map says, offline
+npx leashcli guard status           # what is installed, and whether the key works</pre>
+  <p><strong>Claude Code plugin.</strong> The same hook as a plugin, from this repository's marketplace file (no form):</p>
+  <pre>claude plugin marketplace add GautamTalksDev/leash
+claude plugin install counterseal@counterseal
+npx leashcli guard install --agents none     # makes the key the plugin's hook uses</pre>
+  <p>The plugin needs <code>node</code> on your PATH and runs its own pinned copy of the guard, never <code>npx</code>. Claude Code 2.1.295 or later makes a hook that crashes or times out block the command; older versions let it through. Claude Code may say one plugin option is not set: it is only for the optional MCP server and can be left empty. If you use the plugin, <code>guard install</code> adds no second hook to Claude Code (two would run, and the second would deny a command you approved).</p>
+  <h3>What happens</h3>
+  <ol>
+    <li>The agent runs <code>terraform destroy -auto-approve</code>. The hook reads it, finds the rule, and asks the Approvals API (<a href="#guard">above</a>) with the command, the rule, why, and the name of the folder.</li>
+    <li>The command waits (up to 9 minutes by default). Your phone shows the exact command; you approve with a passkey, or deny with a reason.</li>
+    <li>Approved: the hook uses the approval once and the command runs. Denied: the agent is told, in quotes, that its human said no and why. Nobody answers: the agent is told to ask you, and asking again is the same hold.</li>
+  </ol>
+  <p>Agents whose hook cannot wait (or if you set <code>mode</code> to <code>retry</code>) get the denial at once with the link, and run exactly the same command again after you approve it.</p>
+  <h3>What is held (shell map 2026-10-10.1)</h3>
+  <table>
+    <tr><th>Rule</th><th>Holds</th></tr>
+    <tr><td><code>sh.terraform-destroy</code></td><td>terraform or tofu: destroy, apply -destroy, workspace delete (also terragrunt)</td></tr>
+    <tr><td><code>sh.pulumi-destroy</code></td><td>pulumi: destroy, stack rm, state delete</td></tr>
+    <tr><td><code>sh.iac-destroy</code></td><td>cdk, cdktf, sst, serverless, sam, amplify: destroy, remove, delete</td></tr>
+    <tr><td><code>sh.railway</code></td><td>railway: delete, down, volume delete, environment delete</td></tr>
+    <tr><td><code>sh.fly</code></td><td>fly: apps destroy, volumes destroy, machine destroy</td></tr>
+    <tr><td><code>sh.vercel</code></td><td>vercel: remove, rm, project rm, env rm, domains rm, alias rm</td></tr>
+    <tr><td><code>sh.wrangler</code></td><td>wrangler: delete, d1 delete, r2 bucket delete, kv namespace delete, d1 execute --remote with SQL that is not a plain read</td></tr>
+    <tr><td><code>sh.supabase</code></td><td>supabase: db reset (local too), projects delete, db push, migration repair</td></tr>
+    <tr><td><code>sh.neon</code></td><td>neonctl: projects delete, branches delete, restore or reset</td></tr>
+    <tr><td><code>sh.prisma</code></td><td>prisma: migrate reset, db push --accept-data-loss or --force-reset, db execute, any --shadow-database-url</td></tr>
+    <tr><td><code>sh.drizzle</code></td><td>drizzle-kit: push, drop</td></tr>
+    <tr><td><code>sh.sql-cli</code></td><td>psql, mysql, mariadb, sqlite3, turso and other SQL clients: DROP, TRUNCATE, DELETE or UPDATE without WHERE, ALTER ... DROP, SQL from a file; any write to a database on another machine</td></tr>
+    <tr><td><code>sh.db-reset</code></td><td>dropdb, rails db:drop and db:reset, manage.py flush, artisan migrate:fresh, redis-cli FLUSHALL, pg_restore --clean and other tools that empty or drop a database</td></tr>
+    <tr><td><code>sh.git-force</code></td><td>git push with --force, -f, --force-with-lease, a +refspec, --mirror, --delete or :branch</td></tr>
+    <tr><td><code>sh.git-history</code></td><td>git filter-branch, filter-repo, reflog expire, gc --prune=now, prune, update-ref -d</td></tr>
+    <tr><td><code>sh.git-discard</code></td><td>git reset --hard, clean -f, checkout or restore of the whole tree, checkout --force</td></tr>
+    <tr><td><code>sh.gh</code></td><td>gh: repo delete, archive, rename, edit --visibility, release delete, secret set or delete, any delete, api -X DELETE, PATCH or PUT on the GitHub map</td></tr>
+    <tr><td><code>sh.k8s</code></td><td>kubectl delete, drain, replace --force, apply --prune; helm uninstall or delete; argocd app delete</td></tr>
+    <tr><td><code>sh.docker</code></td><td>docker: volume rm or prune, system prune, container prune, rm -v, rm of every container, compose down -v</td></tr>
+    <tr><td><code>sh.cloud</code></td><td>aws: delete-*, terminate-*, remove-*, deregister-*, s3 rm --recursive, s3 rb; gcloud, az, doctl, heroku, firebase and other cloud CLIs: delete, destroy</td></tr>
+    <tr><td><code>sh.stripe</code></td><td>stripe CLI: refunds create, payouts create, transfers create, subscriptions cancel, any delete, post or delete on the Stripe map</td></tr>
+    <tr><td><code>sh.npm</code></td><td>npm, pnpm, yarn: unpublish, deprecate, owner rm, dist-tag rm, access revoke, token revoke</td></tr>
+    <tr><td><code>sh.rm</code></td><td>rm -r on /, ~, the project root, .git, a variable that may be empty or a path outside the project; find -delete; shred; rsync --delete; chmod or chown -R on /; crontab -r</td></tr>
+    <tr><td><code>sh.disk</code></td><td>dd of=/dev/..., mkfs, wipefs, blkdiscard, diskutil erase, and writes to a disk device</td></tr>
+    <tr><td><code>sh.curl-api</code></td><td>curl, wget, httpie with a write method to a host on the API map, matched against that provider's rules</td></tr>
+    <tr><td><code>sh.dynamic-program</code></td><td>a program name built at run time (a variable or a substitution) in a command that contains destroy, delete, drop, truncate, reset, force or rm</td></tr>
+    <tr><td><code>sh.decode-exec</code></td><td>decoded text (base64, xxd, gunzip, openssl) piped into a shell, an interpreter or eval; held without being read</td></tr>
+  </table>
+  <p>The guard reads commands the way a shell does: quotes, escapes, <code>;</code> <code>&amp;&amp;</code> <code>|</code>, groups, loops, here-documents, <code>$(...)</code>, brace expansion, simple variables on the same line, <code>cd</code>, and these wrappers: <code>sudo</code>, <code>env</code>, <code>nohup</code>, <code>time</code>, <code>xargs</code>, <code>find -exec</code>, <code>sh -c</code> and <code>bash -lc</code>, <code>eval</code>, <code>ssh</code>, <code>docker exec</code>, <code>kubectl exec</code>, <code>npx</code> and its relatives, and the scripts in the project's <code>package.json</code>. MCP tool calls (matcher <code>mcp__.*</code>) are held when the tool name says it deletes, drops, sends, pays or deploys, or when the call carries SQL that is not a plain read; a policy file <code>~/.config/leash/mcp/&lt;server&gt;.json</code> can add <code>hold</code> and <code>allow</code> patterns. Tool annotations such as readOnlyHint are never trusted.</p>
+  <h3>What it does not see</h3>
+  <ul>
+    <li><strong>Aliases</strong> and shell functions defined outside the command line, and variables set in an earlier command.</li>
+    <li>The contents of <strong>script files</strong> (<code>bash deploy.sh</code>, <code>./run.sh</code>, <code>make</code>), and code in <strong>other languages</strong> (<code>python -c</code>, <code>node -e</code>, <code>perl -e</code>). The shell map is for what a shell is asked to run.</li>
+    <li><strong>PowerShell</strong> and <code>cmd</code>. On Windows, use Git Bash or WSL.</li>
+    <li><strong>Encoded</strong> payloads: a decoder piped into a shell is held, but the payload is not decoded or classified.</li>
+    <li>Globs stay unexpanded, symlinks are not followed, and shells nested more than three deep are scanned piece by piece.</li>
+    <li>A command it cannot parse is scanned piece by piece. If that finds nothing it passes; set <code>"unreadable": "hold"</code> to hold it.</li>
+    <li>An agent that edits its own hook settings, the guard's files or its config, or runs the same effect through a script, is not stopped. <code>leashcli guard status</code> notices a changed script. For a hard stop, give the agent a Counterseal token instead of the real key.</li>
+  </ul>
+  <h3>If something goes wrong</h3>
+  <p>By default the guard fails closed: if the server cannot be reached, answers something unexpected, or the key is no longer valid, a command on the map is denied with the fix, and every other command runs as before. A hook request times out after 10 seconds. Set <code>"onUnavailable": "allow"</code> in <code>~/.config/leash/guard.json</code> to let commands on the map through when the server cannot be reached; a revoked key or a rate limit still denies. A key made by <code>leashcli guard install</code> ends with that command line sign-in (7 days at most): make a lasting one in the app (Account, Guard keys) and run <code>leashcli guard install --paste-key</code>.</p>
+  <table>
+    <tr><th>Setting in <code>guard.json</code></th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>onUnavailable</code></td><td><code>deny</code></td><td><code>deny</code> or <code>allow</code>, when the server cannot be reached</td></tr>
+    <tr><td><code>waitSeconds</code></td><td>540</td><td>how long the hook waits for the passkey (at most 590; Claude Code's hook limit is set to 660)</td></tr>
+    <tr><td><code>mode</code></td><td><code>wait</code></td><td>per agent: <code>wait</code> holds the command at the hook; <code>retry</code> denies at once and the agent runs it again after approval</td></tr>
+    <tr><td><code>disableRules</code></td><td>none</td><td>rule ids to leave out, for example <code>["sh.git-discard"]</code> (an agent that can edit this file can do the same)</td></tr>
+    <tr><td><code>unreadable</code></td><td><code>allow</code></td><td>what to do with a command that cannot be parsed and has nothing on the map in it</td></tr>
+    <tr><td><code>cursorPassThrough</code></td><td><code>allow</code></td><td>Cursor's hook must answer for every command: <code>allow</code> or <code>ask</code></td></tr>
+  </table>
+  <h3>Which agents</h3>
+  <table>
+    <tr><th>Agent</th><th>How</th><th>Status</th></tr>
+    <tr><td>Claude Code</td><td>plugin, or a <code>PreToolUse</code> hook in <code>~/.claude/settings.json</code> (Bash and <code>mcp__.*</code>)</td><td>Follows the documented hook format; the plugin passes <code>claude plugin validate --strict</code> and installs from the marketplace file with Claude Code 2.1.293. Not yet seen firing in a live session.</td></tr>
+    <tr><td>Codex</td><td><code>~/.codex/hooks.json</code>, Bash only. Open <code>/hooks</code> once to trust it.</td><td>Written to the documented format. Not tested in Codex yet.</td></tr>
+    <tr><td>Cursor</td><td><code>~/.cursor/hooks.json</code> (<code>beforeShellExecution</code>, <code>beforeMCPExecution</code>, fail closed)</td><td>Written to the documented format. Not tested in Cursor yet. Whether Cursor still asks you about a command the hook answers <code>allow</code> to is not documented; <code>cursorPassThrough: "ask"</code> is the careful choice.</td></tr>
+    <tr><td>Copilot CLI, Gemini CLI, Antigravity</td><td colspan="2">Not supported yet: their hooks have not been tested with the guard.</td></tr>
+  </table>
+  <p>What leaves your machine: the command text with credentials removed (connection strings, bearer tokens, key-shaped values, <code>PASSWORD=</code> style variables), the rule, why, the name of the folder (not its path) and the session id. Held commands are shown on your devices and may appear on the lock screen.</p>
 
   <h2 id="policy">Token policies</h2>
   <p>Each token can carry a policy that narrows what its key can do. A policy can never widen it.</p>
