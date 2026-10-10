@@ -192,7 +192,7 @@ npx leashcli guard install --agents none     # makes the key the plugin's hook u
   <h3>What it does not see</h3>
   <ul>
     <li><strong>Aliases</strong> and shell functions defined outside the command line, and variables set in an earlier command.</li>
-    <li>The contents of <strong>script files</strong> (<code>bash deploy.sh</code>, <code>./run.sh</code>, <code>make</code>), and code in <strong>other languages</strong> (<code>python -c</code>, <code>node -e</code>, <code>perl -e</code>). The shell map is for what a shell is asked to run.</li>
+    <li>The contents of <strong>script files</strong> (<code>bash deploy.sh</code>, <code>./run.sh</code>, <code>make</code>), even one the same command line writes, a script downloaded and piped into a shell (<code>curl ... | sh</code>), and code in <strong>other languages</strong> (<code>python -c</code>, <code>node -e</code>, <code>perl -e</code>). The shell map is for what a shell is asked to run.</li>
     <li><strong>PowerShell</strong> and <code>cmd</code>. On Windows, use Git Bash or WSL.</li>
     <li><strong>Encoded</strong> payloads: a decoder piped into a shell is held, but the payload is not decoded or classified.</li>
     <li>Globs stay unexpanded, symlinks are not followed, and shells nested more than three deep are scanned piece by piece.</li>
