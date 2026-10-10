@@ -48,7 +48,7 @@ export const LOWER_DELAY = 24 * 3600_000, VOTE_DELAY = 24 * 3600_000, INVITE_HOU
 export const GRANT_TTL = 10 * 60_000; // an approved hold is used once within 10 minutes (as in broker.js)
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const NAME = /^[\p{L}\p{N} ._'-]+$/u;
-const LABEL = /^[\p{L}\p{N} ._:/()-]+$/u;
+const LABEL = /^[\p{L}\p{N} ._:/()',-]+$/u; // what an invite is for ("Asha, platform team"); shown with textContent only
 const ID = /^[0-9a-f]{24}$/;
 const sameText = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 

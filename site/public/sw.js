@@ -1,5 +1,6 @@
 // Counterseal service worker: turns an empty Web Push "wake up" into a notification about a held request, a command
-// line sign-in or a passkey added. The push carries no data; the details come from the service over your own session.
+// line sign-in, a passkey added or a change to the team. The push carries no data; the details come from the service
+// over your own session.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
@@ -17,30 +18,50 @@ self.addEventListener('push', (e) => {
       // the newest event is shown (a freeze, which stops holds from mattering, outranks the holds)
       const r = await fetch('/v1/alerts', { credentials: 'same-origin', cache: 'no-store' });
       if (r.ok) {
-        const { holds, signins, passkeys, frozen_at: frozenAt } = await r.json();
+        const { holds, signins, passkeys, frozen_at: frozenAt, team } = await r.json();
         const at = (x) => (x && Number.isFinite(x.created_at) ? x.created_at : 0);
-        const s = Array.isArray(signins) && signins[0], k = Array.isArray(passkeys) && passkeys[0], h0 = holds && holds[0];
-        if (Number.isFinite(frozenAt) && frozenAt >= at(s) && frozenAt >= at(k)) {
+        // a hold that someone just sealed (one of two) counts as new: that alert asks the next approver to look
+        const heldAt = (h) => Math.max(at(h), ...(h && Array.isArray(h.votes) ? h.votes.map((v) => (Number.isFinite(v.at) ? v.at : 0)) : [0]));
+        const byNewest = Array.isArray(holds) ? [...holds].sort((a, b) => heldAt(b) - heldAt(a)) : holds;
+        const s = Array.isArray(signins) && signins[0], k = Array.isArray(passkeys) && passkeys[0], h0 = byNewest && byNewest[0];
+        // team events (someone joined, a role changed, someone was removed, the protection will be lowered)
+        const t = Array.isArray(team) && team[0], tAt = t && Number.isFinite(t.at) ? t.at : 0;
+        if (Number.isFinite(frozenAt) && frozenAt >= at(s) && frozenAt >= at(k) && frozenAt >= tAt) {
           title = 'Counterseal is frozen';
           body = 'Every agent token is stopped. Unfreeze it with your passkey in the app.';
           tag = 'leash-frozen'; actions = undefined;
-        } else if (s && /^[0-9a-f]{24}$/.test(String(s.id)) && at(s) >= at(h0) && at(s) >= at(k)) {
+        } else if (t && tAt >= heldAt(h0) && tAt >= at(s) && tAt >= at(k)) {
+          const n = typeof t.name === 'string' && t.name ? t.name : 'Someone';
+          const role = (x) => (typeof x === 'string' ? x : 'a member');
+          const seals = (q, sa) => `${q === 1 ? 'one seal' : `${q} seals from different people`}${sa === false ? ', never the person who asked' : ''}`;
+          tag = 'leash-team-' + tAt; url = '/app#team';
+          if (t.kind === 'member_joined') { title = `${n} joined your Counterseal team`; body = `As ${role(t.role)}. Not expected? Tap to review your team and remove them.`; }
+          else if (t.kind === 'member_role_changed') { title = `${n} is now ${role(t.to)} on your Counterseal team`; body = `Was ${role(t.from)}. Not expected? Tap to review your team.`; actions = undefined; }
+          else if (t.kind === 'member_removed') { title = `${n} was removed from your Counterseal team`; body = 'Their sessions, passkeys and keys were revoked.'; actions = undefined; }
+          else if (t.kind === 'quorum_lowering' && t.to && Number.isFinite(t.effective_at)) {
+            title = 'Counterseal: protection will be lowered';
+            body = `From ${new Date(t.effective_at).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}, held actions will need ${seals(t.to.quorum, t.to.selfApprove)}. Not expected? Tap to cancel it with your passkey.`;
+          } else { title = 'Counterseal: the lowering of protection was cancelled'; body = 'Nothing changes.'; actions = undefined; }
+        } else if (s && /^[0-9a-f]{24}$/.test(String(s.id)) && at(s) >= heldAt(h0) && at(s) >= at(k)) {
           const where = [s.country, s.network].filter((x) => typeof x === 'string' && x).join(', ');
           title = 'A command line was signed in to your Counterseal account';
           body = `${where ? 'From ' + where + '. ' : ''}Not you? Tap to revoke it and everything it made.`;
           tag = 'leash-cli-' + s.id; url = '/app#cli=' + s.id;
-        } else if (k && at(k) >= at(h0)) {
+        } else if (k && at(k) >= heldAt(h0)) {
           title = 'A passkey was added to your Counterseal account';
           body = `${typeof k.host === 'string' ? 'For ' + k.host + '. ' : ''}Not you? Tap to review your passkeys and remove it.`;
           tag = 'leash-pk-' + String(k.id).slice(0, 24); url = '/app#account';
         } else if (holds && !holds.length) { title = 'Counterseal alerts are working'; body = 'Nothing is waiting for you right now.'; actions = undefined; }
         else if (holds && holds.length) {
-          const h = holds[0];
+          const h = h0;
           // a coding agent's command or tool call (asked for by its guard), a deploy, or an API call the broker held
           const who = h.token_label || h.agent || 'Your agent';
           title = h.kind === 'shell' ? `${who} wants to run a command` : h.kind === 'tool' ? `${who} wants to call a tool` : h.kind === 'deploy' ? `${who} wants to deploy` : `${who} wants to ${h.method} ${h.host}`;
+          // two seals: how many it has (the next approver is who this alert is for)
+          const need = Number.isInteger(h.needs) ? h.needs : 1, got = Array.isArray(h.votes) ? h.votes.length : 0;
+          const seals = need > 1 ? `\n${got} of ${need} seals${got ? ': needs another approver' : ''}` : '';
           // a held Stripe refund or payout leads with its amount (Counterseal wrote that line itself, from the request)
-          body = `${typeof h.headline === 'string' && h.headline ? h.headline + '\n' : ''}${h.path}\n${h.why}${holds.length > 1 ? `\n+${holds.length - 1} more waiting` : ''}`;
+          body = `${typeof h.headline === 'string' && h.headline ? h.headline + '\n' : ''}${h.path}\n${h.why}${seals}${holds.length > 1 ? `\n+${holds.length - 1} more waiting` : ''}`;
           tag = 'leash-' + h.id; url = '/app#hold=' + h.id;
           // after the move, the approve link points at the host where this account has a passkey (the server says which)
           if (typeof h.approve_url === 'string' && appUrl(h.approve_url)) url = h.approve_url;

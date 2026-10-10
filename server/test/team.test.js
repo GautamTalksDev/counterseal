@@ -5,6 +5,7 @@
 // pre-approvals and money caps as a way around two seals; Freeze; receipt privacy; the D1 budgets.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { World, Authenticator, ORIGIN, RP_ID } from './helpers.js';
 import { _resetMemoryBuckets } from '../src/ratelimit.js';
 import { _resetSeen } from '../src/admin.js';
@@ -789,6 +790,16 @@ test('budgets: sealing, joining, removing and reading the team stay well under 5
   const soloGet = await w2.req('GET', '/p/github/repos/acme/app', { bearer: t2, ...anon });
   const teamGet = await w.req('GET', '/p/github/repos/acme/app', { bearer: tok, ...anon });
   assert.equal(teamGet.queries, soloGet.queries);
+});
+
+test('the app: a Team view, seals on hold cards, the invite page and team alerts, without innerHTML; the invite token leaves the address bar at once', () => {
+  const read = (p) => readFileSync(new URL('../../site/public/' + p, import.meta.url), 'utf8');
+  const app = read('app/app.js'), html = read('app/index.html'), sw = read('sw.js');
+  for (const s of ['/v1/team', '/v1/team/quorum/begin', '/v1/team/quorum/cancel/begin', '/v1/team/invites/begin', '/v1/invites/lookup', '/v1/invites/finish', '/role/begin', '/remove/begin', 'excludeCredentials', 'Add your seal with passkey']) assert.ok(app.includes(s), s);
+  assert.match(app, /#invite=\(\[A-Za-z0-9_-\]\{43\}\)\$\/\); if \(iv\) \{ inviteToken = iv\[1\]; history\.replaceState\(null, '', '\/app'\)/, 'read once, then removed from the address bar');
+  assert.ok(!/\.(innerHTML|outerHTML)\s*=|insertAdjacentHTML\(|document\.write\(/.test(app));
+  for (const id of ['inviteIn', 'members', 'invitePanel', 'qForm', 'qBanner', 'sealCount']) assert.match(html, new RegExp(`id="${id}"`), id);
+  for (const k of ['member_joined', 'member_role_changed', 'member_removed', 'quorum_lowering', 'seals']) assert.ok(sw.includes(k), k);
 });
 
 test('deleting the account removes the whole team: members, invites and seals', async () => {

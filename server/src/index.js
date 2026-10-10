@@ -100,13 +100,15 @@ const ROUTES = [
   ['POST', new RegExp(`^/v1/tokens/${ID}/reset/begin$`), 'webw', (c) => Brakes.resetBegin(c.env, c.s, c.m[1]), APPROVER],
   ['POST', new RegExp(`^/v1/tokens/${ID}/reset/finish$`), 'webw', (c) => Brakes.resetFinish(c.env, c.s, c.m[1], c.body), APPROVER],
   ['GET', /^\/v1\/me$/, 'session', async (c) => {
-    const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan, frozen_at FROM accounts WHERE id = ?').bind(c.s.accountId).first();
+    const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan, frozen_at, quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at FROM accounts WHERE id = ?').bind(c.s.accountId).first();
     const u = await usageOf(c.env, c.s.accountId);
-    const { receipts, ...rest } = account || {};
+    const { receipts, quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at, ...rest } = account || {};
     return {
       account: account ? rest : null, kind: c.s.kind,
       // who is signed in: on a team, one member with their own role (the account's founder: the account's id and name)
       member: { id: c.s.memberId, role: c.s.role, name: c.s.memberName || account?.name || null, founder: c.s.memberId === c.s.accountId },
+      // the seals a held action needs now, and a lowering that is waiting (the app shows it on every page)
+      team: Team.effective({ quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at }),
       // which host this is, and where the product lives (the app offers "Move to Counterseal" on the old host)
       host: { here: A.rp(c.env).origin, legacy: A.rp(c.env).legacy, primary: A.hosts(c.env)[0].origin },
       // receipts numbers at the top level as well, as the receipts API always had them

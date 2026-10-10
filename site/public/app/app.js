@@ -6,6 +6,10 @@ const $ = (id) => document.getElementById(id);
 // and the history at once, so it is never shown, bookmarked, logged or sent as a Referer
 let moveToken = null;
 { const mv = location.hash.match(/^#move=([A-Za-z0-9_-]{43})$/); if (mv) { moveToken = mv[1]; history.replaceState(null, '', '/app'); } }
+// a team invite works the same way: the one-time token is in the fragment, read once and taken out of the address bar,
+// and it only ever travels in a POST body
+let inviteToken = null;
+{ const iv = location.hash.match(/^#invite=([A-Za-z0-9_-]{43})$/); if (iv) { inviteToken = iv[1]; history.replaceState(null, '', '/app'); } }
 const el = (tag, props = {}, ...kids) => { const n = document.createElement(tag); Object.assign(n, props); for (const k of kids) if (k != null) n.append(k); return n; };
 const b64u = { enc: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''), dec: (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)) };
 
@@ -86,10 +90,54 @@ $('unfreezeBtn').onclick = async () => {
   try { await ceremony('/v1/me/unfreeze/begin', '/v1/me/unfreeze/finish'); freezeBar(null); toast('Unfrozen. Your agents can work again.'); load(); } catch (e) { toast(e.message); }
 };
 
+// ---- who you are on the team: the server checks your role on every request; the page only hides what it would refuse
+const LEVEL = { viewer: 0, member: 1, approver: 2, owner: 3 };
+const ROLE_TEXT = { owner: 'Owner', approver: 'Approver', member: 'Member', viewer: 'Viewer' };
+let ME = { id: null, role: 'owner', name: '' }, SEALS = { quorum: 1, selfApprove: true, pending: null }, NAMES = new Map();
+const can = (need) => (LEVEL[ME.role] ?? -1) >= LEVEL[need];
+function applyRole() {
+  for (const n of document.querySelectorAll('[data-need]')) n.hidden = !can(n.dataset.need);
+  $('whoRole').textContent = ROLE_TEXT[ME.role] || '';
+}
+const when = (t) => new Date(t).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+const left = (t) => { const m = Math.max(0, Math.round((t - Date.now()) / 60_000)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
+/** what a waiting change does, in a few words: "one seal instead of two", "the person who asked may be one of them" */
+function lowering(p, now) {
+  const parts = [];
+  if (p.quorum < now.quorum) parts.push(`${p.quorum === 1 ? 'one seal' : `${p.quorum} seals`} instead of ${now.quorum === 2 ? 'two' : now.quorum}`);
+  if (p.selfApprove && !now.selfApprove) parts.push('the person whose agent asked may be one of the seals');
+  return parts.join(', and ') || 'a lower setting';
+}
+/** the banner on every page while lowering the protection is waiting its 24 hours */
+function loweringBanner(p) {
+  $('qBanner').hidden = !p;
+  if (!p) return;
+  $('qbTitle').textContent = `Protection will be lowered in ${left(p.effectiveAt)}`;
+  $('qbText').textContent = `From ${when(p.effectiveAt)}: ${lowering(p, SEALS)}. Every member was alerted. Not expected? An owner or approver can cancel it with their passkey.`;
+}
+/** wax discs: one per seal needed, filled for each seal given */
+function discs(need, have, big = false) {
+  const box = el('span', { className: 'discs' });
+  for (let i = 0; i < need; i++) box.append(el('span', { className: 'wax' + (i < have ? ' on' : '') + (big ? ' lg' : '') }));
+  return box;
+}
+const cancelLowering = async () => {
+  try { await ceremony('/v1/team/quorum/cancel/begin', '/v1/team/quorum/cancel/finish'); toast('Cancelled. Nothing changes.'); load(); } catch (e) { toast(e.message); }
+};
+$('qbCancel').onclick = cancelLowering;
+$('qbOpen').onclick = () => show('team');
+
 // ---- data
 let meta;
 async function load() {
   const [c, t, h, a, ak, me] = await Promise.all([api('GET', '/v1/credentials'), api('GET', '/v1/tokens'), api('GET', '/v1/holds'), api('GET', '/v1/audit'), api('GET', '/v1/agent-keys'), api('GET', '/v1/me')]);
+  ME = me.member || ME; SEALS = me.team || SEALS;
+  applyRole();
+  $('sealCount').textContent = String(SEALS.quorum); $('sealCount').classList.toggle('two', SEALS.quorum > 1);
+  $('preNote').hidden = SEALS.quorum <= 1 && SEALS.selfApprove;
+  $('mintPre').disabled = !$('preNote').hidden;
+  loweringBanner(SEALS.pending);
+  if (current === 'team') teamView().catch(() => {});
   freezeBar(me.account.frozen_at);
   // holds
   const H = $('holds');
@@ -103,8 +151,8 @@ async function load() {
   // creds
   const C = $('creds'); C.replaceChildren(); const tc = $('tokCred'); tc.replaceChildren();
   for (const x of c.credentials) {
-    const del = el('button', { className: 'btn sm dan', textContent: 'Delete' });
-    del.onclick = async () => { if (!confirm(`Delete ${x.label}? Tokens using it stop working.`)) return; await api('DELETE', `/v1/credentials/${x.id}`); load(); };
+    const del = el('button', { className: 'btn sm dan', textContent: 'Delete', hidden: !can('owner') });
+    del.onclick = async () => { if (!confirm(`Delete ${x.label}? Tokens using it stop working.`)) return; try { await api('DELETE', `/v1/credentials/${x.id}`); load(); } catch (e) { toast(e.message); } };
     C.append(el('div', {}, el('span', {}, el('b', { textContent: x.label }), el('span', { className: 'dim', textContent: `  ${x.provider}${x.host ? ' ' + x.host : ''}  ...${x.hint}` })), del));
     tc.append(el('option', { value: x.id, textContent: `${x.label} (${x.provider})` }));
   }
@@ -112,9 +160,10 @@ async function load() {
   // tokens
   const T = $('tokens'); T.replaceChildren();
   for (const x of t.tokens.filter((y) => !y.revoked)) {
-    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke' });
-    rv.onclick = async () => { await api('DELETE', `/v1/tokens/${x.id}`); load(); };
+    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke', hidden: !can('member') });
+    rv.onclick = async () => { try { await api('DELETE', `/v1/tokens/${x.id}`); load(); } catch (e) { toast(e.message); } };
     const bound = x.agent_key ? `, signed by ${x.agent_key_label}${x.agent_key_revoked ? ' (key revoked: token stopped)' : ''}` : '';
+    const maker = x.member_id && x.member_id !== ME.id && NAMES.has(x.member_id) ? `, made by ${NAMES.get(x.member_id)}` : '';
     const brakes = brakesLines(x, x.spent_today);
     // a tripped breaker: its writes are waiting; a passkey resets it
     let rs = null;
@@ -124,7 +173,7 @@ async function load() {
     }
     T.append(el('div', {},
       el('span', {}, el('b', { textContent: x.label }), x.tripped_at ? el('span', { className: 'badge dan', textContent: 'Tripped' }) : null,
-        el('span', { className: 'dim', textContent: `  ${x.provider}, expires ${new Date(x.expires_at).toLocaleDateString()}${x.policy.unattendedIrreversible.length ? ', has pre-approvals' : ''}${bound}` }),
+        el('span', { className: 'dim', textContent: `  ${x.provider}, expires ${new Date(x.expires_at).toLocaleDateString()}${x.policy.unattendedIrreversible.length ? `, has pre-approvals${SEALS.quorum > 1 || !SEALS.selfApprove ? ' (paused while two seals are required)' : ''}` : ''}${bound}${maker}` }),
         x.tripped_at ? el('span', { className: 'dim brk tripped', textContent: `Tripped at ${new Date(x.tripped_at).toLocaleTimeString()} (${TRIP_WHY[x.tripped_why] || 'a limit'}). Its writes wait for you; reads still pass.` }) : null,
         ...brakes.map((t) => el('span', { className: 'dim brk', textContent: t }))),
       el('span', { className: 'acts' }, rs, rv)));
@@ -158,14 +207,39 @@ async function load() {
 const KIND = { proxy: 'API call', shell: 'Shell command', tool: 'Tool call', deploy: 'Deploy' };
 const drafts = new Map(); // hold id -> a deny reason being typed
 const WANTS = { shell: 'wants to run this command', tool: 'wants to make this tool call', deploy: 'wants to deploy' };
+// The seals on a card (two-person seal): one wax disc per seal needed, filled for each seal given, who gave it, when and
+// with which passkey; and whether you can add yours. The server decides; the card only explains.
+function sealsRow(x) {
+  const need = x.needs || 1, votes = x.votes || [];
+  if (need < 2 && !votes.length) return null;
+  const by = votes.map((v) => `${v.member === ME.id ? 'you' : v.name || 'someone'} at ${new Date(v.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (passkey ${String(v.passkey).slice(0, 4)}...)`).join('; ');
+  const text = votes.length
+    ? `${votes.length} of ${need} seals: approved by ${by}. ${votes.length < need ? `Waiting for ${need - votes.length === 1 ? 'a second approver' : `${need - votes.length} more approvers`}.` : ''}`
+    : `Needs ${need} seals from ${need} different owners or approvers, each with their own passkey.`;
+  return el('div', { className: 'seals' }, discs(need, votes.length), el('span', { textContent: text }));
+}
+/** why you cannot add your seal to this hold, or '' */
+function noSeal(x) {
+  if (!can('approver')) return 'Only owners and approvers can seal. You can deny it.';
+  if ((x.votes || []).some((v) => v.member === ME.id)) return 'You have sealed this. It needs another approver.';
+  if (x.self_approve === false && x.requested_by && x.requested_by === ME.id) return 'Your own token or guard key asked for this, so someone else on your team must seal it.';
+  return '';
+}
 function holdCard(x) {
   const kind = KIND[x.kind] ? x.kind : 'proxy';
   const guard = kind !== 'proxy';
-  const ok = el('button', { className: 'btn pri', type: 'button', textContent: 'Approve with passkey' });
+  const two = (x.needs || 1) > 1;
+  const ok = el('button', { className: 'btn pri', type: 'button', textContent: two ? 'Add your seal with passkey' : 'Approve with passkey' });
   const no = el('button', { className: 'btn dan', type: 'button', textContent: 'Deny' });
+  const why = noSeal(x);
+  if (why) { ok.disabled = true; ok.title = why; }
   if (frozenNow) { ok.disabled = true; ok.title = 'Unfreeze first: nothing is approved while frozen.'; }
   ok.onclick = async () => {
-    try { await ceremony(`/v1/holds/${x.id}/approve/begin`, `/v1/holds/${x.id}/approve/finish`); toast(guard ? 'Approved. The agent can run that exact command once, within 10 minutes.' : 'Approved. The agent can retry that exact request once.'); load(); } catch (e) { toast(e.message); }
+    try {
+      const r = await ceremony(`/v1/holds/${x.id}/approve/begin`, `/v1/holds/${x.id}/approve/finish`);
+      toast(!r.approved ? r.note : guard ? 'Approved. The agent can run that exact command once, within 10 minutes.' : 'Approved. The agent can retry that exact request once.');
+      load();
+    } catch (e) { toast(e.message); }
   };
   const deny = async (reason) => { try { await api('POST', `/v1/holds/${x.id}/deny`, reason ? { reason } : {}); drafts.delete(x.id); toast(reason ? 'Denied. The agent gets your reason.' : 'Denied.'); load(); } catch (e) { toast(e.message); } };
   no.onclick = () => deny(null);
@@ -203,7 +277,9 @@ function holdCard(x) {
     x.preview ? el('pre', { className: 'preview mono' + (guard ? ' exact' : ''), textContent: x.preview }) : null,
     guard ? el('p', { className: 'dim small', textContent: `Summary from the guard: ${x.path}` }) : null,
     el('p', { className: 'dim', textContent: `${x.why} Rule ${x.rule}.` }),
+    sealsRow(x),
     el('div', { className: 'row' }, ok, no, withReason),
+    why && !frozenNow ? el('p', { className: 'dim small seal-why', textContent: why }) : null,
     reasonRow);
 }
 
@@ -270,6 +346,7 @@ function show(view) {
   current = view;
   if (changed && view === 'receipts') load().catch(() => {});
   if (changed && view === 'account') { passkeysView().catch(() => {}); cliSessionsView().catch(() => {}); guardKeysView().catch(() => {}); }
+  if (changed && view === 'team') teamView().catch((e) => toast(e.message));
   for (const s of document.querySelectorAll('.view')) s.hidden = s.dataset.view !== view;
   for (const a of document.querySelectorAll('#snav a')) a.classList.toggle('on', a.dataset.view === view);
 }
@@ -278,11 +355,21 @@ for (const a of document.querySelectorAll('#snav a')) a.onclick = (e) => { e.pre
 // ---- deep links: #hold=<id>, #device (command line sign-in), #cli=<id> (the alert after one), #freeze (the alert's
 // Freeze button could not freeze: this only brings you to the button, it never presses it)
 function route() {
+  // an invite link opened in a tab where the app is already running: take the token out of the address bar at once
+  if (/^#invite=/.test(location.hash)) {
+    const iv = location.hash.match(/^#invite=([A-Za-z0-9_-]{43})$/);
+    history.replaceState(null, '', '/app');
+    if (!iv) return toast('This invite link is incomplete. Ask for the whole link.');
+    inviteToken = iv[1]; clearInterval(boot.poll); inviteIn();
+    return;
+  }
   if (location.hash === '#freeze') { window.scrollTo(0, 0); ($('freezeBtn').hidden ? $('unfreezeBtn') : $('freezeBtn')).focus(); }
   const hm = location.hash.match(/^#hold=([0-9a-f]{24})$/);
   if (hm) show('holds');
-  // the alert after a passkey was added opens the passkey list
+  // the alert after a passkey was added opens the passkey list; a team alert (someone joined, a role changed, the
+  // protection will be lowered) opens the team
   if (location.hash === '#account') { show('account'); history.replaceState(null, '', '/app'); }
+  if (location.hash === '#team') { show('team'); history.replaceState(null, '', '/app'); }
   if (hm) setTimeout(() => { const n = $('hold-' + hm[1]); if (n) n.scrollIntoView({ behavior: 'smooth' }); }, 300);
   const dm = /^#device(=.*)?$/.exec(location.hash);
   if (dm && $('devicePanel').hidden) deviceOpen(!!dm[1]);
@@ -392,6 +479,116 @@ async function cliSessionsView() {
     const state = s.status === 'live' ? `ends ${new Date(s.expires_at).toLocaleDateString()}${s.current ? ' (this one)' : ''}` : s.status === 'ended' ? 'signed out or expired' : 'revoked';
     L.append(el('div', {}, el('span', {}, el('b', { textContent: new Date(s.created_at).toLocaleString() }), el('span', { className: 'dim', textContent: `  from ${place(s)}, ${state}` })), rv));
   }
+}
+
+// ---- the team (two-person seal). Every change here takes the signed-in person's own passkey; Counterseal checks the
+// role, the last-owner rule and the quorum rules again on the server.
+async function teamView() {
+  const t = await api('GET', '/v1/team');
+  ME = { ...ME, id: t.me.id, role: t.me.role }; applyRole();
+  NAMES = new Map(t.members.map((m) => [m.id, m.name]));
+  // the seals needed, now
+  $('qDiscs').replaceChildren(...discs(t.quorum, t.quorum, true).childNodes);
+  $('qTitle').textContent = t.quorum === 1 ? 'One seal' : `${t.quorum} seals`;
+  $('qNow').textContent = `${t.quorum === 1 ? 'Any one owner or approver approves a held action with their passkey.' : `${t.quorum} different owners or approvers must each approve with their own passkey before a held action can go ahead.`} ${t.selfApprove ? 'The person whose agent token or guard key asked may be one of them.' : 'The person whose agent token or guard key asked cannot be one of them.'} ${t.voters} ${t.voters === 1 ? 'person' : 'people'} on this team can seal${t.votersNow < t.voters ? ` (${t.voters - t.votersNow} from later: a new approver's seal counts 24 hours after joining while two are required)` : ''}.`;
+  // the form starts from what is in force now; a waiting change is shown above it, with its countdown
+  $(t.quorum > 1 ? 'q2' : 'q1').checked = true; $('qSelf').checked = !!t.selfApprove;
+  $('q2').disabled = t.voters < 2;
+  $('q2').closest('label').title = t.voters < 2 ? 'Two seals need two owners or approvers. Invite an approver first.' : '';
+  $('qPending').hidden = !t.pending;
+  if (t.pending) $('qPendingText').textContent = `Waiting: from ${when(t.pending.effectiveAt)} (in ${left(t.pending.effectiveAt)}), ${lowering(t.pending, t)}.`;
+  // people
+  $('teamCount').textContent = `${t.members.length} of ${t.maxMembers}`;
+  const owners = t.members.filter((m) => m.role === 'owner').length;
+  const M = $('members'); M.replaceChildren();
+  for (const m of t.members) {
+    const facts = [m.label && m.label !== m.name ? `invited as ${m.label}` : null, `${m.passkeys} passkey${m.passkeys === 1 ? '' : 's'}`, m.last_used ? `last used ${new Date(m.last_used).toLocaleDateString()}` : 'not used yet', m.votes_from ? `seals count from ${when(m.votes_from)}` : null].filter(Boolean).join(', ');
+    const acts = el('span', { className: 'acts' });
+    if (can('owner')) {
+      const sel = el('select', { className: 'sm', ariaLabel: `Role of ${m.name}` }, ...['owner', 'approver', 'member', 'viewer'].map((r) => el('option', { value: r, textContent: ROLE_TEXT[r], selected: r === m.role })));
+      const go = el('button', { className: 'btn sm', type: 'button', textContent: 'Change with passkey', hidden: true });
+      sel.onchange = () => { go.hidden = sel.value === m.role; };
+      go.onclick = async () => {
+        try { const r = await ceremony(`/v1/team/members/${m.id}/role/begin`, `/v1/team/members/${m.id}/role/finish`, { role: sel.value }); toast(`${m.name} is now ${ROLE_TEXT[r.role].toLowerCase()}.${r.votesFrom ? ` Their seal counts from ${when(r.votesFrom)}.` : ''}`); teamView(); load(); } catch (e) { toast(e.message); sel.value = m.role; go.hidden = true; }
+      };
+      acts.append(sel, go);
+    }
+    // the last owner can be neither removed nor demoted (the server refuses it too)
+    if ((can('owner') || m.you) && !(m.role === 'owner' && owners < 2)) {
+      const rm = el('button', { className: 'btn sm dan', type: 'button', textContent: m.you ? 'Leave team' : 'Remove' });
+      rm.onclick = async () => {
+        const msg = m.you
+          ? 'Leave this team? You are signed out everywhere, your passkeys for it are removed, and the tokens, guard keys and receipts keys you made stop working. Confirm with your passkey.'
+          : `Remove ${m.name}? They are signed out everywhere, their passkeys and alert devices are removed, their seals on waiting actions are dropped, and the tokens, guard keys and receipts keys they made stop working. Confirm with your passkey.`;
+        if (!confirm(msg)) return;
+        try { await ceremony(`/v1/team/members/${m.id}/remove/begin`, `/v1/team/members/${m.id}/remove/finish`); if (m.you) return location.replace('/app'); toast(`${m.name} was removed.`); teamView(); load(); } catch (e) { toast(e.message); }
+      };
+      acts.append(rm);
+    }
+    M.append(el('div', {},
+      el('span', { className: 'who-line' }, el('b', { textContent: m.name }), m.you ? el('span', { className: 'dim', textContent: ' (you)' }) : null,
+        el('span', { className: 'badge role r-' + m.role, textContent: ROLE_TEXT[m.role] }),
+        el('span', { className: 'dim brk', textContent: facts })),
+      acts));
+  }
+  // open invites
+  const I = $('invites'); I.replaceChildren();
+  for (const i of t.invites) {
+    const rv = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Revoke' });
+    rv.onclick = async () => { try { await api('DELETE', `/v1/team/invites/${i.id}`); toast('Invite revoked. The link no longer works.'); teamView(); } catch (e) { toast(e.message); } };
+    I.append(el('div', {}, el('span', {}, el('b', { textContent: i.label }), el('span', { className: 'dim', textContent: `  ${ROLE_TEXT[i.role]}, works until ${when(i.expires_at)}, made by ${NAMES.get(i.created_by) || 'an owner'}` })), rv));
+  }
+  $('noInvites').hidden = t.invites.length > 0;
+}
+$('qPendingCancel').onclick = cancelLowering;
+$('qSave').onclick = async () => {
+  try {
+    const quorum = $('q2').checked ? 2 : 1, selfApprove = $('qSelf').checked;
+    const r = await ceremony('/v1/team/quorum/begin', '/v1/team/quorum/finish', { quorum, selfApprove });
+    toast(r.pending ? `Saved. The lower protection starts at ${when(r.pending.effectiveAt)}; every member was alerted and an approver can cancel it.` : 'Saved. It applies now, to actions already waiting too.');
+    teamView(); load();
+  } catch (e) { toast(e.message); }
+};
+$('ivNew').onclick = async () => {
+  try {
+    const label = $('ivLabel').value.trim();
+    if (!label) return toast('Say who the invite is for. They see it, and so does your team.');
+    const r = await ceremony('/v1/team/invites/begin', '/v1/team/invites/finish', { role: $('ivRole').value, label, hours: Number($('ivHours').value) });
+    $('newInv').hidden = false; $('newInvVal').textContent = r.url; $('ivLabel').value = '';
+    $('newInvNote').textContent = `Works once, until ${when(r.expiresAt)}.`;
+    teamView();
+  } catch (e) { toast(e.message); }
+};
+$('invLater').onclick = () => { inviteToken = null; location.replace('/app'); };
+$('ivCopy').onclick = async () => { try { await navigator.clipboard.writeText($('newInvVal').textContent); toast('Copied. Send it privately.'); } catch { toast('Select the link and copy it.'); } };
+
+// ---- joining a team from an invite (#invite=<token>): the page shows the account, who invited you and the role before
+// anything is made, then makes your own passkey for this team. An authenticator that already holds one of the team's
+// passkeys refuses to make another (excludeCredentials), so one device cannot join twice.
+async function inviteIn() {
+  $('signedOut').hidden = false; $('signedIn').hidden = true;
+  for (const id of ['login', 'authMain', 'authIntro', 'devSignedOut']) $(id).hidden = true;
+  $('inviteIn').hidden = false;
+  const bad = (msg) => { $('invBad').textContent = msg; $('invBad').hidden = false; $('invForm').hidden = true; $('invWarn').hidden = true; $('login').hidden = false; $('authIntro').hidden = false; };
+  let l;
+  try { l = await api('POST', '/v1/invites/lookup', { token: inviteToken }); } catch (e) { $('invAccount').textContent = 'a Counterseal team'; return bad(e.message); }
+  $('invAccount').textContent = l.account; $('invInviter').textContent = l.inviter; $('invInviter2').textContent = l.inviter;
+  $('invRole').textContent = ROLE_TEXT[l.role] || l.role;
+  $('invRoleText').textContent = { approver: '(you seal held actions with your passkey)', member: '(you make tokens and keys for your agents)', viewer: '(you read, and can deny)' }[l.role] || '';
+  $('invLabel').textContent = l.label; $('invUntil').textContent = when(l.expires_at);
+  $('invName').focus();
+  $('invJoin').onclick = async () => {
+    try {
+      const name = $('invName').value.trim(); if (!name) return toast('Type your name first.');
+      const b = await api('POST', '/v1/invites/begin', { token: inviteToken, name });
+      const o = b.options;
+      const cred = await navigator.credentials.create({ publicKey: { ...o, challenge: b64u.dec(o.challenge), user: { ...o.user, id: b64u.dec(o.user.id) }, excludeCredentials: (o.excludeCredentials || []).map((c) => ({ type: c.type, id: b64u.dec(c.id) })) } });
+      await api('POST', '/v1/invites/finish', { token: inviteToken, challengeId: b.challengeId, credential: { id: cred.id, attestationObject: b64u.enc(cred.response.attestationObject), clientDataJSON: b64u.enc(cred.response.clientDataJSON) } });
+      inviteToken = null; $('inviteIn').hidden = true;
+      for (const id of ['login', 'authMain', 'authIntro']) $(id).hidden = false;
+      toast(`Welcome to ${l.account}.`); boot();
+    } catch (e) { toast(e.name === 'InvalidStateError' ? 'This device already holds a passkey for this team. Each person joins once, with their own passkey.' : e.message); }
+  };
 }
 
 // ---- alerts (Web Push). The push itself carries nothing; sw.js fetches the held request after it wakes.
@@ -531,9 +728,13 @@ async function boot() {
   try {
     const me = await api('GET', '/v1/me');
     $('signedOut').hidden = true; $('signedIn').hidden = false; $('logout').hidden = false;
-    $('who').textContent = me.account.name;
+    ME = me.member || ME; SEALS = me.team || SEALS; applyRole();
+    // on a team, your own name (the account's name is the team's)
+    const shown = ME.name || me.account.name;
+    $('who').textContent = shown; $('who').title = ME.founder ? me.account.name : `${shown}, on ${me.account.name}`;
     $('movePanel').hidden = !me.host.legacy; $('moveHost').textContent = me.host.primary;
-    $('avatar').textContent = (me.account.name.trim()[0] || '?').toUpperCase();
+    $('avatar').textContent = (shown.trim()[0] || '?').toUpperCase();
+    api('GET', '/v1/team').then((t) => { NAMES = new Map(t.members.map((m) => [m.id, m.name])); }).catch(() => {});
     meta = meta || (await api('GET', '/v1/meta'));
     const p = $('prov'); p.replaceChildren(...meta.providers.map((x) => el('option', { value: x.id, textContent: x.name })));
     PROV = Object.fromEntries(meta.providers.map((x) => [x.id, x])); showHost();
@@ -553,4 +754,4 @@ async function boot() {
     } catch { /* offline: the form still works or explains itself */ }
   }
 }
-if (moveToken) { $('signedOut').hidden = false; $('signedIn').hidden = true; moveIn(); } else boot();
+if (moveToken) { $('signedOut').hidden = false; $('signedIn').hidden = true; moveIn(); } else if (inviteToken) inviteIn(); else boot();

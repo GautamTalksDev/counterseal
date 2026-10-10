@@ -204,3 +204,52 @@ a.ul{text-decoration:underline;text-underline-offset:3px}
   .btn.freeze,.btn.unfreeze{width:100%}
   .grid3{grid-template-columns:1fr}
 }
+
+/* Two-person seal: the seals are green wax (the site's second seal), one disc per seal needed, filled when given */
+:root{--wax:#1d5e43;--wax-hi:#3f9a72;--wax-glow:rgba(63,154,114,.30)}
+.discs{display:inline-flex;gap:6px;align-items:center;flex:none}
+.wax{width:20px;height:20px;border-radius:50%;flex:none;border:1.5px dashed rgba(63,154,114,.75);background:rgba(29,94,67,.10)}
+.wax.on{border:0;background:radial-gradient(circle at 38% 34%,#3a8f69,var(--wax) 52%,#0e3b29 100%);box-shadow:inset 0 -2px 5px rgba(0,0,0,.45),inset 0 2px 3px rgba(255,255,255,.14),0 0 0 3px var(--wax-glow)}
+.wax.lg{width:40px;height:40px;border-width:2px}
+.hold .seals{display:flex;align-items:center;gap:12px;margin:2px 0 14px;padding:10px 12px;border:1px solid rgba(63,154,114,.35);border-radius:10px;background:rgba(29,94,67,.12);font-size:13px;line-height:1.45}
+.hold .seal-why{margin:8px 0 0;font-size:12.5px}
+.ico.i-team{border-radius:50%;box-shadow:5px 0 0 -1.5px currentColor;width:11px;margin-right:4px}
+.cnt.seal-cnt.two{background:var(--wax);color:#e9fff3}
+.who-box{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.who-role{font-size:11.5px;color:var(--mute)}
+.seals-panel .seal-state{display:flex;gap:16px;align-items:center}
+.seals-panel .seal-state h3{font-size:18px;letter-spacing:-.01em}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.seg label{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line2);border-radius:12px;cursor:pointer;background:var(--bg)}
+.seg label:has(input:checked){border-color:rgba(63,154,114,.7);background:rgba(29,94,67,.16)}
+.seg label:has(input:disabled){opacity:.5;cursor:not-allowed}
+.seg input{width:auto;height:auto;margin-top:3px;accent-color:var(--wax-hi)}
+.seg b{display:block;font-size:14px}
+.seg small{display:block;color:var(--dim);font-size:12.5px;margin-top:2px}
+.panel-head{display:flex;justify-content:space-between;align-items:baseline;padding:12px 0 4px}
+.members .who-line{min-width:0}
+.members select.sm{height:32px;width:auto;padding:0 8px;font-size:13px;border-radius:8px}
+.badge.role{background:rgba(255,255,255,.05);color:var(--dim);border:1px solid var(--line2)}
+.badge.role.r-owner{color:var(--acc);border-color:rgba(200,245,96,.35);background:var(--acc-soft)}
+.badge.role.r-approver{color:#8fe0b6;border-color:rgba(63,154,114,.5);background:rgba(29,94,67,.18)}
+.facts.roles{grid-template-columns:max-content 1fr;gap:8px 16px;font-size:13.5px}
+.facts.roles dt{color:var(--ink);font-weight:600}
+.facts.roles dd{color:var(--dim)}
+.banner.lowering{border-color:rgba(245,183,72,.5);background:linear-gradient(180deg,rgba(245,183,72,.10),var(--bg2))}
+.banner.lowering h3{color:var(--warn)}
+.invite-card{margin:18px 0 6px;padding:22px;border:1px solid rgba(63,154,114,.45);border-radius:16px;background:linear-gradient(180deg,rgba(29,94,67,.16),var(--bg2) 70%)}
+.invite-card h2{font-size:22px;line-height:1.2;letter-spacing:-.02em;font-weight:600;margin-top:14px}
+.invite-card .inv-seal{display:flex;gap:8px}
+.invite-card .alert{margin-top:14px}
+.invite-card .facts{margin-top:14px}
+.invite-card .row{flex-wrap:wrap}
+.linkbtn{color:var(--ink);text-decoration:underline;text-underline-offset:3px;font-size:inherit;padding:0}
+.invite-card .row input{flex:1 1 180px;min-width:0}
+.seals-panel .pending-note{margin-top:14px;padding:10px 12px;border:1px solid rgba(245,183,72,.45);border-radius:10px;background:rgba(245,183,72,.08);font-size:13px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+@media (max-width:860px){
+  .seg{grid-template-columns:1fr}
+  .members>div{flex-wrap:wrap}
+  .members .acts{flex-wrap:wrap}
+  .hold .seals{align-items:flex-start}
+  .who-box{display:none}
+}
