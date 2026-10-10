@@ -72,7 +72,7 @@ export async function startStub(opts = {}) {
       const ct = String(req.headers['content-type'] || '');
       if (!ct.startsWith('application/json')) return err(res, 415, 'json_only');
       if (raw.length > 16 * 1024) return err(res, 413, 'too_large');
-      const fc = take('create'); if (fc) return err(res, fc, fc === 429 ? 'slow_down' : 'stub_failure', fc === 429 ? 'Too many holds this hour.' : 'injected failure');
+      const fc = take('create'); if (fc) return err(res, fc, fc === 429 ? 'slow_down' : fc === 403 ? 'forbidden' : 'stub_failure', fc === 429 ? 'Too many holds this hour.' : fc === 403 ? 'This key may not ask.' : 'injected failure');
       if (!body || typeof body !== 'object' || Array.isArray(body)) return err(res, 400, 'bad_field');
       for (const f2 of Object.keys(body)) if (!FIELDS.has(f2)) return err(res, 400, 'bad_field', `unknown field ${f2}`);
       if (!['shell', 'tool'].includes(body.kind)) return err(res, 400, 'bad_kind');
@@ -110,13 +110,13 @@ export async function startStub(opts = {}) {
     const h = state.holds.get(mm[1]);
     if (!h || h.key !== key) return err(res, 404, 'not_found');
     if (m === 'GET' && !mm[2]) {
-      const fp = take('poll'); if (fp) return err(res, fp, 'stub_failure', 'injected failure');
+      const fp = take('poll'); if (fp) return err(res, fp, fp === 403 ? 'forbidden' : 'stub_failure', fp === 403 ? 'This key may not read that.' : 'injected failure');
       const w = u.searchParams.get('wait') ?? '0';
       if (!/^\d+$/.test(w) || Number(w) > 20) return err(res, 400, 'bad_wait');
       const until = Date.now() + Number(w) * 1000 * state.timeScale;
       while (h.status === 'pending' && Date.now() < until) await new Promise((r) => setTimeout(r, 20));
       if (h.status === 'approved' && h.expires_at < Date.now()) h.status = 'expired';
-      return send(res, 200, { id: h.id, status: h.status, deny_reason: h.deny_reason, expires_at: h.expires_at, hash: h.hash });
+      return send(res, 200, { id: h.id, status: h.status, deny_reason: h.deny_reason, expires_at: h.expires_at, hash: h.hash, seals: h.seals || 0, needs: h.needs || 1 }); // two-person seal: a pending hold can have some of its seals
     }
     if (m === 'POST' && mm[2]) {
       const fu = take('use'); if (fu) return err(res, fu, 'stub_failure', 'injected failure');

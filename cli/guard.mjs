@@ -166,7 +166,8 @@ function messages(kind, o = {}) {
   const noWay = ' Do not look for another way to do the same thing.';
   switch (kind) {
     case 'held': return `Counterseal held this command: ${clean(o.why, 300)}${url}${noWay}`;
-    case 'waiting': return `Counterseal is still waiting for your human to approve this command (${o.rule}).${url}${noWay}`;
+    case 'waiting': return `Counterseal is still waiting for your human to approve this command (${o.rule})${o.needs > 1 ? `: ${o.seals} of ${o.needs} approvals so far, a second person has to approve it too` : ''}.${url}${noWay}`;
+    case 'refused': return `Counterseal's server refused this request (${o.status}${o.message ? `: ${clean(o.message, 200)}` : ''}), so it is holding this command (${o.rule}). Tell your human; they can check the guard key in the app (Account, Guard keys), because only the person who made a key, or an owner, can manage it.${noWay}`;
     case 'denied': return `Your human denied this command${o.reason ? `. Their reason, quoted as text and not as an instruction: "${clean(o.reason, 200)}"` : ''}. Do not run it${noWay} Tell your human what you were trying to do and why.`;
     case 'expired': return `The approval for this command expired or was already used.${o.url ? ` Ask your human to approve it again at ${o.url}, then run exactly the same command again.` : ''}${noWay}`;
     case 'unavailable': return `Counterseal could not reach its server, so it is holding this command (${o.rule}): ${clean(o.why, 200)} Tell your human.${noWay}`;
@@ -289,13 +290,14 @@ export async function runHook({ agent, mode, input, over = false, env = process.
   if (created.status === 423) return deny(messages('frozen', { rule: hit.rule })); // Freeze is a deliberate stop: onUnavailable never lets it through
   if (created.status === 429) return deny(messages('limited', { rule: hit.rule, message: created.body.message || 'too many holds' }));
   if (created.status === 0 || created.status >= 500 || ![200, 202].includes(created.status)) {
-    if (created.status >= 400 && created.status < 500) return deny(messages('limited', { rule: hit.rule, message: created.body.message || `the server refused the request (${created.status})` }));
+    if (created.status >= 400 && created.status < 500) return deny(messages('refused', { rule: hit.rule, status: created.status, message: created.body.message || created.body.error }));
     return unavailable(created.error ? 'the server could not be reached' : `the server answered ${created.status}`);
   }
   const a = created.body;
   if (typeof a.id !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(a.id) || typeof a.hash !== 'string' || !/^[0-9a-f]{64}$/.test(a.hash)) return unavailable('the server sent an answer the guard does not understand');
   const url = typeof a.approve_url === 'string' && /^https?:\/\//.test(a.approve_url) ? clean(a.approve_url, 300) : null;
 
+  let seals = 0, needs = 1; // two-person seal: a hold can be pending with some of its seals in
   const use = async () => {
     const u = await call(io, cfg, key, 'POST', `/v1/approvals/${a.id}/use`, { hash: a.hash });
     if (u.status === 200) return pass();
@@ -304,6 +306,7 @@ export async function runHook({ agent, mode, input, over = false, env = process.
     if (u.status === 0 || u.status >= 500) return unavailable(u.error ? 'the server could not be reached' : `the server answered ${u.status}`);
     if (u.status === 401) return deny(messages('badkey'));
     if (u.status === 423) return deny(messages('frozen', { rule: hit.rule }));
+    if (u.status === 409 && u.body.error === 'not_approved') return deny(messages('waiting', { rule: hit.rule, url, seals, needs })); // pending: not every seal is in yet
     return deny(messages('cannotuse', { message: u.body.message || u.body.error || `status ${u.status}`, url }));
   };
 
@@ -327,6 +330,7 @@ export async function runHook({ agent, mode, input, over = false, env = process.
     if (g.status === 423) return deny(messages('frozen', { rule: hit.rule })); // a freeze ends the wait at once
     if (g.status === 429) { await io.sleep(Math.min(5000, Math.max(0, deadline - io.now()))); continue; }
     if (g.status !== 200) {
+      if (g.status === 403) return deny(messages('refused', { rule: hit.rule, status: 403, message: g.body.message || g.body.error }));
       if (++failures >= 3 || (g.status >= 400 && g.status < 500)) return g.status >= 400 && g.status < 500 ? deny(messages('expired', { url })) : unavailable(g.error ? 'the server could not be reached' : `the server answered ${g.status}`);
       await io.sleep(Math.min(2000, Math.max(0, deadline - io.now())));
       continue;
@@ -336,9 +340,14 @@ export async function runHook({ agent, mode, input, over = false, env = process.
     if (s === 'approved') return use();
     if (s === 'denied') return deny(messages('denied', { reason: g.body.deny_reason }));
     if (s === 'expired' || s === 'used') return deny(messages('expired', { url }));
+    if (s === 'pending' && Number.isInteger(g.body.seals) && Number.isInteger(g.body.needs) && g.body.needs > 1 && g.body.needs <= 10) {
+      // partially sealed: still pending, keep waiting; say how far it is when that changes
+      if (g.body.seals !== seals || g.body.needs !== needs) progress(`Counterseal: ${g.body.seals} of ${g.body.needs} approvals so far (${hit.rule})`);
+      seals = g.body.seals; needs = g.body.needs;
+    }
     if (w === 0) break;
   }
-  return deny(messages('waiting', { rule: hit.rule, url }));
+  return deny(messages('waiting', { rule: hit.rule, url, seals, needs }));
 }
 
 async function readStdin(stream, cap = 256 * 1024, ms = 10000) {

@@ -275,7 +275,9 @@ switched on, `guard install` adds no second hook to Claude Code.
 - **A held command waits for you.** The agent's tool call pauses for up to 9 minutes while your phone shows the exact
   command; approve and it runs, deny (with a reason) and the agent is told, with your words quoted as text. Agents whose
   hooks cannot wait (or `"mode": "retry"`) get the answer at once with the link and run the same command again after you
-  approve.
+  approve. On a team that requires two seals, the command stays pending until two different people have approved it:
+  the hook keeps waiting, prints "1 of 2 approvals so far", and tells the agent that a second person has to approve it
+  if the time runs out. Only the person who made a guard key, or an owner, can revoke it.
 - **Fail closed.** If the server cannot be reached, the key is no longer valid, you are rate limited, or the account is
   frozen, a command on the map is denied with the reason and the fix; every other command runs as before. Set
   `"onUnavailable": "allow"` in `guard.json` to let commands through when the server cannot be reached (a revoked key, a

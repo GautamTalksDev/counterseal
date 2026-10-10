@@ -156,6 +156,7 @@ npx leashcli guard install --agents none     # makes the key the plugin's hook u
     <li>Approved: the hook uses the approval once and the command runs. Denied: the agent is told, in quotes, that its human said no and why. Nobody answers: the agent is told to ask you, and asking again is the same hold.</li>
   </ol>
   <p>Agents whose hook cannot wait (or if you set <code>mode</code> to <code>retry</code>) get the denial at once with the link, and run exactly the same command again after you approve it.</p>
+  <p>On a team that <a href="#team">requires two seals</a>, a held command stays pending until two different people have approved it, each with their own passkey. The hook keeps waiting, prints how far it is (for example "1 of 2 approvals so far") and, if the time runs out, tells the agent that a second person has to approve it too. A guard key can be revoked only by the person who made it or by an owner.</p>
   <h3>What is held (shell map 2026-10-10.1)</h3>
   <table>
     <tr><th>Rule</th><th>Holds</th></tr>

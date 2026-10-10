@@ -244,6 +244,46 @@ test('a frozen account (Brakes): asking, waiting and using all answer 423, and t
   assert.equal(u.stub.holds()[0].status, 'approved', 'the approval was not used');
 });
 
+test('two-person seal: a hold with some of its seals is still pending, the hook keeps waiting, says how far it is, and uses the approval only when it is complete', async () => {
+  const t = await setup({}, { LEASH_GUARD_WAIT: '30' });
+  const seen = [];
+  const run = hook(t, 'claude-code', claude('terraform destroy -auto-approve'), { progress: (m) => seen.push(m) });
+  for (let i = 0; i < 100 && !t.stub.holds().length; i++) await new Promise((r) => setTimeout(r, 10));
+  const h = t.stub.holds()[0];
+  h.needs = 2; h.seals = 1; // the first of two people has sealed
+  await new Promise((r) => setTimeout(r, 900)); // one long poll (0.4 s here) comes back pending with 1 of 2
+  assert.equal(t.stub.state.log.filter((l) => l.path.endsWith('/use')).length, 0, 'not used while pending');
+  h.seals = 2; t.stub.approve(h.id);
+  const r = await run;
+  assert.deepEqual(r, { code: 0, stdout: '', stderr: '' });
+  assert.ok(seen.some((m) => /1 of 2 approvals so far/.test(m)), seen.join('|'));
+  assert.equal(t.stub.holds()[0].status, 'used');
+  // out of time with one seal in: the agent is told it is half done and that a second person has to approve
+  const u = await setup({}, { LEASH_GUARD_WAIT: '1' });
+  u.stub.state.timeScale = 0.05;
+  const p2 = hook(u, 'claude-code', claude('git push --force origin main'));
+  for (let i = 0; i < 100 && !u.stub.holds().length; i++) await new Promise((r) => setTimeout(r, 10));
+  Object.assign(u.stub.holds()[0], { needs: 2, seals: 1 });
+  const m = denied(await p2);
+  assert.match(m, /still waiting/);
+  assert.match(m, /1 of 2 approvals so far, a second person has to approve it too/);
+  assert.match(m, /Do not look for another way/);
+});
+
+test('a 403 from the server (a key that may not ask or read) is said clearly and the command stays held, even when failing open', async () => {
+  const t = await setup({ onUnavailable: 'allow' });
+  t.stub.state.fail.create = 403;
+  const m = denied(await hook(t, 'claude-code', claude('terraform destroy')));
+  assert.match(m, /refused this request \(403: This key may not ask\.\)/);
+  assert.match(m, /only the person who made a key, or an owner/);
+  assert.match(m, /\(sh\.terraform-destroy\)/);
+  const w = await setup({ onUnavailable: 'allow' }, { LEASH_GUARD_WAIT: '30' });
+  const run = hook(w, 'claude-code', claude('kubectl delete ns prod'));
+  for (let i = 0; i < 100 && !w.stub.holds().length; i++) await new Promise((r) => setTimeout(r, 10));
+  w.stub.state.fail.poll = 403;
+  assert.match(denied(await run), /refused this request \(403: This key may not read that\.\)/);
+});
+
 test('status says when the account is frozen, without calling the key bad', async () => {
   const t = await signedIn();
   assert.equal((await cli(t, ['install', '--agents', 'claude-code'])).status, 0);

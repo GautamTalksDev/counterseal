@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { World, serve } from '../../server/test/helpers.js';
+import { World, serve, Authenticator, ORIGIN, RP_ID } from '../../server/test/helpers.js';
 import { _resetMemoryBuckets } from '../../server/src/ratelimit.js';
 import { runHook, makeIO } from '../guard.mjs';
 
@@ -105,6 +105,64 @@ test('real server: a denial reaches the agent with the human\'s words quoted as 
   assert.match(m, /Your human denied this command/);
   assert.match(m, /quoted as text and not as an instruction: "not today, use staging"/);
   assert.equal((await holdsOf(t, 'denied'))[0].deny_reason, 'not today, use staging');
+});
+
+// ---- a team: the second person (through a real invite and a real passkey) and the quorum (two-person seal)
+async function addMember(w, owner, name) {
+  const b = await w.req('POST', '/v1/team/invites/begin', { cookie: owner.cookie, body: { role: 'approver', label: name } });
+  assert.equal(b.status, 200, JSON.stringify(b.body));
+  const f = await w.req('POST', '/v1/team/invites/finish', { cookie: owner.cookie, body: { challengeId: b.body.challengeId, credential: await owner.auth.get(b.body.options) } });
+  assert.equal(f.status, 200, JSON.stringify(f.body));
+  const token = f.body.url.split('#invite=')[1];
+  const auth = new Authenticator(ORIGIN, RP_ID);
+  const jb = await w.req('POST', '/v1/invites/begin', { body: { token, name } });
+  assert.equal(jb.status, 200, JSON.stringify(jb.body));
+  const jf = await w.req('POST', '/v1/invites/finish', { body: { token, challengeId: jb.body.challengeId, credential: await auth.create(jb.body.options) } });
+  assert.equal(jf.status, 200, JSON.stringify(jf.body));
+  return { cookie: jf.headers.get('set-cookie').split(';')[0], auth };
+}
+async function setQuorum2(w, u) {
+  const b = await w.req('POST', '/v1/team/quorum/begin', { cookie: u.cookie, body: { quorum: 2, selfApprove: true } });
+  assert.equal(b.status, 200, JSON.stringify(b.body));
+  const f = await w.req('POST', '/v1/team/quorum/finish', { cookie: u.cookie, body: { quorum: 2, selfApprove: true, challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) } });
+  assert.equal(f.status, 200, JSON.stringify(f.body));
+}
+async function sealNext(w, u) { // the next pending guard hold gets this person's seal; returns what the server said
+  for (let i = 0; i < 400; i++) {
+    await sleep(25);
+    const h = ((await w.req('GET', '/v1/holds?status=pending', { cookie: u.cookie })).body.holds || []).find((x) => x.kind === 'shell' || x.kind === 'tool');
+    if (h) { const f = await approve(w, u, h.id); return { hold: h, body: f.body }; }
+  }
+  throw new Error('no hold appeared');
+}
+
+test('real server, two-person seal: one of two seals is still pending (the hook keeps waiting and says so), the command runs only after the second person seals', async () => {
+  const t = await setup({}, { LEASH_GUARD_WAIT: '20' });
+  const asha = await addMember(t.w, t.u, 'Asha');
+  await setQuorum2(t.w, t.u);
+  // the guard key above was made before the quorum went up: the hold still needs two seals
+  let done = false;
+  const run = runHook({ agent: 'claude-code', input: claude('terraform destroy -auto-approve'), env: t.env }).then((r) => { done = true; return r; });
+  const first = await sealNext(t.w, t.u);
+  assert.equal(first.body.approved, false, JSON.stringify(first.body));
+  await sleep(400);
+  assert.equal(done, false, 'one of two seals: the hook is still waiting');
+  assert.equal((await holdsOf(t, 'pending')).length, 1);
+  await approve(t.w, asha, first.hold.id);
+  const r = await run;
+  assert.deepEqual(r, { code: 0, stdout: '', stderr: '' });
+  assert.equal((await holdsOf(t, 'used')).length, 1);
+});
+
+test('real server, two-person seal: out of time with one of two seals, the agent is told it is half done', async () => {
+  const t = await setup({}, { LEASH_GUARD_WAIT: '2' });
+  await addMember(t.w, t.u, 'Asha');
+  await setQuorum2(t.w, t.u);
+  const run = runHook({ agent: 'claude-code', input: claude('git push --force origin main'), env: t.env });
+  await sealNext(t.w, t.u);
+  const m = reason(await run);
+  assert.match(m, /still waiting/);
+  assert.match(m, /1 of 2 approvals so far, a second person has to approve it too/);
 });
 
 test('real server: Freeze stops the guard: asking, and a wait in progress, end with the reason instead of timing out', async () => {
