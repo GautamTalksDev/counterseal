@@ -856,3 +856,21 @@ test('a failure inside the gateway never lets the call through: it is answered a
     assert.equal(r.sent('delete_project'), 0);
   } finally { r.close(); }
 });
+
+test('with a team that needs more than one passkey, the model is told how many approvals there are so far', async () => {
+  const ask = stubAsk({ get: () => ({ status: 200, body: { id: HOLD, status: 'pending', seals: 1, needs: 2 } }) });
+  const r = rig({ ask });
+  try {
+    await r.handshake();
+    assert.doesNotMatch(r.text(await r.call('delete_project', DEL)), /approvals so far/, 'when it is first asked nothing is known yet');
+    assert.match(r.text(await r.call('delete_project', DEL)), /^Held by Counterseal: delete_project needs approval \(.*\)\. Ask your human to approve it at .* \(1 of 2 approvals so far\), then call the same tool with the same arguments again\.$/);
+    for (const body of [{ seals: 1, needs: 1 }, { seals: 'x', needs: 2 }, { seals: -1, needs: 2 }, { seals: 1, needs: 1e9 }, {}]) {
+      const a = stubAsk({ get: () => ({ status: 200, body: { id: HOLD, status: 'pending', ...body } }) });
+      const q = rig({ ask: a });
+      await q.handshake();
+      await q.call('delete_project', DEL);
+      assert.doesNotMatch(q.text(await q.call('delete_project', DEL)), /approvals so far/, JSON.stringify(body));
+      q.close();
+    }
+  } finally { r.close(); }
+});
