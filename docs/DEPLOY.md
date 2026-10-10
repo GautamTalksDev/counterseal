@@ -5,14 +5,24 @@ Object (`ReceiptLog`, the public log) and static assets. It fits the Workers Fre
 
 ## Upgrading the live service (from the broker-only version)
 
-The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005_cli_signin.sql`,
-`0006_approvals.sql`, `0007_gates.sql`, `0008_brakes.sql`, `0009_team.sql` and `0010_provider_host.sql` only add tables, indexes and defaulted or nullable columns, so the code that runs today keeps
-working on the migrated database, and the new code keeps working with everything the old code wrote
-(`server/test/migration.test.js` runs the deployed code, migrates, then runs the new code). CLI sessions made before 0005
-keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as `kind: "proxy"` (a brokered API
-call); 0006 adds the guard keys table and the coding-agent approvals (branch `feat/approvals`, not yet deployed). 0010 adds one
-nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0008 (Brakes, branch `feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and `counters`; every existing token and account is not tripped, not frozen and has no caps. 0009 (the two-person seal, branch `feat/two-person`, not yet deployed) adds the tables `members`, `invites` and `hold_votes`, a `member_id` on passkeys, sessions, push devices, device codes, move links, tokens, guard keys, receipts keys and agent keys, the quorum columns on `accounts` (quorum 1, self-approval on) and `needs` and `requested_by` on `holds`; every existing account is one person, its owner, and one seal approves, as before (no row is rewritten: a NULL `member_id` means the account's founder).
-nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0007 (Deploy Gate, branch `feat/deploy-gate`, not yet deployed) adds the tables `gates`, `gate_polls` and `gate_runs`; it changes no existing row, and a hold made before it reads as it did (`kind: "proxy"`, or `shell` and `tool` for a coding agent's approval). Apply every migration before deploying the code (the held list joins `gates`). 0008 (Brakes, branch `feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and `counters`; every existing token and account is not tripped, not frozen and has no caps.
+The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005_cli_signin.sql`, `0006_approvals.sql`,
+`0007_gates.sql`, `0008_brakes.sql`, `0009_team.sql`, `0010_provider_host.sql` and `0011_breakglass.sql` only add tables, indexes
+and defaulted or nullable columns, so the code that runs today keeps working on the migrated database, and the new code keeps
+working with everything the old code wrote (`server/test/migration.test.js` runs the deployed code, migrates, then runs the new
+code). CLI sessions made before 0005 keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as
+`kind: "proxy"` (a brokered API call); 0006 adds the guard keys table and the coding-agent approvals (branch `feat/approvals`, not
+yet deployed). 0007 (Deploy Gate, branch `feat/deploy-gate`, not yet deployed) adds the tables `gates`, `gate_polls` and
+`gate_runs`; it changes no existing row, and a hold made before it reads as it did (`kind: "proxy"`, or `shell` and `tool` for a
+coding agent's approval). Apply every migration before deploying the code (the held list joins `gates`). 0008 (Brakes, branch
+`feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and
+`counters`; every existing token and account is not tripped, not frozen and has no caps. 0009 (the two-person seal, branch
+`feat/two-person`, not yet deployed) adds the tables `members`, `invites` and `hold_votes`, a `member_id` on passkeys, sessions,
+push devices, device codes, move links, tokens, guard keys, receipts keys and agent keys, the quorum columns on `accounts`
+(quorum 1, self-approval on) and `needs` and `requested_by` on `holds`; every existing account is one person, its owner, and one
+seal approves, as before (no row is rewritten: a NULL `member_id` means the account's founder). 0010 adds one nullable column, the
+store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0011 (break glass and alert
+channels, branch `feat/deploy-gate`, not yet deployed) adds the tables `windows` and `channels`; it changes no existing row, and
+with no window and no channel nothing behaves differently.
 
 ```bash
 cd server
@@ -22,7 +32,7 @@ npx -y wrangler@4 d1 time-travel info leash
 # 2. new secrets (names only; values never leave your machine)
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK        # the log's Ed25519 signing key; prints the public part to stderr: keep it
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx -y wrangler@4 secret put STATS_TOKEN   # optional: /v1/admin/stats
-# 3. the additive migrations (applies 0004 to 0010; 0001 to 0003 are already applied)
+# 3. the additive migrations (applies 0004 to 0011; 0001 to 0003 are already applied)
 npx -y wrangler@4 d1 migrations apply leash --remote
 # 4. the code (creates the ReceiptLog Durable Object through the "v1" migration in wrangler.jsonc)
 npx -y wrangler@4 deploy
@@ -74,7 +84,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" |
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))" | npx -y wrangler@4 secret put IP_SALT
 node dev/vapid-keygen.mjs | npx -y wrangler@4 secret put VAPID_PRIVATE_JWK   # phone alerts (Web Push); optional
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK          # the public log
-npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0010
+npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0011
 npx -y wrangler@4 deploy
 ```
 
@@ -128,6 +138,9 @@ after sign-ins.
 | Deploy gate: the same run asks again | 2 (the token's `jti`, a poll secret); 4 queries | none |
 | Deploy gate: a run the gate refuses | 0 (1 read) | none |
 | Deploy gate: waiting (`GET /v1/gate/status/<id>?wait=20`) | 0 (at most 12 D1 queries, all reads) | none |
+| Break glass opened (passkey verify, the window, audit, the team's alert) | about 6; 13 D1 queries, more with devices and channels to tell | 1 request, about 7 rows |
+| A call the map holds, let through by an open window | as an allowed sealed write: about 8; 12 D1 queries (one is the window's own read; a call the map does not hold, or any call while no window is open, costs nothing more) | 1 request, about 7 rows |
+| A held call with one alert channel | about 10 (the hold, the alert's limit, the channel's bookkeeping); 16 D1 queries; one subrequest to the service, after the answer | 1 request, about 7 rows |
 | Deploy gate: the poll that spends an approval, sealed | about 6 (about 8 with a key handed out); 9 queries (13) | 1 request, about 7 rows |
 | Brakes: a write on a token with `writesPerHour` | one more (the hour's count) | |
 | Brakes: ... with `repeatsPer5Min` too | two more (a row per distinct request in its 5 minutes, reused for repeats) | |
@@ -212,6 +225,15 @@ minutes per isolate (a subrequest, not CPU) and the imported key is kept:
 | `GET /v1/gate/status/<id>`, approved: spend once, bind, sealed | 0.73 ms (1.05) | 0.57 ms |
 | The same, with a 15 minute token handed out (phase 2) | 0.96 ms (2.89) | 0.65 ms |
 | `POST /v1/gate/cancel/<id>` | 0.47 ms (0.89) | |
+
+Break glass and alert channels (part 2b of the two-person seal), same method; the stand-in for the chat services answers at once, so this is our own CPU:
+
+| Path | Worker CPU | Durable Object CPU |
+|---|---|---|
+| Open a break-glass window (passkey verify, insert, team alert) | 1.6 ms (6.0) | |
+| A DELETE the map would hold, let through by an open window, sealed | 1.9 ms (3.6) | 1.0 ms |
+| Add an alert channel (passkey verify, seal the address, insert) | 1.7 ms (2.8) | |
+| A held DELETE with one alert channel (hold, push check, unseal, post stubbed) | 3.2 ms (6.8) | 1.8 ms |
 
 These are Node numbers, not a load test on Workers. Run one before raising the batch caps in `server/src/receipts.js`.
 

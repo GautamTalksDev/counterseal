@@ -136,7 +136,7 @@ A token without `limits` and `money` costs no extra database writes. See the [po
 ### Two-person seal (teams)
 
 The counterseal in the literal sense: a second, different person seals what the first one approved. In this repo on
-branch `feat/two-person`, not yet deployed (migration 0009).
+branch `feat/two-person`, not yet deployed (migration 0009; break glass and channels: migration 0011).
 
 - **People, not shared logins.** An owner invites people with a link that works once (2 hours by default, 24 at most);
   each person makes their own passkey and signs in as themselves. Roles: **owner** (the team, the quorum, the vault),
@@ -154,8 +154,15 @@ branch `feat/two-person`, not yet deployed (migration 0009).
   the tokens and keys they made, drops their seals and voids approvals they helped give that are not yet used, in one
   step. The last owner can never be removed. Only its maker or an owner can revoke someone's token or key.
 - **Public receipts** of an approval record how many seals were required and given, never who.
+- **Break glass.** For the night the second approver cannot be reached: an owner or approver opens a window of 5 to 60
+  minutes with a passkey. What Counterseal would hold, for the tokens and guard keys you pick, goes through; every call is on
+  the record (and its public receipt says `breakglass`), every member and channel is told at once, any member can close it,
+  and it cannot be extended (three a day). It never lifts a freeze, a tripped breaker or a money cap, and not a deploy gate.
+- **Slack, Discord and Google Chat** are told when something is held, part-sealed, or the team changes (who asked, the rule,
+  how many seals, a link; never the path, command, body, amount or a name). They cannot approve: only a passkey in the app does.
+  The webhook address is kept encrypted and never shown again.
 
-What it does not do: stop two people who agree to act together. See [threat model T1 to T11](docs/THREAT_MODEL.md) and the
+What it does not do: stop two people who agree to act together. See [threat model T1 to T13](docs/THREAT_MODEL.md) and the
 [team API](docs/PROTOCOL.md#team-the-two-person-seal).
 
 ## Quickstart
@@ -422,18 +429,15 @@ node dev/local.js 8790                          # http://localhost:8790 (passkey
 
 ## Deploy
 
-See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), seven additive migrations (0004 to 0010), `wrangler deploy`.
+See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), eight additive migrations (0004 to 0011), `wrangler deploy`.
 
 ## Status and roadmap
 
 Brokers GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify; phone and desktop alerts for held calls (Web Push,
 payload-free); public receipts; agent keys; money caps, a breaker and Freeze. In this repo, not yet deployed: the Approvals API and guard keys for a
-coding agent's commands, `leashcli guard` with its shell map and Claude Code plugin (CLI 0.2.1, not yet on npm), and the
-two-person seal (team members, invites, roles, quorum votes). Next: AWS (SigV4
-re-signing), PlanetScale; break-glass windows and Slack, Discord and Google Chat alerts for teams; SSO for teams; external
-witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
-coding agent's commands, and the Deploy Gate for GitHub Actions. Next: AWS (SigV4 re-signing), PlanetScale; two-person
-approval; SSO for teams; external witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
+coding agent's commands, `leashcli guard` with its shell map and Claude Code plugin (CLI 0.2.1, not yet on npm), the two-person seal (team members,
+invites, roles, quorum votes) with break-glass windows and Slack, Discord and Google Chat alerts, and the Deploy Gate for GitHub Actions. Next: AWS (SigV4
+re-signing), PlanetScale; SSO for teams; external witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
 
 Counterseal maps to the proxy-gateway model of the IETF draft
 [Credential Broker for Agents (CB4A)](https://www.ietf.org/archive/id/draft-hartman-credential-broker-4-agents-00.html)

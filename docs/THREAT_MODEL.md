@@ -421,6 +421,31 @@ volume, and calls its rules hold as irreversible still need every seal. Test: *F
 
 **T11. Budgets.** The proxy reads the quorum in the token's query (no extra query); a seal, a join, a removal and
 reading the team each stay well under 50 D1 queries. Test: *budgets*.
+
+**T12. Break glass is one person loosening protection.** It exists for the night the second approver cannot be reached, so it
+lets one approver's decision stand in for the seals. It is therefore made small and loud: an owner or approver only, in a web
+session with a fresh passkey whose challenge carries the minutes, the scope and the reason (so a stolen session cannot open
+one, and a request cannot be swapped under the ceremony); while one person cannot approve alone, not an approver whose seal does
+not count yet; 5 to 60 minutes, one at a time, 3 a day, never extended; the whole team's devices and every channel are told at
+once, with no rate limit; any member can close it; the calls it lets through are in the owner's log with the window's id and in
+the public receipt as `breakglass`. It never lifts a freeze, a tripped breaker, a rate limit or a money cap, is never read for a
+deploy gate, does not approve what was already waiting, does not cover the opener's own token when self-approval is off, and
+ends when its opener stops being an owner or approver. Residual, said plainly: for up to an hour a leaked token in the window's
+scope can do what the map would hold, with no second seal; and an approver who opens three windows a day is an insider the
+product reports, not one it stops. Tests: `test/breakglass.test.js`, `test/bg-app.test.js`.
+
+**T13. Alert channels.** A webhook address is a secret and the server posts to it, so: it is sealed with the vault key (bound
+to the account, the row and the kind, so a copied row does not open), never returned, never in the log (the log has the service
+and the host); adding one takes an owner's passkey for exactly that address (its hash is in the challenge). The server will post
+only to the three services' own hosts and the exact path shape of their webhooks (https, no credentials, port or fragment, no
+query except Google Chat's two, and the address must equal what a URL parser makes of it, so IP literals, punycode, a trailing
+dot, `%2e`, tabs, backslashes and `user@host` tricks are all refused), again before every send; no redirect is followed, a send
+waits 3 seconds, at most 3 channels (so at most 3 subrequests), and a channel that fails 10 times in a row stops until a test
+works (one test a minute). A channel can only be told, never asked: approving needs a passkey in the app. A message carries a
+label made of safe characters, the rule's id, the seals and the approve link; never the path, command, body, amount, a name or
+a window's reason, and Discord's mentions are switched off. Residual: the people in a channel learn that something was held
+and when; the services (Slack, Discord, Google) receive that text. Tests: `test/channels.test.js`.
+
 ### Deploy gates (GitHub Actions, migration 0007, not yet deployed)
 
 A job asks `POST /v1/gate/request` with the OIDC token GitHub signs for it; the owner approves in the app with a passkey; the

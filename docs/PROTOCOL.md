@@ -317,11 +317,68 @@ of the approval carries `meta.quorum` and `meta.votes` only.
 
 `GET /v1/alerts` adds `team: [{kind, at, ...}]` for the last 15 minutes: `member_joined` (name, role),
 `member_role_changed` (name, from, to), `member_removed` (name, role), `quorum_lowering` (from, to, effective_at) and
-`quorum_lowering_cancelled`. Every change to the team or the quorum wakes the devices at once, with no rate limit (each
+`quorum_lowering_cancelled`, `breakglass_opened` (minutes), `breakglass_closed` and `channel_added` (slack, discord or gchat). Every change to the team or the quorum wakes the devices at once, with no rate limit (each
 took a passkey, so none can be hidden behind another). A seal that does not complete the quorum wakes the other
 members' devices (at most once a minute per account, shared with hold alerts).
 
+### Break glass (migration 0011)
+
+A window lets what the irreversible map would hold go through, for at most 60 minutes. It is one person loosening protection
+while two seals may be required, so it is small and loud.
+
+- `POST /v1/team/breakglass/begin` then `/finish` (an owner or approver, web session, fresh passkey ceremony, never a command
+  line session). Body `{minutes, reason, tokenId?}`: `minutes` is a whole number from 5 to 60 (`400 bad_minutes`), `reason` is
+  3 to 200 characters after cleaning (`400 bad_reason`), `tokenId` is a live token's id or a guard key's id of this account, or
+  absent for every token and guard key (`404 not_found`). The challenge carries exactly these three, so the passkey approves
+  this window and no other. Refused with `423 account_frozen`, `403 seal_not_yet` (while one person cannot approve alone, an
+  approver whose seal does not count yet), `403 own_request` (self-approval off and the scope is the opener's own token or key),
+  `409 window_open` (one at a time; a window cannot be extended, open another when it ends) and `429 too_many_windows` (3 in 24
+  hours per account). The insert itself decides the last three again, so two requests at once open one. Returns
+  `{id, expires_at, scope}`.
+- `DELETE /v1/team/breakglass/<id>` (any member, any session with CSRF; closing only tightens): `{ok}`, or `404`.
+- `GET /v1/team` and `GET /v1/me` carry the open window: `windows: [{id, opened_by, opened_by_name, reason, opened_at,
+  expires_at, scope}]` (`scope` is `null` or `{token_id, label}`). `GET /v1/team` also has `breakglass: {minMinutes, maxMinutes,
+  perDay}`.
+- What it does. In `broker.proxy`, when the map would hold a call (and the rule is not a brake's: `brake.*`) and a window is open
+  for the token, the call is allowed with the rule's id plus `:breakglass`; the private log's `proxy` entry carries
+  `breakglass: <window id>` and the public receipt `meta.breakglass: true`, nothing else about the window. In
+  `approvals.create`, a hold for a guard key that a window covers is inserted already approved (use once within 10 minutes,
+  `status: "approved"`, `breakglass: true` in the answer); the later `run_approved` entry carries the window's id. The check costs
+  nothing for a call the map does not hold: whether a window is open is read in the token's or guard key's own query.
+- What it never does. It is not read for a deploy gate. It does not lift a freeze (423 comes first), a tripped breaker, a rate
+  limit or a money cap (`brake.*` rules), or what was already waiting before it opened. With self-approval off it does not
+  cover what the opener's own token or guard key asks. It stops applying when its opener is no longer an owner or approver, and
+  when it expires or is closed.
+- Opening one writes `breakglass_opened` (the opener, minutes, scope and reason, owner-visible only) and wakes every other member's
+  devices and every channel at once, with no rate limit (each took a passkey; 3 a day bounds them); closing writes
+  `breakglass_closed` and does the same.
+
+### Alert channels (migration 0011)
+
+Slack, Discord and Google Chat are told, never asked: a channel cannot approve anything.
+
+- `POST /v1/team/channels/begin` then `/finish` (an owner, web session, passkey). Body `{kind, url, label}`: `kind` is `slack`,
+  `discord` or `gchat`; `label` as for a token; `url` is the webhook address the service gave. The challenge carries the kind, the
+  label and the SHA-256 of the address (`409 channel_changed` if finish differs). 3 channels at most (`409 too_many_channels`).
+  Returns `{id, kind, name, label, host, created_at, last_ok_at, failures, disabled}`. The address is sealed with the vault key
+  (AES-GCM, bound to the account, the row and the kind) and never returned; `GET /v1/team` lists `channels` without it.
+- The address must be exactly a webhook of the service: https, no user name or port or fragment, the host `hooks.slack.com`
+  (path `/services/T.../B.../secret`), `discord.com` or `discordapp.com` (`/api/webhooks/<id>/<token>`) or `chat.googleapis.com`
+  (`/v1/spaces/<space>/messages?key=...&token=...`), no other query, and the address must be byte for byte what a URL parser
+  makes of it (`400 bad_url`). It is checked again before every send.
+- `POST /v1/team/channels/<id>/test` (an owner, web session; one a minute per account): sends a test and answers `{ok, status}`; a
+  working test also turns a stopped channel back on. `DELETE /v1/team/channels/<id>` (an owner): removes it.
+- A send is one POST of JSON (`{text}`; Discord `{content, allowed_mentions: {parse: []}}`), no redirect followed, 3 seconds. A
+  non-2xx answer, a redirect, a timeout or an error is a failure; ten in a row stop the channel until a test works.
+- What is sent: the token's label, the guard key's agent name or the gate's label (only letters, digits, space and `._:/()-`), the
+  rule's id, the seals so far and needed, and the approve link (`/app#hold=<id>`). When a held action is created (at most one
+  alert a minute per account, the same limit as the phone's), when a seal does not complete the quorum, when break glass opens or
+  closes, and when the team or the quorum changes (a fixed sentence with no name or role). Never the path, command, body, amount,
+  a person's name or the reason of a window.
+
 ### Extension points (break-glass windows and team alert channels)
+
+Built in 0011 (`src/windows.js`, `src/channels.js`); what follows is the contract they were written to.
 
 - New tables go in their own additive migration (the next free number), not in 0009, so a database that applied 0009
   stays consistent. Reference `members(id)` for `opened_by`; scope rows by `account_id`.
@@ -335,7 +392,7 @@ members' devices (at most once a minute per account, shared with hold alerts).
   before a hold is inserted.
 - Seals: who may seal is one SQL rule (`ELIGIBLE` in `team.js`), used by the seal, the approval and the hold card.
   A window that lets holds through without seals is one person loosening protection while two seals are required:
-  this branch builds no windows; when they come, audit each one and announce it to every member and channel.
+  src/windows.js is that window: audited, announced to every member and channel, at most 60 minutes, 3 a day.
 - Alerts: `notify(env, accountId, fetch, {exceptMember, extra})` wakes every member's devices but one (plus `extra`
   devices no longer in the account); team events for the
   phone come from audit actions listed in `Team.recentEvents`. A channel message can say "n of m seals" from

@@ -188,6 +188,19 @@ on both hosts, the D1 budgets and account deletion; and the migration test on li
 the seals already on waiting holds. Passkey ceremonies of Brakes (unfreeze, breaker reset) also require the signed-in
 person's own passkey.
 
+## Break glass and alert channels, 9 Oct 2026 (branch `feat/deploy-gate`, migration 0011, not deployed)
+
+Part 2b of the two-person seal (threat model T12 and T13). A window of at most 60 minutes, opened by an owner or approver with a
+passkey whose challenge carries exactly what was asked, lets what the map would hold go through for the tokens and guard keys it
+names; it is one at a time, three a day, never extended, announced to every member and channel at once, flagged in the log and the
+public receipt, closable by any member, and it never lifts a freeze, a breaker, a rate limit or a money cap, never applies to a
+deploy gate, and ends with its opener's role. Channels (Slack, Discord, Google Chat) are told, never asked: the webhook address is
+sealed with the vault key and bound to its row, the server posts only to the three services' exact webhook shapes (no redirect, 3
+seconds, 3 channels, stopped after 10 failures), and a message carries no path, command, body, amount, name or reason. Not covered,
+and said so: for up to an hour a leaked token in a window's scope can do what the map holds without a second seal; an approver who
+opens windows is an insider that the product reports but does not stop. Tests: `server/test/breakglass.test.js`,
+`channels.test.js`, `bg-app.test.js`.
+
 ## The coding-agent guard, 10 Oct 2026 (branch `feat/guard-cli`, not deployed; no server change)
 
 `leashcli guard` (CLI 0.2.1), the shell map (`sdk/shellmap.mjs`, version `2026-10-10.1`) and the Claude Code plugin. It runs
