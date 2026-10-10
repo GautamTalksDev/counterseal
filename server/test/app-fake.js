@@ -21,11 +21,12 @@ class El {
 
 /** run app.js: routes maps "METHOD /path" to a function (body, init) returning [status, json] */
 export async function page(routes, { hash = '' } = {}) {
-  const els = new Map(), created = [], calls = [], toasts = [];
+  const els = new Map(), created = [], calls = [], toasts = [], intervals = [], docListeners = {};
   const NAV = ['holds', 'vault', 'tokens', 'gates', 'team', 'agentkeys', 'receipts', 'audit', 'account'].map((v) => { const a = new El('a'); a.dataset.view = v; return a; });
   const VIEWS = NAV.map((a) => { const s = new El('section'); s.dataset.view = a.dataset.view; return s; });
   const byId = (id) => { if (!els.has(id)) els.set(id, new El(id === 'toast' ? 'div' : 'div', id)); return els.get(id); };
   const document = {
+    hidden: false, addEventListener: (type, fn) => { (docListeners[type] ||= []).push(fn); },
     getElementById: byId, createElement: (t) => { created.push(t); return new El(t); }, createTextNode: (t) => new Txt(t), activeElement: null, body: new El('body'),
     querySelectorAll: (sel) => (sel === '#snav a' ? NAV : sel === '.view' ? VIEWS : []),
   };
@@ -40,13 +41,13 @@ export async function page(routes, { hash = '' } = {}) {
   const ctx = vm.createContext({
     document, fetch, window: { addEventListener() {}, scrollTo() {}, trustedTypes: undefined }, location: { hash, origin: 'https://leash.test', assign() {}, replace() {}, reload() {} }, history: { replaceState() {} },
     navigator: { credentials: { get: async () => ({ id: 'cred', response: { authenticatorData: new ArrayBuffer(4), clientDataJSON: new ArrayBuffer(4), signature: new ArrayBuffer(4) } }) }, clipboard: { writeText: async (t) => { ctx.copied = t; } } },
-    confirm: () => true, setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {}, Intl, URL, Blob, btoa, atob, Uint8Array, ArrayBuffer, Promise, JSON, Object, Array, String, Number, Date, Math, Set, Map, console, Error, SyntaxError, encodeURIComponent,
+    confirm: () => true, setTimeout: () => 0, clearTimeout() {}, setInterval: (fn) => intervals.push(fn), clearInterval() {}, Intl, URL, Blob, btoa, atob, Uint8Array, ArrayBuffer, Promise, JSON, Object, Array, String, Number, Date, Math, Set, Map, console, Error, SyntaxError, encodeURIComponent,
   });
   const src = readFileSync(new URL('../../site/public/app/app.js', import.meta.url), 'utf8').replace(/^import .*$/m, 'const BRAND = { name: "Counterseal" };');
   vm.runInContext(src, ctx, { filename: 'app.js' });
   const settle = async () => { for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r)); };
   await settle();
   const toast = () => byId('toast').textContent;
-  return { byId, calls, created, NAV, VIEWS, settle, toast, ctx, go: async (view) => { NAV.find((a) => a.dataset.view === view).click(); await settle(); } };
+  return { byId, calls, created, NAV, VIEWS, settle, toast, ctx, intervals, document, docListeners, go: async (view) => { NAV.find((a) => a.dataset.view === view).click(); await settle(); } };
 }
 

@@ -140,10 +140,12 @@ export async function listGates(env, sess) {
 /** revoking only tightens, so any signed-in session of its maker or an owner may (anyone else who sees trouble freezes the
  *  account, src/brakes.js). The gate's open holds are closed, and the tokens it handed out stop. */
 export async function revoke(env, sess, id) {
+  // the holds and tokens go only once the gate is revoked (by its maker or an owner), as for a guard key (approvals.js)
+  const gone = 'EXISTS (SELECT 1 FROM gates WHERE id = ?2 AND account_id = ?1 AND revoked = 1)';
   const [g, h, tk] = await env.DB.batch([
     env.DB.prepare(`UPDATE gates SET revoked = 1 WHERE id = ? AND account_id = ? AND revoked = 0 ${Team.MAKER_OR_OWNER}`).bind(id, sess.accountId, ...Team.makerOrOwner(sess)),
-    env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND token_id = ? AND status IN ('pending','approved')").bind(sess.accountId, tokenIdOf(id)),
-    env.DB.prepare('UPDATE tokens SET revoked = 1 WHERE account_id = ? AND revoked = 0 AND id IN (SELECT token_id FROM gate_runs WHERE gate_id = ? AND account_id = ?)').bind(sess.accountId, id, sess.accountId),
+    env.DB.prepare(`UPDATE holds SET status = 'expired' WHERE account_id = ?1 AND token_id = ?3 AND status IN ('pending','approved') AND ${gone}`).bind(sess.accountId, id, tokenIdOf(id)),
+    env.DB.prepare(`UPDATE tokens SET revoked = 1 WHERE account_id = ?1 AND revoked = 0 AND id IN (SELECT token_id FROM gate_runs WHERE gate_id = ?2 AND account_id = ?1) AND ${gone}`).bind(sess.accountId, id),
   ]);
   if (!g.meta.changes) throw await Team.notRevoked(env, sess, 'gates', id);
   await audit(env, sess.accountId, sess.kind, 'gate_revoked', { id, closed: h.meta.changes, tokens: tk.meta.changes });

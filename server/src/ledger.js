@@ -14,7 +14,8 @@
 import { HttpError, json, API_HEADERS, b64u, rand, randomId, sha256hex, now, str } from './util.js';
 import { validate, canonical, checkSignature, checkSignerProof, signerProofText, signerKeyBytes, importSigner, LIMITS, SIGNED_KEEP_MS } from './receipts.js';
 import { logKey, b64std } from './note.js';
-import { publicHost } from './providers.js';
+import { publicHost, PROVIDERS } from './providers.js';
+import { GUARD_RULES } from './guardrules.js';
 import * as A from './auth.js';
 import * as Team from './team.js';
 import { audit } from './audit.js';
@@ -42,6 +43,14 @@ export const dayCapFor = (env) => (env.UNLIMITED ? Number.MAX_SAFE_INTEGER : Num
 /** total appends per UTC day across all accounts (abuse and cost guard). Sized for the Workers Free plan, where D1 and
  *  Durable Object SQLite each allow 100,000 rows written a day. See docs/DEPLOY.md. */
 export const globalCap = (env) => Number(env.GLOBAL_DAILY_CAP) || 10_000;
+// The broker's own decisions come first. Receipts an agent reports (POST /v1/receipts) may use at most REPORTED_DAILY_CAP
+// of the day's capacity across all accounts (default 5,000, never more than the cap), and an account's reported receipts
+// at most its own quotas; its broker decisions may use twice those. So junk reported receipts (an agent's lsr_ key, or a
+// few new accounts) can neither fill the public log for everyone nor quietly keep an account's own decisions out of it,
+// which would be "receipts off" without the passkey ceremony that switch needs.
+export const reportedCap = (env) => Math.min(globalCap(env), Number(env.REPORTED_DAILY_CAP) || 5_000);
+const BROKER_SHARE = 2;
+const times = (n, k) => Math.min(Number.MAX_SAFE_INTEGER, n * k);
 
 // Per isolate: requests that are certain to be refused (the day's capacity or an account's quota is used up) are
 // refused from memory, before any D1 write. Set only when D1 itself said the counter is full.
@@ -93,16 +102,6 @@ export async function apiKey(env, request) {
   return k;
 }
 
-/** atomically reserve n units in a counter row, only if the total stays within max; returns false if it would not.
- *  One statement (D1 counts queries per invocation), and a refused reservation writes no row. */
-async function reserve(db, table, keyCols, keyVals, n, max) {
-  const cols = keyCols.join(', ');
-  const r = await db.prepare(`INSERT INTO ${table} (${cols}, receipts) SELECT ${keyCols.map(() => '?').join(', ')}, ? WHERE ? <= ?
-    ON CONFLICT (${cols}) DO UPDATE SET receipts = receipts + excluded.receipts WHERE receipts + excluded.receipts <= ? RETURNING receipts`).bind(...keyVals, n, n, max, max).first();
-  return !!r;
-}
-const release = (db, table, keyCols, keyVals, n) =>
-  db.prepare(`UPDATE ${table} SET receipts = MAX(0, receipts - ?) WHERE ${keyCols.map((k) => `${k} = ?`).join(' AND ')}`).bind(n, ...keyVals).run();
 
 /** the account's month and day counters in one row and one statement: both must stay within their caps */
 async function reserveUsage(db, acct, t, n, quota, dayCap) {
@@ -130,10 +129,12 @@ const logChanged = (e) => /log name or signing key differs/.test(String(e && e.m
 
 /** reserve the account's counters and the global day, append, and undo everything if any step fails. Throws HttpError
  *  402 (quota), 503 (capacity) or the append's own error. */
-async function reserveAndAppend(c, { t, acct, items, signerClaim }) {
+async function reserveAndAppend(c, { t, acct, items, signerClaim, broker = false }) {
   const db = c.env.DB, n = items.length;
-  const quota = quotaFor(c.env), dayCap = dayCapFor(c.env);
-  const capKey = `cap:${c.key.vkey}:${day(t)}`, quotaKey = `quota:${acct}:${month(t)}`, dayKey = `dayq:${acct}:${day(t)}`;
+  const quota = times(quotaFor(c.env), broker ? BROKER_SHARE : 1), dayCap = times(dayCapFor(c.env), broker ? BROKER_SHARE : 1);
+  const kind = broker ? 'b' : 'r';
+  const capKey = `cap:${c.key.vkey}:${day(t)}`, quotaKey = `quota:${kind}:${acct}:${month(t)}`, dayKey = `dayq:${kind}:${acct}:${day(t)}`, repKey = `rcap:${c.key.vkey}:${day(t)}`;
+  if (!broker && isFull(repKey, t)) throw new HttpError(503, 'log_at_capacity', 'Reported receipts reached their share of the public log for today. Nothing was recorded. Try again after 00:00 UTC.');
   if (isFull(capKey, t)) throw new HttpError(503, 'log_at_capacity', 'The public log reached its daily capacity. Nothing was recorded. Try again after 00:00 UTC.');
   if (isFull(quotaKey, t)) throw new HttpError(402, 'quota', `Monthly quota is ${quota} receipts and all are used, so nothing was recorded.`, { quota, used: quota, remaining: 0 });
   if (isFull(dayKey, t)) throw new HttpError(402, 'daily_quota', `An account can record up to ${dayCap} receipts a day and today's are used, so nothing was recorded. Try again after 00:00 UTC.`, { dayCap, remaining: 0 });
@@ -150,13 +151,19 @@ async function reserveAndAppend(c, { t, acct, items, signerClaim }) {
       throw new HttpError(402, 'daily_quota', `An account can record up to ${dayCap} receipts a day and ${usedToday} are used today. This batch of ${n} would exceed it, so nothing was recorded.`, { dayCap, usedToday, remaining: Math.max(0, dayCap - usedToday) });
     }
     held.push(() => releaseUsage(db, acct, t, n));
-    const cap = globalCap(c.env), G = ['day'], gk = [day(t)];
-    if (!(await reserve(db, 'global_usage', G, gk, n, cap))) {
-      const used = (await db.prepare('SELECT receipts FROM global_usage WHERE day = ?').bind(...gk).first())?.receipts || 0;
-      if (used >= cap) markFull(capKey, nextDay(t));
-      throw new HttpError(503, 'log_at_capacity', 'The public log reached its daily capacity. Nothing was recorded. Try again after 00:00 UTC.');
+    // the day's total, and for reported receipts their own share of it, in one row and one statement (migration 0013)
+    const cap = globalCap(c.env), rcap = broker ? cap : reportedCap(c.env), r0 = broker ? 0 : n, d = day(t);
+    const g = await db.prepare(`INSERT INTO global_usage (day, receipts, reported) SELECT ?1, ?2, ?3 WHERE ?2 <= ?4 AND ?3 <= ?5
+      ON CONFLICT (day) DO UPDATE SET receipts = receipts + ?2, reported = reported + ?3 WHERE receipts + ?2 <= ?4 AND reported + ?3 <= ?5 RETURNING receipts`).bind(d, n, r0, cap, rcap).first();
+    if (!g) {
+      const u = await db.prepare('SELECT receipts, reported FROM global_usage WHERE day = ?').bind(d).first();
+      if ((u?.receipts || 0) >= cap) markFull(capKey, nextDay(t));
+      else if (!broker && (u?.reported || 0) >= rcap) markFull(repKey, nextDay(t));
+      throw new HttpError(503, 'log_at_capacity', !broker && (u?.receipts || 0) + n <= cap
+        ? 'Reported receipts reached their share of the public log for today. Nothing was recorded. Try again after 00:00 UTC.'
+        : 'The public log reached its daily capacity. Nothing was recorded. Try again after 00:00 UTC.');
     }
-    held.push(() => release(db, 'global_usage', G, gk, n));
+    held.push(() => db.prepare('UPDATE global_usage SET receipts = MAX(0, receipts - ?1), reported = MAX(0, reported - ?2) WHERE day = ?3').bind(n, r0, d).run());
     const res = await c.log.append(items, t).catch((e) => { throw logChanged(e) ? new HttpError(503, 'log_key_changed', 'The log is misconfigured. Nothing was recorded.') : e; });
     heads.set(c.key.vkey, { at: now(), head: { size: res.size, root: res.root, note: res.note, at: t } });
     return res;
@@ -211,6 +218,7 @@ export const DECISION = { proxy: 'allowed', hold: 'held', deny: 'denied', approv
 const RULE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const MAPV = /^\d{4}-\d{2}-\d{2}\.\d{1,3}$/;
 const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
+const API_RULES = new Set(Object.values(PROVIDERS).flatMap((p) => (p.irreversible || []).map((r) => r.id)));
 
 /** the public receipt for one broker decision. Only fixed vocabulary goes in: method and provider host (for a
  *  coding-agent approval: RUN or CALL and the agent's name from a fixed list), decision, rule id, map version (the
@@ -220,7 +228,8 @@ export function brokerReceipt({ action, detail, auditHash, at, mapVersion }) {
   // a per-store host (Shopify's <store>.myshopify.com) is a business name: only the shared suffix is ever public
   const host = /^[a-z0-9.-]{1,100}$/.test(detail.host || '') ? publicHost(detail.host) : null;
   const meta = { map: typeof detail.map === 'string' && MAPV.test(detail.map) ? detail.map : mapVersion };
-  if (detail.rule && RULE.test(detail.rule)) meta.rule = detail.rule;
+  // a coding-agent or MCP decision's rule comes from the agent's machine: only a rule id Counterseal ships is published
+  if (detail.rule && RULE.test(detail.rule) && (!['shell', 'tool'].includes(detail.kind) || GUARD_RULES.has(detail.rule) || API_RULES.has(detail.rule))) meta.rule = detail.rule;
   if (detail.agent_key) meta.agent_key = true;
   if (detail.passkey) meta.passkey = true;
   // two-person seal: how many seals were required and how many there were. Counts only: never who, which passkey or when
@@ -252,7 +261,7 @@ export async function sealDecision(env, accountId, receipt) {
   const entry = canonical({ v: 2, source: 'broker', submitter: await submitterCommitment(accountId, 'broker', salt), received_at: t, receipt });
   const items = [{ tenant: accountId, entry, opening: JSON.stringify({ key: 'broker', salt }) }];
   let res;
-  try { res = await reserveAndAppend(c, { t, acct: accountId, items }); }
+  try { res = await reserveAndAppend(c, { t, acct: accountId, items, broker: true }); }
   catch (e) {
     if (!(e instanceof HttpError)) console.error(JSON.stringify({ event: 'seal_failed', message: String(e?.message || e).slice(0, 200) }));
     return skip(e instanceof HttpError ? e.code : 'append_failed');

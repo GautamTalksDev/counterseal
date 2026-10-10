@@ -4,7 +4,7 @@ import { mapOf } from './approvals.js';
 import { cardOf, publicRepoOf } from './gatefacts.js';
 import { seal, open } from './vault.js';
 import { summarize, PROVIDERS, MAP_VERSION, storeHost, LIMITS } from './providers.js';
-import { normalisePolicy, decide } from './policy.js';
+import { normalisePolicy, decide, afterMap } from './policy.js';
 import { audit } from './audit.js';
 import { newChallenge, takeChallenge, checkAssertion, rp, hosts, appOrigin, sessionId } from './auth.js';
 import { limit, allow } from './ratelimit.js';
@@ -359,8 +359,10 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   // have had their say goes through, sealed in the log with the window's id. Never what a brake holds (a tripped breaker, a rate
   // limit, a money cap), and with self-approval off never the opener's own token. The brakes then look at the call again as an
   // allowed write, so it still counts against the breaker's limits.
+  // Only a hold of the map: never the token's own hold rules or default (rules "policy.*"), and, as for a money cap, only
+  // when the rest of the token's own policy (its hold rules, allow list and default) would allow the call.
   let breakglass = null;
-  if (tok.window_open && d.decision === 'hold' && !d.rule.startsWith('brake.')) {
+  if (tok.window_open && d.decision === 'hold' && !d.rule.startsWith('brake.') && !d.rule.startsWith('policy.') && afterMap(policy, provider, method, path).decision === 'allow') {
     const w = await Windows.matching(env, tok.account_id, tok.id, Team.memberOf(tok), team.selfApprove, now());
     if (w) {
       breakglass = w.id;

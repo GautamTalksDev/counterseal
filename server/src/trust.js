@@ -228,7 +228,7 @@ export async function exportFinish(env, sess, body) {
 const safeJson = (s) => { if (s === null || s === undefined) return null; try { return JSON.parse(s); } catch { return null; } };
 
 // ---------------------------------------------------------------- evidence pack (audit chain + log checkpoint)
-export const EVIDENCE_PAGE = 250, EVIDENCE_RPM = 120;
+export const EVIDENCE_PAGE = 250, EVIDENCE_RPM = 120, EVIDENCE_SCAN = 1000;
 /** GET /v1/export/evidence?from=&to=&after=: a page of audit entries as stored, oldest first, so the browser can
  *  recompute every hash and link; the first page also carries the log's latest signed checkpoint and verifier key. */
 export async function evidence(c) {
@@ -238,11 +238,20 @@ export async function evidence(c) {
   const to = q.get('to') === null ? Number.MAX_SAFE_INTEGER : int(q.get('to'), 'to');
   const after = q.get('after') === null ? 0 : int(q.get('after'), 'after');
   if (to < from) throw new HttpError(400, 'bad_range', 'to is before from.');
-  const rows = (await env.DB.prepare('SELECT seq, at, actor, action, detail, prev_hash, hash, receipt FROM audit WHERE account_id = ? AND seq > ? AND at >= ? AND at <= ? ORDER BY seq LIMIT ?')
-    .bind(s.accountId, after, from, to, EVIDENCE_PAGE + 1).all()).results;
-  const done = rows.length <= EVIDENCE_PAGE;
-  const entries = rows.slice(0, EVIDENCE_PAGE);
-  const out = { account_id: s.accountId, entries, done, next_after: done ? null : entries[entries.length - 1].seq };
+  // A page looks at most EVIDENCE_SCAN entries (the index is by account and seq, not by time): a range that matches nothing
+  // must not make one request read the account's whole log (Workers Free: 5 million rows read a day for every tenant).
+  // When the look ends before a full page is found, the page is short and next_after says where to go on.
+  const rows = (await env.DB.prepare(`SELECT seq, at, actor, action, detail, prev_hash, hash, receipt FROM (SELECT seq, at, actor, action, detail, prev_hash, hash, receipt FROM audit
+      WHERE account_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?5) WHERE at >= ?3 AND at <= ?4 ORDER BY seq LIMIT ?6`)
+    .bind(s.accountId, after, from, to, EVIDENCE_SCAN, EVIDENCE_PAGE + 1).all()).results;
+  let done = rows.length <= EVIDENCE_PAGE, entries = rows.slice(0, EVIDENCE_PAGE), next = done ? null : entries[entries.length - 1].seq;
+  if (done) {
+    // fewer than a page matched: was the look cut short? (it then looked at a full EVIDENCE_SCAN entries; go on after the
+    // last one, unless that one is already past the range: times only grow along the chain, give or take a clock step)
+    const last = await env.DB.prepare('SELECT seq, at FROM audit WHERE account_id = ? AND seq > ? ORDER BY seq LIMIT 1 OFFSET ?').bind(s.accountId, after, EVIDENCE_SCAN - 1).first();
+    if (last && last.at <= to) { done = false; next = last.seq; }
+  }
+  const out = { account_id: s.accountId, entries, done, next_after: next };
   if (!after) {
     // the first page: whether the range starts at the account's first entry (then the chain must start at zero), and
     // the public log's head, so receipts in the range can be checked against a signed checkpoint

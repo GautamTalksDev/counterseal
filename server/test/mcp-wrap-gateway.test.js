@@ -252,7 +252,7 @@ test('forms of tools/call: no id, an odd method spelling, bad parameters, ids of
     assert.equal((await r.sayRaw(call('{"name":"delete_project"}', '"7"')))[0].id, '7');
     // arguments left out are an empty object, and that is what the approval is about
     const created = ask.calls.filter((c) => c.kind === 'create').pop().a[0];
-    assert.equal(created.detail, '{"arguments":{},"tool":"delete_project"}');
+    assert.equal(created.detail, '{"arguments":{},"tool":"mcp__srv__delete_project"}', 'the approval names the server too');
     // ids the wrapper keeps for itself
     const res = await r.sayRaw('{"jsonrpc":"2.0","id":"__cs_1","method":"ping"}');
     assert.equal(res[0].error.code, -32600);
@@ -291,7 +291,7 @@ test('a held call asks once, says so to the model with the link, stays held whil
     // what was asked for
     const body = ask.calls[0].a[0];
     assert.deepEqual(Object.keys(body).sort(), ['agent', 'context', 'detail', 'kind', 'map', 'rule', 'summary', 'why']);
-    assert.deepEqual({ kind: body.kind, agent: body.agent, rule: body.rule, summary: body.summary, detail: body.detail, map: body.map }, { kind: 'tool', agent: 'mcp', rule: 'mcp.name', summary: 'srv: delete_project', detail: '{"arguments":{"id":"p1"},"tool":"delete_project"}', map: '2026-10-10.1' });
+    assert.deepEqual({ kind: body.kind, agent: body.agent, rule: body.rule, summary: body.summary, detail: body.detail, map: body.map }, { kind: 'tool', agent: 'mcp', rule: 'mcp.name', summary: 'srv: delete_project', detail: '{"arguments":{"id":"p1"},"tool":"mcp__srv__delete_project"}', map: '2026-10-10.1' });
     assert.deepEqual(body.context, { session: 'srv', cwd: 'project-x' });
     assert.ok(body.why.length > 20 && body.why.length <= 300);
     // asking again while it waits does not ask again

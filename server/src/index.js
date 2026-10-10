@@ -252,7 +252,7 @@ const ROUTES = [
   ['GET', new RegExp(`^/v1/gate/status/${ID}$`), 'poll', (c) => Gt.status(c, c.m[1])],
   ['POST', new RegExp(`^/v1/gate/cancel/${ID}$`), 'poll', (c) => Gt.cancel(c, c.m[1])],
   ['GET', /^\/v1\/audit$/, 'session', async (c) => { const v = c.url.searchParams.get('before'); return { entries: await auditList(c.env, c.s.accountId, v === null ? 0 : int(v, 'before')) }; }],
-  ['GET', /^\/v1\/audit\/verify$/, 'session', (c) => verifyChain(c.env, c.s.accountId)],
+  ['GET', /^\/v1\/audit\/verify$/, 'session', (c) => { const v = c.url.searchParams.get('after'); return verifyChain(c.env, c.s.accountId, v === null ? 0 : int(v, 'after')); }],
   // agent keys (Prove who). Registering needs proof of possession; revoking breaks every token bound to the key, so
   // like deleting a vaulted key it needs a web session.
   ['GET', /^\/v1\/agent-keys$/, 'session', (c) => K.list(c.env, c.s)],

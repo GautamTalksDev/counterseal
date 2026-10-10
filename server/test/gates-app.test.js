@@ -35,6 +35,7 @@ async function page(routes, { hash = '' } = {}) {
   const VIEWS = NAV.map((a) => { const s = new El('section'); s.dataset.view = a.dataset.view; return s; });
   const byId = (id) => { if (!els.has(id)) els.set(id, new El(id === 'toast' ? 'div' : 'div', id)); return els.get(id); };
   const document = {
+    hidden: false, addEventListener() {},
     getElementById: byId, createElement: (t) => { created.push(t); return new El(t); }, createTextNode: (t) => new Txt(t), activeElement: null, body: new El('body'),
     querySelectorAll: (sel) => (sel === '#snav a' ? NAV : sel === '.view' ? VIEWS : []),
   };

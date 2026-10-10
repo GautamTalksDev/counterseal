@@ -95,7 +95,12 @@ export async function announce(env, accountId, text) {
 /** "Counterseal: <who> needs approval for <rule> (needs 2 seals). Approve with your passkey: <link>" */
 export function holdText({ who, rule, needs = 1, seals = 0, url }) {
   const rest = needs > 1 ? ` (${seals} of ${needs} seals so far)` : '';
-  return `Counterseal: ${safeLabel(who) || 'An agent'} needs approval for ${String(rule).replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 80) || 'an action'}${rest}. Approve with your passkey: ${url}`;
+  // a label is typed by whoever made the token (a command line session or an agent may): one that could read as a web
+  // address ("https://counterseal-login.example") is put in code formatting, which Slack, Discord and Google Chat never
+  // turn into a link next to the real approve link
+  const label = safeLabel(who);
+  const shown = /[.:/]/.test(label) ? '`' + label + '`' : label;
+  return `Counterseal: ${shown || 'An agent'} needs approval for ${String(rule).replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 80) || 'an action'}${rest}. Approve with your passkey: ${url}`;
 }
 export const sealText = ({ seals, needs, url }) => `Counterseal: a held action has ${seals} of ${needs} seals and needs another approver. Approve with your passkey: ${url}`;
 

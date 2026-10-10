@@ -48,14 +48,25 @@ export async function list(env, accountId, before, limit = 100) {
   return rows.results.map((r) => ({ ...r, detail: JSON.parse(r.detail) }));
 }
 
-export async function verifyChain(env, accountId) {
-  const rows = (await env.DB.prepare('SELECT * FROM audit WHERE account_id = ? ORDER BY seq').bind(accountId).all()).results;
+/** GET /v1/audit/verify?after=<seq>: the chain checked a page at a time (VERIFY_PAGE entries a request), from the start, or
+ *  from the entry after `after` (linked to that entry's stored hash). A whole log in one request would read every row of the
+ *  account and hash each one: past a few thousand entries that is over the Workers Free CPU limit, and repeated it would
+ *  spend the day's D1 read budget for every tenant. `done: false` and `next_after` say where the next page starts. */
+export const VERIFY_PAGE = 100;
+export async function verifyChain(env, accountId, after = 0) {
   let prev = '0'.repeat(64);
-  for (const r of rows) {
+  if (after) {
+    const p = await env.DB.prepare('SELECT hash FROM audit WHERE account_id = ? AND seq = ?').bind(accountId, after).first();
+    if (!p) return { ok: false, brokenAt: after, error: 'after_not_found' };
+    prev = p.hash;
+  }
+  const rows = (await env.DB.prepare('SELECT seq, account_id, at, actor, action, detail, prev_hash, hash FROM audit WHERE account_id = ? AND seq > ? ORDER BY seq LIMIT ?').bind(accountId, after, VERIFY_PAGE + 1).all()).results;
+  const done = rows.length <= VERIFY_PAGE, page = rows.slice(0, VERIFY_PAGE);
+  for (const r of page) {
     if (r.prev_hash !== prev) return { ok: false, brokenAt: r.seq };
     const h = await sha256hex(`${r.prev_hash}|${r.account_id}|${r.at}|${r.actor}|${r.action}|${r.detail}`);
     if (h !== r.hash) return { ok: false, brokenAt: r.seq };
     prev = r.hash;
   }
-  return { ok: true, entries: rows.length, head: prev };
+  return { ok: true, entries: page.length, head: prev, done, next_after: done ? null : page[page.length - 1].seq };
 }

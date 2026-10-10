@@ -60,11 +60,14 @@ export async function freeze(env, sess) {
   // approvals nobody has used yet are void: nothing a human said yes to earlier fires after the freeze ends. On a team
   // (src/team.js) that includes the seals already on waiting holds: they are dropped, and sealing starts again after
   // the unfreeze.
-  const [v, s] = await env.DB.batch([
+  // An open break-glass window (src/windows.js) is closed too: it was one person's yes in advance, and an unfreeze must
+  // not bring it back (an approver who unfreezes opens a new one, with a passkey and the whole team told, if still needed).
+  const [v, s, wn] = await env.DB.batch([
     env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND status = 'approved'").bind(sess.accountId),
     env.DB.prepare('DELETE FROM hold_votes WHERE account_id = ?1 AND hold_id IN (SELECT id FROM holds WHERE account_id = ?1 AND status = \'pending\')').bind(sess.accountId),
+    env.DB.prepare('UPDATE windows SET closed_at = ?2, closed_by = ?3 WHERE account_id = ?1 AND closed_at IS NULL AND expires_at > ?2').bind(sess.accountId, t, sess.memberId || sess.accountId),
   ]);
-  await audit(env, sess.accountId, sess.kind, 'freeze', { by: sess.kind, voided_approvals: v.meta.changes, ...(s.meta.changes ? { dropped_seals: s.meta.changes } : {}), ...(sess.memberId && sess.memberId !== sess.accountId ? { member: sess.memberId } : {}) });
+  await audit(env, sess.accountId, sess.kind, 'freeze', { by: sess.kind, voided_approvals: v.meta.changes, ...(s.meta.changes ? { dropped_seals: s.meta.changes } : {}), ...(wn.meta.changes ? { closed_windows: wn.meta.changes } : {}), ...(sess.memberId && sess.memberId !== sess.accountId ? { member: sess.memberId } : {}) });
   // every device is woken (the push has no content; the alert then says the account is frozen). Freezing again takes a
   // passkey in between, so this is at most one alert per human decision; the minute's limit is a seatbelt.
   const p = (async () => { if (await allow(env.DB, 'pushfreeze:' + sess.accountId, 1, 60_000, now())) await notify(env, sess.accountId, env.__pushFetch || fetch); })().catch(() => {});

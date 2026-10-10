@@ -154,15 +154,15 @@ test('Existing accounts keep receipts off; turning on is a web action, turning o
   assert.deepEqual(auditRows(w, u.id).map((r) => r.action).filter((a) => a.startsWith('receipts_')), ['receipts_on', 'receipts_off']);
 });
 
-test('Quota bypass: broker receipts use the same quotas; when any is used up the decision still happens and is counted as skipped', async () => {
+test('Quota bypass: broker receipts count against the same quotas (with twice the room, so reported receipts cannot use it up); when any is used up the decision still happens and is counted as skipped', async () => {
   const w = new World();
   w.env.FREE_LIMIT = '2';
   const u = await account(w);
   const { token: t } = await token(w, u);
-  for (const p of ['/a', '/b', '/c']) assert.equal((await call(w, t, 'DELETE', '/repos/acme' + p)).status, 428, 'the broker never waits for the log');
-  assert.equal((await publicEntries(w)).length, 2);
+  for (const p of ['/a', '/b', '/c', '/d', '/e']) assert.equal((await call(w, t, 'DELETE', '/repos/acme' + p)).status, 428, 'the broker never waits for the log');
+  assert.equal((await publicEntries(w)).length, 4, 'twice the monthly quota for the broker\'s own decisions');
   let me = (await w.req('GET', '/v1/me', { cookie: u.cookie })).body.receipts;
-  assert.deepEqual([me.usage, me.skipped], [2, 1]);
+  assert.deepEqual([me.usage, me.skipped], [4, 1]);
   // reported receipts cannot use what the broker could not
   const key = (await w.req('POST', '/v1/keys', { cookie: u.cookie, body: {} })).body.key;
   assert.equal((await w.req('POST', '/v1/receipts', { bearer: key, ...anon, body: { receipt: { agent: 'a', action: 'b' } } })).status, 402);
@@ -179,8 +179,8 @@ test('Quota bypass: broker receipts use the same quotas; when any is used up the
   d.env.ACCOUNT_DAILY_CAP = '1';
   const b = await account(d);
   const tb = (await token(d, b)).token;
-  await call(d, tb, 'DELETE', '/repos/y/1'); await call(d, tb, 'DELETE', '/repos/y/2');
-  assert.equal((await publicEntries(d)).length, 1);
+  await call(d, tb, 'DELETE', '/repos/y/1'); await call(d, tb, 'DELETE', '/repos/y/2'); await call(d, tb, 'DELETE', '/repos/y/3');
+  assert.equal((await publicEntries(d)).length, 2, 'twice the daily cap for the broker');
   const kb = (await d.req('POST', '/v1/keys', { cookie: b.cookie, body: {} })).body.key;
   const r = await d.req('POST', '/v1/receipts', { bearer: kb, ...anon, body: { receipt: { agent: 'a', action: 'b' } } });
   assert.equal(r.status, 402); assert.equal(r.body.error, 'daily_quota');

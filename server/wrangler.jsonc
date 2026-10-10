@@ -21,10 +21,11 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ReceiptLog"] }],
   // LOG_ORIGIN is signed into every checkpoint and can never change once the log has an entry (src/brand.js).
   // FREE_LIMIT: receipts per account per month. ACCOUNT_DAILY_CAP: per account per UTC day. GLOBAL_DAILY_CAP: appends
-  // per UTC day across all accounts, sized for the Workers Free row budgets (docs/DEPLOY.md). REG_PER_IP_DAY: sign-ups.
+  // per UTC day across all accounts, sized for the Workers Free row budgets (docs/DEPLOY.md); REPORTED_DAILY_CAP: of those, the most
+  // that agents may report through POST /v1/receipts (the broker's own decisions keep the rest). REG_PER_IP_DAY: sign-ups.
   // ORIGIN / RP_ID: the product's host (new passkeys). LEGACY_ORIGIN / LEGACY_RP_ID: the old host (its existing passkeys).
   // WebAuthn ceremonies and CSRF checks accept exactly these two origins, each with its own RP ID.
-  "vars": { "RP_ID": "counterseal.gautamkhosla.com", "ORIGIN": "https://counterseal.gautamkhosla.com", "LEGACY_RP_ID": "leash.gautamkhosla.com", "LEGACY_ORIGIN": "https://leash.gautamkhosla.com", "LOG_ORIGIN": "counterseal.gautamkhosla.com/log", "FREE_LIMIT": "10000", "ACCOUNT_DAILY_CAP": "2000", "GLOBAL_DAILY_CAP": "10000", "REG_PER_IP_DAY": "5" },
+  "vars": { "RP_ID": "counterseal.gautamkhosla.com", "ORIGIN": "https://counterseal.gautamkhosla.com", "LEGACY_RP_ID": "leash.gautamkhosla.com", "LEGACY_ORIGIN": "https://leash.gautamkhosla.com", "LOG_ORIGIN": "counterseal.gautamkhosla.com/log", "FREE_LIMIT": "10000", "ACCOUNT_DAILY_CAP": "2000", "GLOBAL_DAILY_CAP": "10000", "REPORTED_DAILY_CAP": "5000", "REG_PER_IP_DAY": "5" },
   // Secrets (wrangler secret put): LEASH_KEK (32 random bytes, base64url), IP_SALT, VAPID_PRIVATE_JWK (phone alerts:
   // node dev/vapid-keygen.mjs), LOG_KEY_JWK (the log's Ed25519 signing key: node dev/log-keygen.mjs).
   // Optional, replaces the in-memory read limiter: "ratelimits": [{ "name": "READ_LIMITER", "namespace_id": "1001", "simple": { "limit": 600, "period": 60 } }],

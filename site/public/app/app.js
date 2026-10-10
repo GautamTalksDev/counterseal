@@ -482,7 +482,18 @@ $('delConfirm').oninput = () => { $('delAccount').disabled = $('delConfirm').val
 $('delAccount').onclick = async () => {
   try { await ceremony('/v1/me/delete/begin', '/v1/me/delete/finish', { confirm: 'delete' }); location.replace('/'); } catch (e) { toast(e.message); }
 };
-$('verify').onclick = async () => { const v = await api('GET', '/v1/audit/verify'); toast(v.ok ? `Chain intact: ${v.entries} entries.` : `Chain BROKEN at entry ${v.brokenAt}.`); };
+// the server checks the chain a page at a time (server/src/audit.js); the app walks every page
+$('verify').onclick = async () => {
+  let after = null, n = 0;
+  for (let i = 0; i < 10_000; i++) {
+    const v = await api('GET', '/v1/audit/verify' + (after ? `?after=${after}` : ''));
+    if (!v.ok) return toast(`Chain BROKEN at entry ${v.brokenAt}.`);
+    n += v.entries;
+    if (v.done !== false) break;
+    after = v.next_after;
+  }
+  toast(`Chain intact: ${n} entries.`);
+};
 
 // ---- views
 let current = 'holds';
@@ -1222,6 +1233,26 @@ $('evCsv').onclick = () => { if (lastPack) download(`counterseal-decisions-${tod
 // ---- back online after the app opened offline
 window.addEventListener('online', () => { if (!signedInNow) { $('offlineNote').hidden = true; boot(); } });
 
+// ---- the background refresh. Workers Free allows 100,000 requests a day for the whole service, and a full load() is six
+// requests: every 5 seconds that would be about 100,000 a day for one dashboard left open. So: nothing at all while the
+// page is hidden (a background tab, a minimised app; it refreshes once when shown again), one request (/v1/alerts: what
+// waits, the freeze and the team's news) every 5 seconds while it is shown, and the full load only when that answer
+// changed, or once a minute.
+let lastAlerts = null;
+async function refresh() {
+  if (document.hidden || !signedInNow) return;
+  quietUntil = Date.now() + 1500;
+  boot.ticks = (boot.ticks || 0) + 1;
+  if (boot.ticks % 12 === 0) { lastAlerts = null; return load(); }
+  const a = await api('GET', '/v1/alerts');
+  const now = JSON.stringify([(a.holds || []).map((h) => [h.id, (h.votes || []).length]), a.frozen_at ?? null, (a.team || []).length, (a.signins || []).length, (a.passkeys || []).length]);
+  if (now === lastAlerts) return;
+  const first = lastAlerts === null;
+  lastAlerts = now;
+  if (!first) await load();
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && signedInNow && boot.poll) { quietUntil = Date.now() + 1500; lastAlerts = null; load().catch(() => {}); } });
+
 async function boot() {
   try {
     const me = await api('GET', '/v1/me');
@@ -1239,8 +1270,8 @@ async function boot() {
     PROV = Object.fromEntries(meta.providers.map((x) => [x.id, x])); showHost();
     route(); await load(); pushState().catch(() => {});
     installUi(); reportInstalled();
-    // the background refresh: quiet, so it never keeps an idle session alive
-    clearInterval(boot.poll); boot.poll = setInterval(() => { quietUntil = Date.now() + 1500; load().catch(() => {}); }, 5000);
+    // the background refresh: quiet, so it never keeps an idle session alive (see refresh() below)
+    clearInterval(boot.poll); boot.ticks = 0; boot.poll = setInterval(() => refresh().catch(() => {}), 5000);
   } catch (e) {
     signedInNow = false;
     $('signedOut').hidden = false; $('signedIn').hidden = true;
