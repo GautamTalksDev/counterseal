@@ -202,11 +202,12 @@ const ROUTES = [
   ['GET', new RegExp(`^/v1/approvals/${ID}$`), 'guard', (c) => G.status(c, c.m[1])],
   ['POST', new RegExp(`^/v1/approvals/${ID}/use$`), 'guard', (c) => G.use(c, c.m[1])],
   // Deploy gates: a GitHub Actions job waits for a passkey approval. Making a gate needs a passkey ceremony (it decides which
-  // repository may ask you, and in phase 2 which key a run gets); revoking only tightens, so any signed-in session may.
+  // repository may ask you, and in phase 2 which key a run gets), so a member who may make keys; a viewer cannot. Revoking only
+  // tightens: its maker or an owner, any session. Its holds need as many seals as the team's quorum (src/team.js).
   ['GET', /^\/v1\/gates$/, 'session', (c) => Gt.listGates(c.env, c.s)],
-  ['POST', /^\/v1\/gates\/passkey\/begin$/, 'webw', (c) => Gt.createBegin(c.env, c.s)],
-  ['POST', /^\/v1\/gates\/passkey\/finish$/, 'webw', (c) => Gt.createFinish(c.env, c.s, c.body)],
-  ['DELETE', /^\/v1\/gates\/(gate_[0-9a-f]{24})$/, 'write', (c) => Gt.revoke(c.env, c.s, c.m[1])],
+  ['POST', /^\/v1\/gates\/passkey\/begin$/, 'webw', (c) => Gt.createBegin(c.env, c.s), MEMBER],
+  ['POST', /^\/v1\/gates\/passkey\/finish$/, 'webw', (c) => Gt.createFinish(c.env, c.s, c.body), MEMBER],
+  ['DELETE', /^\/v1\/gates\/(gate_[0-9a-f]{24})$/, 'write', (c) => Gt.revoke(c.env, c.s, c.m[1]), MEMBER],
   ['POST', /^\/v1\/gate\/request$/, 'gate', (c) => Gt.request(c)],
   ['GET', new RegExp(`^/v1/gate/status/${ID}$`), 'poll', (c) => Gt.status(c, c.m[1])],
   ['POST', new RegExp(`^/v1/gate/cancel/${ID}$`), 'poll', (c) => Gt.cancel(c, c.m[1])],

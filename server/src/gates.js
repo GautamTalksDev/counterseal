@@ -31,6 +31,7 @@ import { verifyGithubToken, SKEW } from './oidc.js';
 import { GATE_AGENT, GATE_HOST, GATE_METHOD, gateHash, gateContext, factsOf, previewOf } from './gatefacts.js';
 import { WAIT_MAX, WAIT_STEP, WAIT_READS, POLLS_PER_MINUTE } from './approvals.js';
 import { BRAND } from './brand.js';
+import * as Team from './team.js';
 
 export const MAX_GATES = 20, HOLDS_PER_HOUR = 30, PENDING_PER_GATE = 10, TOKEN_TTL = 15 * 60_000, GRANT_WINDOW = 11 * 60_000;
 export const DEFAULT_MINUTES = 15, MAX_MINUTES = 60, MAX_SUMMARY = 120;
@@ -95,18 +96,25 @@ export async function createFinish(env, sess, body) {
     credential = await env.DB.prepare('SELECT id, provider, label FROM credentials WHERE id = ? AND account_id = ?').bind(str(body.credentialId, 'credentialId', { max: 40 }), sess.accountId).first();
     if (!credential) throw new HttpError(404, 'not_found');
     policy = normalisePolicy(body.policy, true); // the passkey ceremony below is what allows pre-approved irreversible operations
+    // Pre-approving irreversible calls (or money caps) is one person approving in advance: an owner or approver, and only
+    // while one seal is enough, as for a token (src/broker.js mintToken).
+    if (policy.unattendedIrreversible.length || policy.money) {
+      Team.requireLevel(sess, Team.LEVEL.approver);
+      const q = Team.effective(await env.DB.prepare('SELECT quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at FROM accounts WHERE id = ?').bind(sess.accountId).first());
+      if (!Team.oneSealEnough(q)) throw new HttpError(409, 'quorum_blocks_preapproval', `Your team requires ${q.quorum > 1 ? `${q.quorum} different approvers` : 'someone other than the maker'} for irreversible calls, so no one can pre-approve them or set money caps alone.`);
+    }
   }
   const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM gates WHERE account_id = ? AND revoked = 0').bind(sess.accountId).first();
   if (n.n >= MAX_GATES) throw new HttpError(409, 'too_many_gates', `Up to ${MAX_GATES} active gates. Revoke one first.`);
 
   const ch = await takeChallenge(env, body.challengeId, 'gate');
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
-  await checkAssertion(env, body.credential, ch.challenge, sess.accountId);
+  await checkAssertion(env, body.credential, ch.challenge, sess);
   const id = 'gate_' + randomId(), t = now();
-  await env.DB.prepare('INSERT INTO gates (id, account_id, label, repository, workflows, refs, environments, events, publish_repo, credential_id, policy, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, sess.accountId, label, repository, JSON.stringify(workflows), JSON.stringify(refs), environments.length ? JSON.stringify(environments) : null, JSON.stringify(events), body.publishRepo ? 1 : 0, credential ? credential.id : null, policy ? JSON.stringify(policy) : null, t).run();
+  await env.DB.prepare('INSERT INTO gates (id, account_id, label, repository, workflows, refs, environments, events, publish_repo, credential_id, policy, created_at, member_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, sess.accountId, label, repository, JSON.stringify(workflows), JSON.stringify(refs), environments.length ? JSON.stringify(environments) : null, JSON.stringify(events), body.publishRepo ? 1 : 0, credential ? credential.id : null, policy ? JSON.stringify(policy) : null, t, sess.memberId || null).run();
   await audit(env, sess.accountId, 'web', 'gate_created', { id, label, repository, workflows, refs, environments, events, publish_repo: body.publishRepo ? 1 : 0, ...(credential ? { credential: credential.id, provider: credential.provider, preapproved: policy.unattendedIrreversible.length } : {}) });
-  return gateView({ id, label, repository, workflows: JSON.stringify(workflows), refs: JSON.stringify(refs), environments: environments.length ? JSON.stringify(environments) : null, events: JSON.stringify(events), publish_repo: body.publishRepo ? 1 : 0, created_at: t, revoked: 0, policy: policy ? JSON.stringify(policy) : null, credential_id: credential?.id ?? null, credential_provider: credential?.provider ?? null, credential_label: credential?.label ?? null });
+  return gateView({ id, label, repository, workflows: JSON.stringify(workflows), refs: JSON.stringify(refs), environments: environments.length ? JSON.stringify(environments) : null, events: JSON.stringify(events), publish_repo: body.publishRepo ? 1 : 0, created_at: t, revoked: 0, member_id: sess.memberId || sess.accountId, policy: policy ? JSON.stringify(policy) : null, credential_id: credential?.id ?? null, credential_provider: credential?.provider ?? null, credential_label: credential?.label ?? null });
 }
 
 const parse = (s, fallback = null) => { try { return s ? JSON.parse(s) : fallback; } catch { return fallback; } };
@@ -118,6 +126,8 @@ function gateView(g) {
     publish_repo: !!g.publish_repo,
     credential: g.credential_id ? { id: g.credential_id, provider: g.credential_provider || null, label: g.credential_label || null, preapproved: policy ? policy.unattendedIrreversible.length : 0 } : null,
     created_at: g.created_at, last_used: g.last_used ?? null, revoked: g.revoked,
+    // who made it (on a team the app shows "made by"; with self-approval off they cannot seal what it asks for)
+    member_id: g.member_id || g.account_id,
   };
 }
 
@@ -126,14 +136,15 @@ export async function listGates(env, sess) {
   return { gates: r.results.map(gateView), server: hosts(env)[0].origin };
 }
 
-/** revoking only tightens: any signed-in session may. The gate's open holds are closed, and the tokens it handed out stop. */
+/** revoking only tightens, so any signed-in session of its maker or an owner may (anyone else who sees trouble freezes the
+ *  account, src/brakes.js). The gate's open holds are closed, and the tokens it handed out stop. */
 export async function revoke(env, sess, id) {
   const [g, h, tk] = await env.DB.batch([
-    env.DB.prepare('UPDATE gates SET revoked = 1 WHERE id = ? AND account_id = ? AND revoked = 0').bind(id, sess.accountId),
+    env.DB.prepare(`UPDATE gates SET revoked = 1 WHERE id = ? AND account_id = ? AND revoked = 0 ${Team.MAKER_OR_OWNER}`).bind(id, sess.accountId, ...Team.makerOrOwner(sess)),
     env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND token_id = ? AND status IN ('pending','approved')").bind(sess.accountId, tokenIdOf(id)),
     env.DB.prepare('UPDATE tokens SET revoked = 1 WHERE account_id = ? AND revoked = 0 AND id IN (SELECT token_id FROM gate_runs WHERE gate_id = ? AND account_id = ?)').bind(sess.accountId, id, sess.accountId),
   ]);
-  if (!g.meta.changes) throw new HttpError(404, 'not_found');
+  if (!g.meta.changes) throw await Team.notRevoked(env, sess, 'gates', id);
   await audit(env, sess.accountId, sess.kind, 'gate_revoked', { id, closed: h.meta.changes, tokens: tk.meta.changes });
   return { ok: true, closed: h.meta.changes, tokens: tk.meta.changes };
 }
@@ -179,7 +190,7 @@ export async function request(c) {
   // 1. GitHub's signature and the token's own claims, before anything touches the database (the audience names this gate)
   const claims = await verifyGithubToken(env, m[1], { audience: audienceFor(env, gateId), now: t });
   // 2. the gate, and whether this run is the kind it accepts. A refused run writes nothing and alerts no one.
-  const g = await env.DB.prepare('SELECT g.*, a.receipts AS receipts_on, a.frozen_at FROM gates g JOIN accounts a ON a.id = g.account_id WHERE g.id = ?').bind(gateId).first();
+  const g = await env.DB.prepare('SELECT g.*, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at FROM gates g JOIN accounts a ON a.id = g.account_id WHERE g.id = ?').bind(gateId).first();
   if (!g || g.revoked) throw new HttpError(404, 'gate_not_found', 'There is no such gate, or it was revoked.');
   checkRun(g, claims);
   // Freeze: nothing new is asked, held or alerted, and the token is not spent. (After the run is known to be this gate's:
@@ -205,6 +216,9 @@ export async function request(c) {
     }
     await limit(env.DB, 'gate:' + g.id, HOLDS_PER_HOUR, 3600_000, t);
     const id = randomId(), expiresAt = t + minutes * 60_000;
+    // two-person seal: the seals this hold needs now, and who "asked" (the gate's maker: with self-approval off they cannot
+    // be one of the approvers, as for a token or a guard key)
+    const needs = Team.effective(g, t).quorum, requestedBy = Team.memberOf(g);
     const context = gateContext(g, claims, { bind, publish: g.publish_repo, summary });
     const f = factsOf(context);
     const pv = previewOf(f);
@@ -213,9 +227,9 @@ export async function request(c) {
       : "A GitHub Actions job is paused until you approve. The repository, workflow, commit and run are from the token GitHub signed for the job.";
     const path = `${claims.repository}@${claims.sha.slice(0, 7)} ${claims.environment || claims.ref}`.slice(0, 200);
     // one statement: two runs asking at the same moment make one hold, not two
-    const ins = await env.DB.prepare(`INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview, kind, agent, context)
-      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'deploy', ?13, ?14 WHERE NOT EXISTS (SELECT 1 FROM holds WHERE token_id = ?3 AND req_hash = ?4 AND status = 'pending' AND expires_at > ?10)`)
-      .bind(id, g.account_id, tokenId, hash, GATE_METHOD, GATE_HOST, path, rule, why, t, expiresAt, pv, GATE_AGENT, context).run();
+    const ins = await env.DB.prepare(`INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview, kind, agent, context, needs, requested_by)
+      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'deploy', ?13, ?14, ?15, ?16 WHERE NOT EXISTS (SELECT 1 FROM holds WHERE token_id = ?3 AND req_hash = ?4 AND status = 'pending' AND expires_at > ?10)`)
+      .bind(id, g.account_id, tokenId, hash, GATE_METHOD, GATE_HOST, path, rule, why, t, expiresAt, pv, GATE_AGENT, context, needs, requestedBy).run();
     if (ins.meta.changes) {
       hold = { id, expires_at: expiresAt, status: 'pending' };
       created = true;
@@ -313,8 +327,9 @@ async function pass(c, h) {
     tokenId = randomId();
     const policy = JSON.parse(g.policy);
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO tokens (id, account_id, credential_id, hash, label, policy, minted_by, expires_at, created_at, agent_key_id, session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(tokenId, g.account_id, cred.id, await sha256hex(token), `gate: ${g.label}`.slice(0, 60), JSON.stringify(policy), 'gate', t + TOKEN_TTL, t, null, null),
+      env.DB.prepare('INSERT INTO tokens (id, account_id, credential_id, hash, label, policy, minted_by, expires_at, created_at, agent_key_id, session_id, member_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        // member_id: the gate's maker, so a pre-approval in its policy pauses when the team needs two seals or its maker can no longer seal
+        .bind(tokenId, g.account_id, cred.id, await sha256hex(token), `gate: ${g.label}`.slice(0, 60), JSON.stringify(policy), 'gate', t + TOKEN_TTL, t, null, null, g.member_id || null),
       env.DB.prepare('INSERT INTO gate_runs (token_id, account_id, gate_id, hold_id, created_at) VALUES (?, ?, ?, ?, ?)').bind(tokenId, g.account_id, g.id, h.id, t),
     ]);
   }

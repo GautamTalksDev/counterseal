@@ -374,11 +374,12 @@ export async function roleFinish(env, sess, id, body) {
     made('api_keys', 'revoked = 1', 'revoked = 0'),
     made('agent_keys', 'revoked_at = ?4', 'revoked_at IS NULL'),
     db.prepare(`UPDATE holds SET status = 'expired' WHERE account_id = ?1 AND requested_by = ?2 AND status IN ('pending','approved') AND ?3 = 'viewer' AND ${changed}`).bind(a, id, role),
+    made('gates', 'revoked = 1', 'revoked = 0'),
   ]);
   if (!up.meta.changes) throw new HttpError(409, 'try_again', 'The team changed while you confirmed. Look again and retry.');
   const row = await db.prepare('SELECT votes_from FROM members WHERE id = ?').bind(id).first();
-  const [tokens, guardKeys, receiptsKeys, agentKeys, holds] = gone.map((x) => x.meta.changes);
-  const revoked = role === 'viewer' ? { revoked: { tokens, guardKeys, receiptsKeys, agentKeys, holds } } : {};
+  const [tokens, guardKeys, receiptsKeys, agentKeys, holds, gates] = gone.map((x) => x.meta.changes);
+  const revoked = role === 'viewer' ? { revoked: { tokens, guardKeys, receiptsKeys, agentKeys, holds, gates } } : {};
   await audit(env, a, 'web', 'member_role_changed', { member: id, name: tg.m.name, from: tg.m.role, to: role, by: sess.memberId, ...(row?.votes_from > t ? { votes_from: row.votes_from } : {}), ...(approved.meta.changes ? { voided_approvals: approved.meta.changes } : {}), ...revoked });
   // who may seal or run the team is never changed quietly: every member's devices are told
   await alertTeam(env, a, sess.memberId);
@@ -427,10 +428,12 @@ export async function removeFinish(env, sess, id, body) {
     db.prepare(`UPDATE invites SET revoked_at = ?3 WHERE account_id = ?1 AND created_by = ?2 AND used_at IS NULL AND revoked_at IS NULL AND ${gone}`).bind(a, id, t),
     // a move link they made can no longer add a passkey for them
     db.prepare(`UPDATE move_links SET used_at = ?3 WHERE ${mine('')} AND used_at IS NULL AND ${gone}`).bind(a, id, t),
+    // the deploy gates they made stop asking (and the tokens those handed out were revoked with the tokens above)
+    db.prepare(`UPDATE gates SET revoked = 1 WHERE ${mine('')} AND revoked = 0 AND ${gone}`).bind(a, id, t),
   ]);
   if (!out[1].meta.changes) throw new HttpError(409, 'try_again', 'The team changed while you confirmed. Look again and retry.');
   const n = (i) => out[i].meta.changes;
-  const revoked = { sessions: n(2), passkeys: n(3), devices: n(4), seals: n(5), holds: n(6), tokens: n(7), guardKeys: n(8), receiptsKeys: n(9), agentKeys: n(10), invites: n(11) };
+  const revoked = { sessions: n(2), passkeys: n(3), devices: n(4), seals: n(5), holds: n(6), tokens: n(7), guardKeys: n(8), receiptsKeys: n(9), agentKeys: n(10), invites: n(11), gates: n(13) };
   await audit(env, a, 'web', 'member_removed', { member: id, name: tg.m.name, role: tg.m.role, by: sess.memberId, ...revoked });
   // the rest of the team is told, and so are the removed person's own devices (deleted above, so this is their last push)
   await alertTeam(env, a, sess.memberId, { extra: id === sess.memberId ? [] : theirs });

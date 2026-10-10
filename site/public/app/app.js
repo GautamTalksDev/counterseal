@@ -538,7 +538,7 @@ async function gatesView() {
   const live = gates.filter((g) => !g.revoked);
   const L = $('gates'); L.replaceChildren();
   for (const g of live) {
-    const rv = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Revoke' });
+    const rv = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Revoke', hidden: !can('member') || !mayRevoke(g.member_id) });
     rv.onclick = async () => {
       if (!confirm(`Revoke ${g.label}? Jobs waiting at it are cancelled${g.credential ? ', and the tokens it handed out stop' : ''}.`)) return;
       try { const r = await api('DELETE', `/v1/gates/${g.id}`); toast(`Revoked.${r.closed ? ` ${r.closed} waiting request(s) closed.` : ''}`); gatesView(); load(); } catch (e) { toast(e.message); }
@@ -557,7 +557,7 @@ async function gatesView() {
         line(`Triggers: ${g.events.join(', ')}`),
         line(g.publish_repo ? 'Public receipts name this repository' : 'Public receipts: DEPLOY, the decision and the rule; never the repository'),
         g.credential ? line(`Hands out a 15 minute token for ${g.credential.label || 'a vault key'} (${g.credential.provider || 'provider'}) after approval${g.credential.preapproved ? `; pre-approves ${g.credential.preapproved} irreversible call pattern(s)` : ''}`) : null,
-        el('span', { className: 'dim brk mono', textContent: `${g.id}${g.last_used ? '  last passed ' + new Date(g.last_used).toLocaleString() : '  never passed'}` })),
+        el('span', { className: 'dim brk mono', textContent: `${g.id}${g.last_used ? '  last passed ' + new Date(g.last_used).toLocaleString() : '  never passed'}${g.member_id && g.member_id !== ME.id && NAMES.has(g.member_id) ? `  made by ${NAMES.get(g.member_id)}` : ''}` })),
       el('span', { className: 'acts' }, cp, rv)));
   }
   $('noGates').hidden = live.length > 0;

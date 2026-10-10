@@ -132,7 +132,7 @@ test('approving a deploy card runs the passkey ceremony on the hold and says the
   const id = f.r.body.id;
   const p = await page(baseRoutes(f, {
     [`POST /v1/holds/${id}/approve/begin`]: async () => [200, { challengeId: 'aa', options: { challenge: 'AAAA', rpId: 'leash.test' } }],
-    [`POST /v1/holds/${id}/approve/finish`]: async () => [200, { ok: true }],
+    [`POST /v1/holds/${id}/approve/finish`]: async () => [200, { ok: true, approved: true, seals: 1, needs: 1 }],
   }));
   const ok = p.byId('holds').children[0].all((c) => c.tag === 'button').find((b) => b.textContent === 'Approve with passkey');
   ok.click(); await p.settle();

@@ -504,6 +504,8 @@ screen. Tests: *public receipts say DEPLOY...*, *the sweep*.
 before anything is written), ends a wait at its next read, spends no approval and hands out no key; approving waits for the
 unfreeze. Tests: `test/gates-freeze.test.js`.
 
+**H14. Two-person seal.** A deploy hold is made with the quorum in force and the gate's maker as `requested_by`, so one approver cannot let a job through when two seals are required, and with self-approval off the maker cannot seal what their gate asks for. The seal is the signed-in person's own passkey (`checkAssertion` takes the session), a viewer or member cannot approve, and a gate that pre-approves irreversible calls needs an owner or approver and one seal being enough; later raising the quorum pauses those pre-approvals (the token carries its maker). Removing or demoting the maker to viewer revokes their gates and what those handed out. Tests: `test/gates-team.test.js`.
+
 Residual: the gate has not yet been run against real GitHub tokens (it follows GitHub's documentation, its discovery document
 and a real token shown in a third-party README); the signed facts say what GitHub says, so a compromised workflow in the
 allowed repository gets a real token and asks truthfully; a job that waits uses Actions minutes.

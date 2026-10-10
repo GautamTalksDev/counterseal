@@ -340,6 +340,7 @@ members' devices (at most once a minute per account, shared with hold alerts).
   devices no longer in the account); team events for the
   phone come from audit actions listed in `Team.recentEvents`. A channel message can say "n of m seals" from
   `holds.needs` and the hold's `votes`.
+
 ## Deploy gates
 
 A GitHub Actions job waits for a passkey approval, bound to the claims in GitHub's signed OIDC token. The holds table,
@@ -350,7 +351,7 @@ protocol is `action/deploy-gate`.
 ### Gates (the app)
 
 - `GET /v1/gates` (any session): `{gates: [{id, label, repository, workflows, refs, environments, events, bound, publish_repo,
-  credential, created_at, last_used, revoked}], server}`. `bound` is `null` or `{repository_id, repository_owner_id, at}`;
+  credential, created_at, last_used, revoked, member_id}], server}`. `member_id` is who made the gate. `bound` is `null` or `{repository_id, repository_owner_id, at}`;
   `credential` is `null` or `{id, provider, label, preapproved}`.
 - `POST /v1/gates/passkey/begin` then `POST /v1/gates/passkey/finish` (web session with CSRF, a passkey ceremony; a command
   line session gets `403 passkey_required`). The finish body is `{challengeId, credential, label, repository, workflows, refs,
@@ -366,12 +367,20 @@ protocol is `action/deploy-gate`.
 | `environments` | optional, up to 10 names, `^[A-Za-z0-9][A-Za-z0-9 ._:/()-]{0,99}$`; if given, the job must run in one of them |
 | `events` | from `push`, `workflow_dispatch`, `release`, `deployment`, `merge_group`, `schedule`, `repository_dispatch`; default the first five |
 | `publishRepo` | boolean, default false: the repository name goes in this gate's public receipts |
-| `credentialId`, `policy` | phase 2: a vault key of this account and the policy of the token handed out (as for a token made with a passkey, so it may pre-approve irreversible calls). `policy` needs `credentialId` (`400 policy_needs_credential`) |
+| `credentialId`, `policy` | phase 2: a vault key of this account and the policy of the token handed out (as for a token made with a passkey, so it may pre-approve irreversible calls, if the maker is an owner or approver and one seal is enough). `policy` needs `credentialId` (`400 policy_needs_credential`) |
 
   Errors: `400 bad_label|bad_repository|bad_workflows|bad_refs|bad_environments|bad_events|bad_publishRepo|bad_policy`,
   `404 not_found` (a key that is not this account's), `409 too_many_gates` (20 active).
-- `DELETE /v1/gates/<id>` (any session with CSRF; revoking only tightens): `{ok, closed, tokens}`: its waiting and approved
-  requests are closed and the tokens it handed out are revoked.
+- `DELETE /v1/gates/<id>` (a member, session with CSRF; its maker or an owner, `403 role_required` for anyone else; revoking only
+  tightens): `{ok, closed, tokens}`: its waiting and approved requests are closed and the tokens it handed out are revoked.
+
+On a team: making or revoking a gate needs the role of a member or more (a viewer gets `403 role_required`); a gate with a key
+whose policy pre-approves irreversible calls (or sets money caps) needs an owner or approver, and is refused with
+`409 quorum_blocks_preapproval` while the team needs two seals or someone other than the maker. A gate remembers who made it
+(`gates.member_id`). A deploy hold is made with `needs` set to the quorum in force and `requested_by` set to the gate's maker, so
+it is approved by as many different owners or approvers as the quorum needs, and with self-approval off not by the maker. The
+poll answers `pending` until it is approved. Removing the maker, or making them a viewer, revokes their gates, the holds they
+asked for and the tokens those handed out (the answer's `revoked` has a `gates` count).
 
 ### Ask: `POST /v1/gate/request`
 

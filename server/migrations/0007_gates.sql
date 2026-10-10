@@ -20,7 +20,8 @@ CREATE TABLE gates (
   policy TEXT,                             -- phase 2: the token's policy (JSON)
   created_at INTEGER NOT NULL,
   last_used INTEGER,
-  revoked INTEGER NOT NULL DEFAULT 0
+  revoked INTEGER NOT NULL DEFAULT 0,
+  member_id TEXT                           -- who made it (two-person seal): with self-approval off they cannot seal what it asks for
 );
 CREATE INDEX gates_by_account ON gates(account_id);
 

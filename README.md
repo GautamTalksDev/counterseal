@@ -104,12 +104,10 @@ sequenceDiagram
 
 A token can carry `unattendedIrreversible` rules for calls an agent may run unattended, **but only a passkey holder can mint
 such a token**. A CLI session cannot, because an agent running on the same laptop can read the CLI's config file. The same
-goes for approving holds (a coding agent's commands included), revoking agent keys and turning public receipts off, and for everything that loosens a brake
+goes for approving holds (a coding agent's commands and a deploy gate's jobs included), making a deploy gate, revoking agent keys and turning public receipts off, and for everything that loosens a brake
 (below): setting money caps, resetting a tripped breaker and unfreezing. Stopping things never needs a passkey. On a team
 that requires two seals, nobody can flip this switch alone: pre-approvals and money caps are paused until the quorum is
 lowered again, which takes 24 hours and tells everyone.
-goes for approving holds (a coding agent's commands and a deploy gate's jobs included), making a deploy gate, revoking agent keys and turning public receipts off, and for everything that loosens a brake
-(below): setting money caps, resetting a tripped breaker and unfreezing. Stopping things never needs a passkey.
 
 ### Brakes
 
@@ -341,6 +339,7 @@ jobs:
   cannot use it.
 - **A gate is a pause the job asks for.** A person who can edit the workflow file can remove the step: protect the file, or use
   the key option above, where the job has nothing to deploy with before an approval.
+- On a team that requires two seals, a deploy needs two different approvers (and with self-approval off, not the person who made the gate); removing the gate's maker stops it. See "On a team" in docs/DEPLOY_GATE.md.
 - Waiting writes nothing to the database. A job that waits uses Actions minutes (private repositories), so keep the timeout low.
 - Public receipts say `DEPLOY github.com`, the decision and the rule; never the repository unless you opt in for that gate.
 - Not yet run against real GitHub tokens: the tests use a stand-in that signs like GitHub. The first real run is the real test.

@@ -455,7 +455,7 @@ test('removing a member revokes their sessions, passkeys, devices, tokens, guard
   // quorum 2 with three approvers: removing Asha leaves two, which is enough
   const r = await remove(w, u, asha);
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  assert.deepEqual(r.body.revoked, { sessions: 2, passkeys: 1, devices: 1, seals: 1, holds: 2, tokens: 1, guardKeys: 1, receiptsKeys: 1, agentKeys: 1, invites: 0 });
+  assert.deepEqual(r.body.revoked, { sessions: 2, passkeys: 1, devices: 1, seals: 1, holds: 2, tokens: 1, guardKeys: 1, receiptsKeys: 1, agentKeys: 1, invites: 0, gates: 0 });
   // her devices got one last alert (they read "signed out"), and the rest of the team was told
   assert.ok(w.pushes.some((p) => p.endsWith('/asha-phone')), JSON.stringify(w.pushes));
   // a yes from someone removed no longer stands: the approval she completed is void, and the agent is held again
@@ -592,14 +592,14 @@ test('an approver made a member or a viewer: their pre-approvals pause, an appro
   // made a viewer: a viewer runs no agents, so everything she made is revoked and what it asked for is closed
   const v = await setRole(w, u, asha, 'viewer');
   assert.equal(v.status, 200, JSON.stringify(v.body));
-  assert.deepEqual(v.body.revoked, { tokens: 1, guardKeys: 1, receiptsKeys: 1, agentKeys: 1, holds: 1 });
+  assert.deepEqual(v.body.revoked, { tokens: 1, guardKeys: 1, receiptsKeys: 1, agentKeys: 1, holds: 1, gates: 0 });
   assert.equal((await w.req('GET', '/p/github/repos/acme/app', { bearer: pre.body.token, ...anon })).body.error, 'token_invalid');
   assert.equal((await w.req('POST', '/v1/approvals', { bearer: gk.key, ...anon, body: {} })).body.error, 'guard_key_invalid');
   assert.equal(w.env.DB.raw.prepare('SELECT revoked FROM api_keys WHERE id = ?').get(rk.id).revoked, 1);
   assert.ok(w.env.DB.raw.prepare('SELECT revoked_at FROM agent_keys WHERE id = ?').get(ak.id).revoked_at);
   assert.equal(w.env.DB.raw.prepare('SELECT status FROM holds WHERE id = ?').get(held.body.hold_id).status, 'expired');
   const ch = JSON.parse(w.env.DB.raw.prepare("SELECT detail FROM audit WHERE action = 'member_role_changed' ORDER BY seq DESC").get().detail);
-  assert.deepEqual(ch.revoked, { tokens: 1, guardKeys: 1, receiptsKeys: 1, agentKeys: 1, holds: 1 });
+  assert.deepEqual(ch.revoked, { tokens: 1, guardKeys: 1, receiptsKeys: 1, agentKeys: 1, holds: 1, gates: 0 });
 });
 
 test('revoking a token or key is for its maker or an owner; a refused revoke closes nothing (anyone else freezes instead)', async () => {

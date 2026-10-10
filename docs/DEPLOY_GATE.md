@@ -135,6 +135,19 @@ to that poll is lost, the job fails (and a re-run asks again): an approval is ne
 Two jobs with the same claims (the same job asked twice) share one request, and one approval lets one of them through. Jobs of
 a matrix have different `check_run_id`s, so each is its own request.
 
+## On a team (two-person seal)
+
+A gate belongs to the person who made it, and a request from it is held like any other hold of a team. If the team needs two
+seals, the job waits until two different owners or approvers have each approved with their own passkey; the first approval
+releases nothing. If the team turned self-approval off, the person who made the gate cannot be one of them. A member can make a
+gate and ask, but cannot approve; a viewer can deny a request but make nothing. Revoking a gate is for its maker or an owner.
+If its maker is removed, or made a viewer, their gates stop at once: the requests waiting at them are closed and the tokens they
+handed out are revoked.
+
+A gate that hands out a key with a policy that pre-approves irreversible calls is one person approving in advance, so it needs
+an owner or approver and is refused while the team needs two seals (or someone other than the maker). If the team starts
+requiring two seals later, those pre-approvals pause: the call is held for approval like any other.
+
 ## Phase 2: no approval, no key
 
 A gate may name a key in your vault and a policy. The deploy key is then not in the repository's secrets at all. When you
