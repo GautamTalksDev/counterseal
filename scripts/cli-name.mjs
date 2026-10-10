@@ -17,7 +17,7 @@ const SUB = 'login|logout|add|creds|tokens|token|revoke|freeze|holds|watch|agent
 const TEXT = /\.(html|js|mjs|md)$/;
 const SKIP = new Set(['fonts', 'img', 'media', 'node_modules', '.git', 'fixtures', 'test']);
 // generated copies are rewritten by scripts/sync-guard.mjs from cli/; the site's SDK copies by rebrand.mjs
-const GENERATED = new Set(['site/public/brand.js', 'site/public/receipts-sdk.js', 'site/public/websig.js']);
+const GENERATED = new Set(['site/public/brand.js', 'site/public/receipts-sdk.js', 'site/public/websig.js', 'site/public/shellmap.js', 'site/public/mcp/mcp-policy.mjs', 'site/public/mcp/mcp-sql.mjs', 'site/public/mcp/mcp-json.mjs']);
 
 export function files() {
   const out = [];

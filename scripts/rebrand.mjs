@@ -17,7 +17,7 @@ const LOCK = join(ROOT, 'brand.lock.json');
 export const KEYS = ['origin', 'wordmark', 'tagline', 'recordLine', 'domain', 'sdk', 'cli', 'cliPlanned', 'name', 'repo'];
 const TEXT = /\.(html|js|mjs|md|webmanifest|json|txt|yml)$/;
 const SKIP = new Set(['fonts', 'img', 'node_modules', '.git', 'fixtures']);
-const GENERATED = new Set(['site/public/brand.js', 'site/public/receipts-sdk.js', 'site/public/websig.js', 'brand.lock.json']);
+const GENERATED = new Set(['site/public/brand.js', 'site/public/receipts-sdk.js', 'site/public/websig.js', 'brand.lock.json', 'site/public/shellmap.js', 'site/public/mcp/mcp-policy.mjs', 'site/public/mcp/mcp-sql.mjs', 'site/public/mcp/mcp-json.mjs']);
 
 export function files() {
   const out = [];
@@ -58,6 +58,9 @@ function main(check) {
   // the site serves copies of two SDK files; keep them identical to the SDK
   writeFileSync(join(ROOT, 'site/public/receipts-sdk.js'), readFileSync(join(ROOT, 'sdk/receipts.mjs'), 'utf8').split('\n').slice(1).join('\n'));
   writeFileSync(join(ROOT, 'site/public/websig.js'), readFileSync(join(ROOT, 'sdk/websig.mjs'), 'utf8'));
+  // the homepage runs the shell map and the MCP wrapper's policy as they are (identical copies)
+  writeFileSync(join(ROOT, 'site/public/shellmap.js'), readFileSync(join(ROOT, 'sdk/shellmap.mjs'), 'utf8'));
+  for (const f of ['mcp-policy.mjs', 'mcp-sql.mjs', 'mcp-json.mjs']) writeFileSync(join(ROOT, 'site/public/mcp', f), readFileSync(join(ROOT, 'cli', f), 'utf8'));
   writeFileSync(LOCK, JSON.stringify(Object.fromEntries(KEYS.map((k) => [k, BRAND[k]])), null, 2) + '\n');
   console.log(`rebranded ${touched} files (${changes.join(', ') || 'nothing changed'}); review with git diff`);
   return 0;

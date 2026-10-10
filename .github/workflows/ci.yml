@@ -19,7 +19,7 @@ jobs:
       - name: Site scripts parse
         run: find site/public -name '*.js' -not -path '*/fonts/*' -print0 | xargs -0 -n1 node --check
       - name: Site copies of the SDK are current
-        run: tail -n +2 sdk/receipts.mjs | diff - site/public/receipts-sdk.js && diff sdk/websig.mjs site/public/websig.js
+        run: tail -n +2 sdk/receipts.mjs | diff - site/public/receipts-sdk.js && diff sdk/websig.mjs site/public/websig.js && diff sdk/shellmap.mjs site/public/shellmap.js && for f in mcp-policy mcp-sql mcp-json; do diff cli/$f.mjs site/public/mcp/$f.mjs; done
       - name: Guard copies are current (shell map SQL block and API map from the server, CLI copy, plugin scripts)
         run: node scripts/sync-guard.mjs --check
       - name: Brand in step (server/src/brand.js)

@@ -25,8 +25,14 @@ const brand = (s) => String(s).replace(/\bLEASH\b/g, 'Counterseal');
 waxLight();
 
 // ------------------------------------------------------------------ small things
-$('copyCmd').addEventListener('click', async () => {
+$('copyCmd')?.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText('npx counterseal login'); $('copyCmd').classList.add('copied'); $('copyCmd').setAttribute('aria-label', 'Copied: npx counterseal login'); setTimeout(() => $('copyCmd').classList.remove('copied'), 1600); } catch { /* clipboard blocked: the command is visible */ }
+});
+// "Try the demo on this page": bring the live window into view and put focus on its next step
+$('tryDemo')?.addEventListener('click', () => {
+  const w = $('demo');
+  w.classList.add('flash'); setTimeout(() => w.classList.remove('flash'), 1600);
+  setTimeout(() => { const b = $('heroOk'); if (b && !$('acts').hidden) b.focus({ preventScroll: true }); else $('again').focus({ preventScroll: true }); }, RM ? 0 : 500);
 });
 const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
 document.querySelectorAll('.rv').forEach((n) => io.observe(n));
@@ -279,6 +285,9 @@ const TRIES = [
   { label: 'DROP TABLE users', m: 'POST', p: 'supabase', host: 'api.supabase.com', path: '/v1/projects/abcd/database/query', body: '{"query":"DROP TABLE users;"}', rule: 'sb.sql' },
   { label: 'Purge the whole cache', m: 'POST', p: 'cloudflare', host: 'api.cloudflare.com', path: '/zones/9a1/purge_cache', body: '{"purge_everything":true}', rule: 'cf.purge' },
   { label: 'Delete a Railway volume', m: 'POST', p: 'railway', host: 'backboard.railway.app', path: '/', body: 'mutation { volumeDelete(volumeId: "vol_prod") }', rule: 'rw.mutation' },
+  { label: 'Email a list of customers', m: 'POST', p: 'resend', host: 'api.resend.com', path: '/emails', body: '{"from":"hi@acme.example","to":["ana@acme.example","bo@acme.example"],"subject":"Update"}', rule: 'rs.recipients' },
+  { label: 'Promote a deploy to production', m: 'POST', p: 'vercel', host: 'api.vercel.com', path: '/v10/projects/acme-web/promote/dpl_9f3c', rule: 'vc.production' },
+  { label: 'Refund a Shopify order', m: 'POST', p: 'shopify', host: 'acme.myshopify.com', path: '/admin/api/2026-07/graphql.json', body: '{"query":"mutation { refundCreate(input: {orderId: \\"gid://shopify/Order/1\\"}) { refund { id } } }"}', rule: 'sh.money' },
   { label: 'Open an issue', m: 'POST', p: 'github', host: 'api.github.com', path: '/repos/acme/app/issues', body: '{"title":"Flaky test"}' },
 ];
 let META = null, current = null;
@@ -497,3 +506,6 @@ loadMeta().then((m) => { META = m; renderMap(); });
   S.focus = S.log.size - 1;
   recordView(S.focus);
 })().catch(fail);
+
+// the feature demos further down the page load after the hero
+import('/js/features.js').catch(() => {});
