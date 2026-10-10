@@ -4,196 +4,51 @@
 
 ### Every irreversible action gets a second seal.
 
-**The approval and proof layer for AI agents.** Your agent gets scoped proxy tokens instead of your real API keys.
-Anything it can't take back (deleting a database, force pushing `main`, refunding customers, `DROP TABLE`) waits until a
-human approves it with a passkey. Every decision becomes a receipt in a public log anyone can verify, and each agent can
-sign its own requests, so a stolen token alone is useless.
+**Your AI agent never holds a real API key, and anything it cannot take back waits for your passkey.**
 
-The agent's signed request is the seal. Your passkey approval is the counterseal. The public log keeps the impression.
+[Website](https://counterseal.gautamkhosla.com) · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Limits](#honest-limits) · [Security](SECURITY.md) · [Self-hosting](docs/DEPLOY.md) · [Full guide](docs/GUIDE.md)
 
-[Website](https://counterseal.gautamkhosla.com) · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Security](SECURITY.md) · [Threat model](docs/THREAT_MODEL.md) · [Protocol](docs/PROTOCOL.md) · [Policy reference](docs/POLICY.md)
+[![npm](https://img.shields.io/npm/v/counterseal)](https://www.npmjs.com/package/counterseal) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 </div>
 
 ---
 
-## Why this exists
+## Why: no approval, no key
 
-In **late April 2026**, an AI coding agent working on a staging credential mismatch searched a repo, found a Railway API token in
-an unrelated file, and called `volumeDelete`. PocketOS lost its production database **and every volume backup in nine
-seconds**. The token had been created to manage custom domains. Its prompt-level guardrails were switched on.
-([AI Incident Database](https://incidentdatabase.ai/reports/7311), [PointGuard AI](https://pointguardai.com/ai-security-incidents/ai-agent-deletes-production-database-in-nine-seconds-and-apologizes))
+In April 2026, an AI coding agent hunting for a staging credential found a Railway API token in an unrelated file and
+called `volumeDelete`. PocketOS had its production database and the backups on the same volume deleted in nine seconds.
+The token had been made to manage custom domains, and the prompt-level guardrails were on.
+([AI Incident Database](https://incidentdatabase.ai/reports/7311))
 
-Prompts are not a permission system. Counterseal moves the decision out of the model, and keeps the proof:
+A prompt is not a permission system. Counterseal moves the decision out of the model:
 
-| Without Counterseal | With Counterseal |
-|---|---|
-| Real keys sit in `.env` files the agent can read | The agent only ever holds `lsh_` proxy tokens |
-| An over-scoped token can do anything its owner can | Each token is narrowed by a policy (paths, methods, read-only, rate) |
-| Destructive calls happen at machine speed | Irreversible calls are held until you tap approve |
-| A leaked token works for whoever finds it | A token bound to an agent key only works on requests that key signed |
-| "What did the agent do?" is a guess, in logs you can edit | Every decision is in your hash-chained audit log and, as a receipt, in a public Merkle log |
+- The agent holds a scoped proxy token (`lsh_...`), never the real key. The real key stays in an encrypted vault and is
+  added to the request on the server.
+- A call that cannot be undone (a delete, a force push, a refund, a `DROP TABLE`) is held until a human approves that
+  exact request with a passkey. No approval, no key.
+- The decision is written down. With receipts on, each decision on a write is also an entry in a public log that anyone
+  can check.
 
-## How it works
-
-Three verbs, one service:
-
-1. **Approve.** Irreversible calls are held until a passkey approves them, on your phone or laptop.
-2. **Record.** Every allow, hold, approval and denial the broker makes on a write becomes a receipt in a public,
-   append-only transparency log (RFC 6962, C2SP signed checkpoints). *If it was recorded, you can prove it.* Agents can
-   log their own actions there too.
-3. **Prove who.** An agent signs its requests with its own Ed25519 key (RFC 9421 HTTP Message Signatures). The receipt
-   records that a registered agent key made the call.
-
-```mermaid
-flowchart LR
-    A[AI agent<br/>signs with its agent key] -- "lsh_ token + RFC 9421 signature" --> L
-    subgraph L[Counterseal Worker]
-      S[Agent signature<br/>Ed25519, nonce, window]
-      P[Policy decision<br/>deny, read-only, allow lists]
-      M[Irreversible map<br/>versioned, per API]
-      V[(Vault<br/>AES-256-GCM per secret)]
-      H[Holds]
-      AU[(Audit log<br/>hash-chained, private)]
-      LOG[(Public log<br/>RFC 6962 Merkle tree,<br/>Durable Object)]
-    end
-    L -- "real key, injected server side" --> U[GitHub · Cloudflare · Railway · Stripe · Supabase<br/>Vercel · Neon · Fly.io · Resend · Shopify]
-    H -- "phone alert" --> Ph[Your phone<br/>passkey / Face ID]
-    Ph -- "WebAuthn assertion" --> H
-    AU -- "receipt: method, host, decision, hashes" --> LOG
-    LOG -- "bundle: entry + inclusion proof + signed checkpoint" --> Aud[Anyone, offline]
-```
-
-What happens to one request:
-
-```mermaid
-sequenceDiagram
-    participant Agent
-    participant Broker as Counterseal
-    participant Human as You (passkey)
-    participant API as Upstream API
-    participant Log as Public log
-    Agent->>Broker: DELETE /p/github/repos/acme/app (Bearer lsh_..., Signature by agent key)
-    Broker->>Broker: signature? token? policy? irreversible map?
-    Broker-->>Agent: 428 held_for_approval + approve_url
-    Broker->>Log: receipt "DELETE api.github.com held"
-    Human->>Broker: Approve (WebAuthn, user verification required)
-    Broker->>Log: receipt "approved"
-    Agent->>Broker: same request again, freshly signed
-    Broker->>API: DELETE /repos/acme/app (real key)
-    API-->>Broker: 204
-    Broker-->>Agent: 204 (x-leash-decision: approved)
-    Broker->>Log: receipt "executed"
-```
-
-### The rules
-
-1. **The agent never holds a real key.** Keys are encrypted in the vault (a separate AES-256-GCM key per secret, wrapped by
-   a master key; ciphertexts are bound to their row with AAD). No API returns a key.
-2. **Irreversible means held.** The [irreversible map](server/src/providers.js) lists the calls on each API that can't be
-   undone, each with the reason. Approval needs a fresh passkey ceremony and covers the exact same request (method, host,
-   path, query, content type, body) once, within 10 minutes.
-3. **Everything is on the record.** Every write, hold, approval and denial is appended to a per-account audit log where
-   each entry hashes the previous one. With receipts on (the default for new accounts), each decision is also sealed in
-   the public log: the method and provider host, the decision, the rule and the hash of the audit entry. Never a path,
-   body, key, token, name, email or IP address.
-4. **A bound token needs its agent.** A token bound to an agent key is refused unless the request is signed with that key
-   (method, full URL, body digest and content type covered; 5 minute window; each nonce once).
-
-### The one dangerous switch
-
-A token can carry `unattendedIrreversible` rules for calls an agent may run unattended, **but only a passkey holder can mint
-such a token**. A CLI session cannot, because an agent running on the same laptop can read the CLI's config file. The same
-goes for approving holds (a coding agent's commands and a deploy gate's jobs included), making a deploy gate, revoking agent keys and turning public receipts off, and for everything that loosens a brake
-(below): setting money caps, resetting a tripped breaker and unfreezing. Stopping things never needs a passkey. On a team
-that requires two seals, nobody can flip this switch alone: pre-approvals and money caps are paused until the quorum is
-lowered again, which takes 24 hours and tells everyone.
-
-### Brakes
-
-Three ways to keep an agent small. They apply to calls that go through Counterseal (Stripe refunds and payouts, and writes in
-general). They do not cap LLM tokens, and they do not cover SQL sent straight over a database connection.
-
-- **Money caps.** A token made with your passkey can carry `"money": {"currency": "usd", "perCall": 5000, "perDay": 20000}`
-  (whole numbers of the currency's smallest unit: 50.00 and 200.00 USD). A Stripe refund or payout under both caps passes
-  without asking. Above them, your phone asks for a passkey, with the amount in large type. Only `POST /v1/refunds` and
-  `POST /v1/payouts` can pass, in that one currency, as a plain form that reads one way: a repeated, escaped or
-  ambiguous amount, a query string, a JSON body or an unfamiliar currency spelling is held, and so is every other money
-  call (transfers, charges, top-ups, confirms). A refund without an amount means everything left on the charge, which
-  Counterseal asks Stripe about with your key. The day is the UTC calendar day, and calls you approve are yours: they are
-  not counted. The rest of the token's policy still applies (an allow list or a hold rule that leaves the refund out keeps
-  it held).
-- **Breaker.** `"limits": {"writesPerHour": 200, "repeatsPer5Min": 3}`, which any session may set. A write is any request that
-  is not a GET or HEAD. Past a limit the token trips: its writes wait until a passkey resets it, reads still pass, and
-  your devices are told once. `repeatsPer5Min: 3` trips on the fourth identical request (same method, path, query, content
-  type and body) within 5 minutes.
-- **Freeze.** One tap in the app, `counterseal freeze`, or the Freeze button on a phone alert stops every agent token
-  (HTTP 423), every coding-agent approval and every deploy gate, voids approvals nobody used yet and pauses approving. Any signed-in session can freeze; only a passkey in the
-  app unfreezes.
-
-A token without `limits` and `money` costs no extra database writes. See the [policy reference](docs/POLICY.md).
-
-### Two-person seal (teams)
-
-The counterseal in the literal sense: a second, different person seals what the first one approved. In this repo on
-branch `feat/two-person`, not yet deployed (migration 0009; break glass and channels: migration 0011).
-
-- **People, not shared logins.** An owner invites people with a link that works once (2 hours by default, 24 at most);
-  each person makes their own passkey and signs in as themselves. Roles: **owner** (the team, the quorum, the vault),
-  **approver** (seals held actions), **member** (makes tokens and keys for their agents, cannot seal), **viewer** (reads,
-  can deny). Roles are checked on the server for every request.
-- **Two seals.** With the quorum at 2, a held API call or coding-agent command goes ahead only when two different owners
-  or approvers have each approved it with their own passkey. One person counts once, with any number of passkeys or
-  browsers. You can also require that the person whose token or guard key asked is not one of them. Anyone can deny:
-  one no ends it.
-- **Never lowered quietly.** Raising the quorum takes effect at once. Lowering it, or letting the person who asked count,
-  takes 24 hours, wakes every member's devices, and any approver can cancel it. While one person cannot approve alone, a new
-  approver's seal counts 24 hours after they join, and pre-approvals and money caps are paused: no one person can
-  approve in advance.
-- **Leaving is instant.** Removing someone signs them out everywhere, deletes their passkeys and alert devices, revokes
-  the tokens and keys they made, drops their seals and voids approvals they helped give that are not yet used, in one
-  step. The last owner can never be removed. Only its maker or an owner can revoke someone's token or key.
-- **Public receipts** of an approval record how many seals were required and given, never who.
-- **Break glass.** For the night the second approver cannot be reached: an owner or approver opens a window of 5 to 60
-  minutes with a passkey. What Counterseal would hold, for the tokens and guard keys you pick, goes through; every call is on
-  the record (and its public receipt says `breakglass`), every member and channel is told at once, any member can close it,
-  and it cannot be extended (three a day). It never lifts a freeze, a tripped breaker or a money cap, and not a deploy gate.
-- **Slack, Discord and Google Chat** are told when something is held, part-sealed, or the team changes (who asked, the rule,
-  how many seals, a link; never the path, command, body, amount or a name). They cannot approve: only a passkey in the app does.
-  The webhook address is kept encrypted and never shown again.
-
-What it does not do: stop two people who agree to act together. See [threat model T1 to T13](docs/THREAT_MODEL.md) and the
-[team API](docs/PROTOCOL.md#team-the-two-person-seal).
+The agent's signed request is the seal. Your passkey approval is the counterseal. The public log keeps the impression.
 
 ## Quickstart
 
+The CLI is the [`counterseal`](https://www.npmjs.com/package/counterseal) package (0.3.0, Node 20 or later, zero
+dependencies).
+
 ```bash
-npx counterseal login                      # type its code at /app#device, check where it started, approve with your passkey
-npx counterseal add github                 # paste the key once; it goes into the vault, never onto disk
-npx counterseal token --label "coding agent, laptop"   # with one key in the vault no id is needed (else: creds, then token <id>)
+npx counterseal login                                    # prints a code; type it at /app#device, check where it started, approve with your passkey
+npx counterseal add github                               # paste the key once; it goes into the vault
+npx counterseal token --label "coding agent, laptop"     # a proxy token for the agent (with one key in the vault no id is needed)
 ```
 
-Or skip the terminal: create an account at /app (a name and a passkey), press **Try a held call** to approve a pretend
-one with your passkey (nothing real is called and nothing is made public), then add a key and make a token in the app.
-
-From version 0.3.0 the CLI is the `counterseal` package on npm (not published yet; until it is, run `node cli/leash.mjs` from
-this repository). `leashcli`, its first name, stays as a thin package that runs the same CLI, so old install lines and
-agent configs keep working. A CLI sign-in lasts 7 days, and tokens and receipts
-keys it makes end with it. The code is typed in the app, never sent as a link: never type a code someone sent you, because whoever
-approves a code gives that command line their account. Each sign-in alerts your devices and can be revoked in the app
-(Account), with every token and key it made.
-
-**One host.** The product lives at counterseal.gautamkhosla.com only: one origin, one passkey RP ID. The earlier
-address, leash.gautamkhosla.com, answers every request (pages, `/app`, `/v1`, `/p`) with a 301 to the same path on
-counterseal and serves nothing itself, so point agents and command lines at counterseal (leashcli 0.1.1 does not follow
-redirects). Passkeys made on leash.gautamkhosla.com do not work on counterseal. See docs/DEPLOY.md.
-
-### Connect your agent (MCP)
+Give the token to your agent as an MCP server (the `leash_request` tool calls the APIs through Counterseal):
 
 ```json
 {
   "mcpServers": {
-    "leash": {
+    "counterseal": {
       "command": "npx",
       "args": ["-y", "counterseal", "mcp"],
       "env": { "LEASH_TOKENS": "github=lsh_..." }
@@ -202,323 +57,132 @@ redirects). Passkeys made on leash.gautamkhosla.com do not work on counterseal. 
 }
 ```
 
-The `leash_request` tool lets the agent call any configured API. When a call is held, the tool result tells the agent to
-stop, give you the approve link, and retry the identical call after you approve. APIs that take a form instead of JSON
-(Stripe) use the tool's `form` field; `counterseal mcp` sends it as `application/x-www-form-urlencoded`.
+Or point any SDK at `https://counterseal.gautamkhosla.com/p/github` with the token as its bearer. When the agent tries
+something irreversible it gets `428 held_for_approval` and an approve link, and your phone or browser asks for a passkey.
 
-### Give the agent its own key (Prove who)
+Prefer no terminal? Create an account at [/app](https://counterseal.gautamkhosla.com/app) (a name and a passkey) and press
+**Try a held call**: a pretend call you approve with your passkey (nothing real is called and nothing is made public).
 
-Make an agent key in the app (generated in your browser; only the public half is sent), or with CLI 0.3.0 from the
-agent's machine, then bind a token to it and give the MCP server the key file:
+All commands: `login`, `logout`, `add`, `creds`, `tokens`, `token`, `revoke`, `freeze`, `holds`, `watch`, `agent-key`,
+`agent-keys`, `mcp`, `mcp wrap|pin|unpin|status`, `guard install|uninstall|status|check|map`. Run `npx counterseal help`.
 
-```bash
-npx counterseal agent-key agent-key.json --label laptop-agent     # CLI 0.3.0 (in this repo, not yet published)
-npx counterseal token <credentialId> --agent-key <agentKeyId>
-# MCP env: { "LEASH_TOKENS": "github=lsh_...", "LEASH_AGENT_KEY": "/path/to/agent-key.json" }
-```
+## Features
 
-Signing from the MCP server needs CLI 0.3.0 too. The only CLI on npm today is the `leashcli` package, version 0.1.1, which
-cannot sign, so a bound token would refuse its calls; the `counterseal` package (0.3.0) is not published yet. Until it is, run
-`cli/leash.mjs` from this repository.
-
-### Approvals for what Counterseal does not proxy (a coding agent's commands)
-
-Some irreversible actions never pass through an API Counterseal brokers: `terraform destroy`, `railway volume delete`,
-`gh repo delete`, `prisma migrate reset`, `DROP TABLE` through `psql`, `git push --force`. For those, a hook on the
-agent's machine (`counterseal guard`, in the next section) holds a **guard key** (`lsg_`) and asks the Approvals API:
-
-```bash
-# ask (Bearer lsg_): the exact command, why it is held, and the folder it runs in
-curl -s -X POST https://counterseal.gautamkhosla.com/v1/approvals -H "authorization: Bearer $LSG" -H 'content-type: application/json' \
-  -d '{"kind":"shell","agent":"claude-code","rule":"sh.terraform-destroy","why":"Destroys every resource in the state.","summary":"terraform destroy","detail":"terraform destroy -auto-approve","context":{"cwd":"infra"}}'
-# -> 202 {"id","status":"pending","hash","approve_url","expires_at"}; your phone buzzes; approve in the app with your passkey
-curl -s "https://counterseal.gautamkhosla.com/v1/approvals/$ID?wait=20" -H "authorization: Bearer $LSG"   # long-poll, writes nothing
-curl -s -X POST "https://counterseal.gautamkhosla.com/v1/approvals/$ID/use" -H "authorization: Bearer $LSG" -H 'content-type: application/json' -d "{\"hash\":\"$HASH\"}"
-```
-
-- An approval covers that exact command (with its agent and folder), once, within 10 minutes. You can deny with a reason;
-  the agent gets the reason back.
-- A guard key can ask and read its own approvals; it can never approve (that always needs your passkey in the app). Make
-  one in the app (Account, Guard keys) or from a signed-in `leashcli`; a key made by a CLI sign-in ends with it.
-- **The guard runs on the agent's machine: a seatbelt, not a sandbox.** An agent that can edit its hook settings or run a
-  script around the hook is not stopped by it. For a hard stop, give the agent a Counterseal token instead of the real key.
-- Public receipts say only `RUN claude-code` (or `CALL mcp`), the decision, the rule id and the map version; never the
-  command, folder or label.
-
-The full contract (request fields, errors, budgets) is in [docs/PROTOCOL.md](docs/PROTOCOL.md#approvals-for-what-the-broker-does-not-proxy).
-
-### Guard your coding agent (`counterseal guard`)
-
-`counterseal guard` is the hook that does the asking for you. It reads each shell command your coding agent is about to
-run the way a shell does (quotes, `&&` and pipes, `sh -c`, `sudo`, `xargs`, `ssh`, `docker exec`, `package.json` scripts and
-more) and holds the ones on the **shell map** (version `2026-10-10.1`, 27 rules: `terraform destroy`, `git push --force`,
-`DROP TABLE` through `psql`, `railway volume delete`, `gh repo delete`, `rm -rf` outside the project, `kubectl delete`,
-`docker volume prune`, cloud CLI deletes, `curl` to a brokered API with a write method, and more) until you approve that
-exact command, once, with a passkey. Everything not on the map is left to the agent's own permission settings.
-
-It needs CLI 0.3.0, which is in this repository and not on npm yet; until it is, run `node cli/leash.mjs guard ...` from a
-clone instead of `npx counterseal guard ...`.
-
-```bash
-npx counterseal login                                  # a guard key made through this ends with the sign-in (7 days at most)
-npx counterseal guard install                          # finds Claude Code, Codex and Cursor; or --agents claude-code,codex,cursor
-npx counterseal guard check -- terraform destroy       # what the map says about a command, offline
-npx counterseal guard status                           # what is installed, whether the key works, whether the account is frozen
-npx counterseal guard uninstall                        # removes only its own hooks, revokes the key
-```
-
-`install` makes a guard key, saves it in `~/.config/leash/guard.json` (mode 600, never printed), copies the guard next to
-it, and adds hook entries to `~/.claude/settings.json`, `~/.codex/hooks.json` and `~/.cursor/hooks.json` without touching
-anything else (it saves a backup, shows the diff, and `--dry-run` shows it without writing). For a key that lasts, make one
-in the app (Account, Guard keys) and run `npx counterseal guard install --paste-key`.
-
-**Claude Code plugin** (the same hook, from this repository's marketplace file, no form):
-
-```bash
-claude plugin marketplace add GautamTalksDev/leash
-claude plugin install counterseal@counterseal
-npx counterseal guard install --agents none            # makes the key the plugin's hook uses
-```
-
-The plugin runs its own pinned copy of the guard (never `npx` at hook time) and needs `node` on your PATH. Claude Code
-2.1.295 or later blocks the command when the hook crashes or times out; older versions let it through. With the plugin
-switched on, `guard install` adds no second hook to Claude Code.
-
-- **A held command waits for you.** The agent's tool call pauses for up to 9 minutes while your phone shows the exact
-  command; approve and it runs, deny (with a reason) and the agent is told, with your words quoted as text. Agents whose
-  hooks cannot wait (or `"mode": "retry"`) get the answer at once with the link and run the same command again after you
-  approve. On a team that requires two seals, the command stays pending until two different people have approved it:
-  the hook keeps waiting, prints "1 of 2 approvals so far", and tells the agent that a second person has to approve it
-  if the time runs out. Only the person who made a guard key, or an owner, can revoke it.
-- **Fail closed.** If the server cannot be reached, the key is no longer valid, you are rate limited, or the account is
-  frozen, a command on the map is denied with the reason and the fix; every other command runs as before. Set
-  `"onUnavailable": "allow"` in `guard.json` to let commands through when the server cannot be reached (a revoked key, a
-  rate limit and a freeze still deny). A request times out after 10 seconds.
-- **What leaves your machine.** The command with credentials removed (connection strings, bearer tokens, key-shaped
-  values, `PASSWORD=` style variables), the rule, why, the name of the folder (not its path) and the session id. Held
-  commands are shown on your devices and may appear on the lock screen.
-- **What it does not see.** Aliases and functions defined outside the command line; the contents of script files and
-  Makefiles; code in other languages (`python -c`, `node -e`); PowerShell and `cmd`; encoded payloads (a decoder piped
-  into a shell is held, not read); globs; symlinks. An agent that edits its own hook settings, the guard's files or its
-  config, or runs the same effect through a script, is not stopped: **a seatbelt, not a sandbox**. For a hard stop, give
-  the agent a Counterseal token instead of the real key.
-- **How far each agent is tested.** The hook is tested against the real Approvals API code over HTTP
-  (`cli/test/guard-server.test.mjs`) and against each agent's documented hook format. Claude Code: the plugin passes
-  `claude plugin validate --strict` and installs from the marketplace file with Claude Code 2.1.293; it has not been seen
-  firing in a live session. Codex and Cursor: written to their documented formats, not tested in the apps. Copilot CLI,
-  Gemini CLI and Antigravity are not supported yet.
-
-The shell map (`sdk/shellmap.mjs`, tests in `sdk/shellmap.test.mjs` with about a thousand commands in
-`sdk/shellmap.vectors.txt`, and `sdk/shellmap.bash.test.mjs`, which compares it with real bash on generated commands: the words
-a command comes to, and whether a stub `terraform destroy` really runs where the map says "not held") is documented rule by rule in the [docs](https://counterseal.gautamkhosla.com/docs/#guard-cli).
-### Put an MCP server behind Counterseal (`counterseal mcp wrap`)
-
-Many MCP servers can delete, send, pay or deploy with the key you gave them. `counterseal mcp wrap` sits between your MCP
-client and any local (stdio) MCP server. It holds the destructive tool calls until you approve them with your passkey,
-and it pins the server's tool definitions, so a server that changes a tool after you approved it is hidden until you
-look. Put it in front of the server's own command in your client's MCP configuration (CLI 0.3.0, in this repo, not yet
-published; until then run `cli/leash.mjs`):
-
-```json
-{
-  "mcpServers": {
-    "supabase": {
-      "command": "npx",
-      "args": ["-y", "counterseal", "mcp", "wrap", "--name", "supabase", "--", "npx", "-y", "@supabase/mcp-server-supabase@latest"],
-      "env": { "LEASH_GUARD_KEY": "lsg_...", "SUPABASE_ACCESS_TOKEN": "the server's own settings stay as they were" }
-    }
-  }
-}
-```
-
-- **What is held.** A call whose tool name says it deletes, destroys, removes, truncates, refunds, transfers, pays out,
-  sends, publishes, deploys, revokes, cancels, archives, terminates, wipes, purges, merges, drops, resets or forces
-  something; a tool that runs a command (`run_command`, `bash`, `apply_migration`); a SQL argument (`query`, `sql`,
-  `statement`) that is not one plain read (`SELECT`, `WITH ... SELECT`, `EXPLAIN`, `SHOW`), the same check the broker
-  applies to SQL; and anything your policy file lists. Reads such as `list_tables` or `get_project` go straight through.
-- **How a hold works.** The wrapper answers at once with a tool result that says the call is held and gives the approval
-  link, so no client timeout runs. You approve in the app with your passkey; the agent calls the same tool with the same
-  arguments again and that call goes through, once, within 10 minutes. Other arguments are another approval. Public
-  receipts say only `CALL mcp`, the decision, the rule and the map version, never the tool, the arguments or the server.
-- **Pinning.** The first complete tool list your client asks for is pinned (trust on first use). After that a changed or
-  new tool is shown to the model as a stub that says it is blocked, its new text never reaches the model, and calls to it
-  are held (rule `mcp.changed`) until you run `counterseal mcp pin --name supabase`, which shows what changed, member by
-  member, and asks you to type `pin`. The server's `instructions` are pinned the same way. The wrapper checks when your
-  client lists tools, when the server says its tools changed, and before a call if its last look is a minute old. The
-  hash is mcp-pin's published tool definition hash (version 1, RFC 8785), so a pin means the same thing to other tools.
-  `counterseal mcp status --name supabase [--check]` shows the pin, what waits for review and whether Counterseal answers;
-  `counterseal mcp unpin --name supabase` forgets the pin.
-- **Policy file** (`~/.config/leash/mcp/<name>.json`, optional, strict JSON, a typo stops the wrapper before it starts):
-  `{"hold": ["send_*"], "allow": ["get_merge_status"], "sqlArgs": ["query", "sql"], "trustAnnotations": false, "repin": "terminal"}`.
-  `hold` adds tool name patterns; `allow` lifts the name rule for those tools but never the SQL rule; `sqlArgs` names the
-  arguments that are SQL (`[]` turns the check off); `trustAnnotations: true` also holds a tool whose definition says
-  `destructiveHint: true`; `repin: "passkey"` makes `counterseal mcp pin` itself wait for your passkey.
-- **A guard key is needed to ask.** Make one in the app (Account, Guard keys) and set `LEASH_GUARD_KEY`, or put
-  `{"key": "lsg_..."}` in `~/.config/leash/guard.json`, the file the coding-agent guard uses. Without one, a held call is
-  refused with a message that says why; calls that are not held never touch Counterseal. A frozen account (Freeze)
-  answers every held call with "Counterseal is frozen" and the agent is told not to retry. The wrapped server does not
-  receive the guard key. `--require-pin` refuses to start a server that has no pin yet. While a team's break-glass window is open, a held call is approved at once (the team opened the window with passkeys) and the wrapper says so on stderr.
-- **A seatbelt, not a sandbox.** The wrapper runs on the machine of the agent it guards, as the same user. It only sees
-  what the client sends through it: an agent that can start the server another way, edit your client's MCP
-  configuration, rewrite the pin or policy files, or call a tool the lists do not name is not stopped. Tool names and
-  arguments are matched against lists, not understood (`write_file` and `create_issue` are not held unless you say so).
-  Prompts and resources are not pinned, tool results are not inspected, and only stdio servers are supported. For a hard
-  stop, give the agent a Counterseal token instead of the real key.
-- Advanced: `LEASH_MCP_RECHECK_MS` (how old the wrapper's last look at the tools may be before a call; default 60000,
-  `0` looks before every call), `LEASH_MCP_TIMEOUT_MS` (how long to wait for Counterseal), `LEASH_MCP_DIR` (where pins and
-  policies live).
-
-### Deploy Gate for GitHub Actions
-
-Hold any GitHub Actions job until you approve it with a passkey. GitHub's own deployment approvals (required reviewers, wait
-timers, custom protection rules) are available only for public repositories on the Free, Pro and Team plans, GitHub's
-documentation says ([read 9 Oct 2026](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
-A gate does not use them: the job's step sends the OIDC token GitHub signs for it, Counterseal verifies it, and your phone shows
-the repository, workflow, commit, run and who started it, from that token. In this repo, not yet deployed (migration 0007); the
-action is in [`action/deploy-gate`](action/deploy-gate) and is not on the Marketplace.
-
-1. In the app, Deploy gates, **New gate** (it asks for your passkey): the repository, its workflow files and the branches or
-   tags it deploys from. Nothing is accepted by default.
-2. Copy `action/deploy-gate` to `.github/actions/counterseal-gate` in the repository and add the step to a job that has
-   `permissions: id-token: write`:
-
-```yaml
-jobs:
-  approve:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write   # lets the job ask GitHub for the token the gate checks
-      contents: read
-    steps:
-      - uses: ./.github/actions/counterseal-gate
-        with:
-          gate: gate_0123456789abcdef01234567      # from the app; not a secret
-          summary: deploy ${{ github.sha }} to production
-          timeout-minutes: 15
-```
-
-3. Run the workflow. The step prints a link and waits; approve with your passkey and the job goes on. It fails if you deny, if
-   nobody decides in time, or if the run is not what the gate accepts. More samples (a deploy job after the gate, and a gate
-   that hands the job a 15 minute token for a vaulted key only after you approve, so there is no deploy key in the repository
-   before then) are in [`action/deploy-gate/examples`](action/deploy-gate/examples).
-
-- The approval covers one run: GitHub's repository and owner ids, run, attempt, commit, workflow, ref and environment. The
-  first approved run binds the gate to the repository's ids, so a repository that is deleted and re-created under the same name
-  cannot use it.
-- **A gate is a pause the job asks for.** A person who can edit the workflow file can remove the step: protect the file, or use
-  the key option above, where the job has nothing to deploy with before an approval.
-- On a team that requires two seals, a deploy needs two different approvers (and with self-approval off, not the person who made the gate); removing the gate's maker stops it. See "On a team" in docs/DEPLOY_GATE.md.
-- Waiting writes nothing to the database. A job that waits uses Actions minutes (private repositories), so keep the timeout low.
-- Public receipts say `DEPLOY github.com`, the decision and the rule; never the repository unless you opt in for that gate.
-- Not yet run against real GitHub tokens: the tests use a stand-in that signs like GitHub. The first real run is the real test.
-
-Usage, what is checked, limits and errors: [docs/DEPLOY_GATE.md](docs/DEPLOY_GATE.md). The contract is in
-[docs/PROTOCOL.md](docs/PROTOCOL.md#deploy-gates).
-
-### Any SDK or script
-
-| Provider | Base URL |
+| | What it does |
 |---|---|
-| GitHub | `https://counterseal.gautamkhosla.com/p/github` |
-| Cloudflare | `https://counterseal.gautamkhosla.com/p/cloudflare` (paths after `/client/v4`) |
-| Railway | `https://counterseal.gautamkhosla.com/p/railway/` (GraphQL) |
-| Stripe | `https://counterseal.gautamkhosla.com/p/stripe` |
-| Supabase (management API) | `https://counterseal.gautamkhosla.com/p/supabase` |
-| Vercel | `https://counterseal.gautamkhosla.com/p/vercel` |
-| Neon | `https://counterseal.gautamkhosla.com/p/neon` (paths after `/api/v2`) |
-| Fly.io (Machines API) | `https://counterseal.gautamkhosla.com/p/fly` (paths after `/v1`; vault the whole token line `fly tokens create` prints, `FlyV1 fm2_...`) |
-| Resend | `https://counterseal.gautamkhosla.com/p/resend` |
-| Shopify (Admin GraphQL API only) | `https://counterseal.gautamkhosla.com/p/shopify/admin/api/2026-07/graphql.json`; add the key with its store address: `counterseal add shopify --host your-store.myshopify.com` |
+| **Approve** | Irreversible calls are held until a passkey approves them, on your phone or laptop. An approval covers that exact request, once, within 10 minutes. |
+| **Record** | With receipts on, every decision the broker makes on a write (allowed, held, approved, executed, denied) becomes an entry in a public, append-only Merkle log (RFC 6962, signed checkpoints). Allowed reads are not recorded. A receipt holds the method, the provider host, the decision and the rule, never a path, body, key, token, name, email or IP. Verify in the browser or offline with `sdk/receipts.mjs`. |
+| **Prove who** | Bind a token to an agent key (Ed25519). It then only works on requests that key signed (RFC 9421), so a stolen token alone does nothing. |
+| **Guard** | `counterseal guard` is a hook for a coding agent's shell commands. A command on the shell map (27 rules: `terraform destroy`, `git push --force`, `DROP TABLE` through `psql`, `rm -rf` outside the project, and more) waits for your passkey. A seatbelt, not a sandbox. |
+| **MCP gateway** | `counterseal mcp wrap` sits in front of any local MCP server: destructive tool calls wait for your passkey, and the server's tool definitions are pinned so a changed tool is hidden until you review it. |
+| **Two-person seal** | A team can require two different people, each with their own passkey, before an irreversible action goes ahead. Roles, one-time invites, and nobody can lower the rule quietly: lowering it takes 24 hours and tells everyone. |
+| **Deploy Gate** | A GitHub Actions step that holds a deploy job until you approve that exact run. It uses the OIDC token GitHub signs for the job. The action is in this repository, not on the Marketplace. |
+| **Brakes** | Money caps for Stripe refunds and payouts, a breaker for too many or repeated writes, and Freeze, which stops every agent token at once. They cover calls through Counterseal, not LLM tokens. |
+| **The app** | An installable web app with live holds, alerts to your devices that carry no payload, the audit log, a privacy center, a data export and an evidence pack. |
 
-The irreversible map covers 10 APIs: GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify. Management APIs only; SQL sent straight over a database connection string never passes through Counterseal. The map version is `2026-10-10.1`; every rule has its reason and the reference page it comes from in [server/src/providers.js](server/src/providers.js).
+The irreversible map covers 10 APIs: GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify. Management APIs only; SQL sent straight over a database connection string never passes through Counterseal.
 
-### Verify a receipt
+Details for each are in the [full guide](docs/GUIDE.md) and the [policy reference](docs/POLICY.md).
 
-Download a bundle from the app (Receipts) and check it at [/verify/](https://counterseal.gautamkhosla.com/verify/), or offline:
+## How it works
 
-```bash
-node sdk/receipts.mjs verify receipt-42.json --key "$(curl -s https://counterseal.gautamkhosla.com/v1/log/key | jq -r .verifier_key)"
+```mermaid
+flowchart LR
+    A["AI agent<br/>token + signature"] --> W
+    subgraph W["Counterseal (a Cloudflare Worker)"]
+      direction TB
+      S["Agent signature check"] --> P["Policy + irreversible map"]
+      P --> V[("Vault<br/>real keys, encrypted")]
+      P --> H["Held for approval"]
+      P --> AU[("Audit log<br/>hash-chained, private")]
+      AU --> LOG[("Public log<br/>Merkle tree")]
+    end
+    W -- "real key, added server side" --> U["GitHub, Stripe, Railway, ..."]
+    H -- "alert" --> You["You: passkey on phone or laptop"]
+    You -- "approve or deny" --> H
+    LOG --> Anyone["Anyone, offline: entry + proof + signed checkpoint"]
 ```
 
-Pin the verifier key once and keep it with your auditors; a bundle's own `log` field is only a hint.
+One request, end to end:
 
-### Free tool: Web Bot Auth checker
-
-[/tools/web-bot-auth/](https://counterseal.gautamkhosla.com/tools/web-bot-auth/) checks a Web Bot Auth signature (RFC 9421) from
-any AI agent, in your browser. The same code is in `sdk/websig.mjs` and `sdk/verifier.mjs` for your own server.
-
-## Limits (Workers Free)
-
-Receipts: 10,000 per account per month, 2,000 per account per UTC day, 10,000 appends per UTC day for the whole log;
-batches of 25 (12 signed). When a limit is reached the broker still decides and still writes the audit log; the receipt is
-skipped and counted. See [docs/DEPLOY.md](docs/DEPLOY.md) for every daily budget.
-
-## Repository layout
-
-```
-server/        Cloudflare Worker: API, proxy, vault, WebAuthn, policy, audit, the public log (Durable Object), agent keys
-  src/brand.js       every product name, domain and tagline (run scripts/rebrand.mjs after changing it)
-  src/providers.js   the irreversible map (versioned; every rule has a test)
-  src/ledger.js      receipts: the public log API, the receipts API, broker receipts
-  src/agentkeys.js   agent keys: proof of possession, RFC 9421 broker signatures
-  src/approvals.js   the Approvals API and guard keys: approvals for a coding agent's commands and tool calls
-  src/brakes.js      money caps, the breaker and Freeze (src/money.js: how amounts are read and shown)
-  src/team.js        the two-person seal: members, invites, roles, the quorum and seals
-  src/trust.js       the first run and the privacy center: the demo hold, launch funnel markers, data export, evidence pack, retention
-  src/gates.js       Deploy Gate: gates, a job's request, the poll, phase 2 (src/oidc.js verifies GitHub's token; src/gatefacts.js)
-  test/              node:test suite: virtual passkeys, fake upstream, migration on data from the live code
-  bench/cpu.mjs      CPU of the hot paths
-  dev/local.js       full local server on node:sqlite
-action/        GitHub Action (deploy-gate, zero dependencies) and sample workflows; not on the Marketplace
-cli/           leash CLI and MCP server (zero dependencies), sign.mjs for agent keys, guard.mjs (the coding-agent guard),
-               mcp-wrap.mjs and the mcp-*.mjs files (mcp wrap: hold destructive MCP tool calls, pin tool definitions)
-  test/              the guard against a stand-in and against the real server code over HTTP; the plugin files
-packages/leashcli/  the old package name: a thin alias that runs the counterseal CLI of the same version
-sdk/           receipts (record + verify offline), websig (Web Bot Auth sign + verify) and shellmap (the shell map), zero dependencies
-plugins/       the Claude Code plugin (hook, skill, pinned scripts); .claude-plugin/marketplace.json at the root lists it
-scripts/       rebrand.mjs, sync-guard.mjs (keeps the guard copies, the SQL block and the API map in step with the server),
-               cli-name.mjs (every install line names BRAND.cliInstall: counterseal, or leashcli before that package is published)
-site/public/   website and the installable app (strict CSP, Trusted Types, no third-party code; sw.js caches only the app's own files)
-docs/          threat model, protocol, policy reference, deployment, release checklist
-.github/       CI, and the npm publish workflow (trusted publishing, provenance, CycloneDX SBOMs)
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant C as Counterseal
+    participant You as You (passkey)
+    participant API as Upstream API
+    Agent->>C: DELETE /p/github/repos/acme/app (token + signature)
+    C-->>Agent: 428 held_for_approval + approve link
+    You->>C: approve (WebAuthn)
+    Agent->>C: the same request again
+    C->>API: DELETE /repos/acme/app (real key)
+    API-->>C: 204
+    C-->>Agent: 204
 ```
 
-## Develop
+## Honest limits
+
+- **It is a broker, not a sandbox.** It protects calls that go through it. An agent that still has the real key in a `.env`
+  file can bypass it, so put the real key in the vault and give the agent a Counterseal token.
+- **The guard and the MCP wrapper are seatbelts.** They run on the agent's machine as the same user. An agent that can edit
+  its own hook settings or run a script around the hook is not stopped. They match lists; they do not understand intent.
+  For a hard stop, give the agent a token instead of the real key.
+- **The map is a reviewed list, not every dangerous action.** Everything not on it is allowed on those hosts.
+- **The public log has one signing key.** Split views are detectable, not prevented. Cosigning by independent outside parties is on the roadmap.
+- **Receipts prove what was decided**, that an agent key signed, and that a passkey approved. Publicly they do not say which
+  person approved, and the time of each receipt is public.
+- **Two people who agree to act together** are out of scope for the two-person seal. Break glass, by design, lets one person
+  loosen protection for up to an hour.
+- **The Deploy Gate has not run against real GitHub tokens yet**; the tests use a stand-in that signs like GitHub.
+- **Brakes cover brokered calls only**, not LLM spend and not SQL over a database connection.
+- **Not independently audited.** The [security standards page](https://counterseal.gautamkhosla.com/security/standards/) is a
+  self-assessment. Beta limits are in [docs/DEPLOY.md](docs/DEPLOY.md).
+
+## Security model
+
+[SECURITY.md](SECURITY.md) (guarantees, controls, how to report a vulnerability) and the
+[threat model](docs/THREAT_MODEL.md). The wire formats are in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
+## Self-hosting
+
+Counterseal is one Cloudflare Worker, one D1 database and one Durable Object, and it fits the Workers Free plan. Follow
+[docs/DEPLOY.md](docs/DEPLOY.md) (secrets, migrations, `wrangler deploy`, settings). To work on it locally:
 
 ```bash
 cd server
 node --test test/*.test.js ../sdk/*.test.mjs ../cli/test/*.test.mjs   # the whole suite
-node ../scripts/sync-guard.mjs                  # after changing the shell map, the CLI or the server map: rewrite the generated copies
-node bench/cpu.mjs                              # CPU per hot path
-node dev/local.js 8790                          # http://localhost:8790 (passkeys work on localhost)
+node dev/local.js 8790                                                # a local server on http://localhost:8790
 ```
 
-## Deploy
+## Repository layout
 
-See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), nine additive migrations (0004 to 0012), `wrangler deploy`.
-Publish the CLI before deploying a site whose install lines say `npx counterseal` (docs/RELEASE.md).
+```
+server/        the Worker: API, proxy, vault, passkeys, policy, audit, the public log, approvals, teams, gates
+cli/           the counterseal CLI, MCP server, guard and MCP wrapper (zero dependencies)
+sdk/           receipts (record and verify offline), Web Bot Auth sign and verify, the shell map
+action/        the Deploy Gate GitHub Action and sample workflows
+plugins/       the coding-agent plugin (hook, skill, pinned scripts)
+packages/      leashcli, the old package name, a thin alias for counterseal
+site/public/   the website and the installable app
+docs/          guide, threat model, protocol, policy reference, deployment, release checklist
+```
 
-## Status and roadmap
+## Contributing
 
-**Live** (checked 9 Oct 2026 at leash.gautamkhosla.com, before the product moved to counterseal.gautamkhosla.com): the broker for
-GitHub, Cloudflare, Railway, Stripe and Supabase (map `2026-10-09.1`), passkey approvals of held calls, and payload-free
-phone and desktop alerts. The published CLI is `leashcli` 0.1.1.
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md) first. Report a vulnerability privately, as [SECURITY.md](SECURITY.md) describes,
+never in a public issue.
 
-**In this repository, not yet deployed:** one host only (leash.gautamkhosla.com answers 301 to counterseal for every request); public receipts and the
-public log; agent keys (Prove who); five more APIs (Vercel, Neon, Fly.io, Resend, Shopify; map `2026-10-10.1`); money caps,
-the breaker and Freeze; the Approvals API and guard keys; `counterseal guard` with its shell map and Claude Code plugin,
-`counterseal mcp wrap`, and CLI 0.3.0 (not yet on npm); the two-person seal with break-glass windows and Slack, Discord and
-Google Chat alerts; the Deploy Gate for GitHub Actions; and the installable app with the first-run demo, the privacy center,
-the data export and the evidence pack (migration 0012, branch `feat/app-trust`).
+## Status
 
-**Next:** AWS (SigV4 re-signing), PlanetScale; SSO for teams; external witness cosigning of checkpoints (C2SP
-tlog-witness); SCITT-compatible receipts.
+The CLI, `counterseal` 0.3.0, is on npm. The hosted service lives at
+[counterseal.gautamkhosla.com](https://counterseal.gautamkhosla.com) and is free during the public beta; there is no
+billing and no paid plan. What each release adds is in [CHANGELOG.md](CHANGELOG.md), and what is deployed where is in
+[docs/DEPLOY.md](docs/DEPLOY.md). Self-hosting runs everything in this repository.
 
-Counterseal maps to the proxy-gateway model of the IETF draft
-[Credential Broker for Agents (CB4A)](https://www.ietf.org/archive/id/draft-hartman-credential-broker-4-agents-00.html)
-(-00, an individual draft): scoped credentials that only work through the broker, policy decisions outside the agent,
-and approval for the calls that matter.
+Next: AWS (SigV4 re-signing), PlanetScale, SSO for teams, outside cosigning of the log checkpoints, SCITT
+receipts.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+[Apache-2.0](LICENSE).

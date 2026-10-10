@@ -138,7 +138,7 @@ curl -s https://counterseal.gautamkhosla.com/v1/approvals/&lt;id&gt;/use \
     <li><strong>A seatbelt, not a sandbox.</strong> The guard runs on the agent's machine and matches a map of commands; an agent that edits its hook settings or wraps a command in a script is not stopped by it. Commands not on the map are left to your agent's own permission settings. For a hard stop, give your agent a Counterseal token instead of the real key.</li>
     <li><strong>Receipts.</strong> A guard decision's public receipt says only <code>RUN claude-code</code> (or <code>CALL mcp</code> for a tool call), the decision, the rule and the map version. Never the command, folder or key label.</li>
   </ul>
-  <p>Fields: <code>kind</code> (<code>shell</code> or <code>tool</code>), <code>agent</code> (<code>claude-code</code>, <code>codex</code>, <code>cursor</code>, <code>copilot</code>, <code>gemini</code>, <code>antigravity</code> or <code>mcp</code>), <code>rule</code>, <code>why</code> (up to 300 characters), <code>summary</code> (up to 200), <code>detail</code> (the exact command or canonical tool call, up to 4,096), optional <code>context</code> (<code>cwd</code>, the folder's name only; <code>session</code>) and <code>map</code> (the guard's map version). The full contract is in <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
+  <p>Fields: <code>kind</code> (<code>shell</code> or <code>tool</code>), <code>agent</code> (<code>claude-code</code>, <code>codex</code>, <code>cursor</code>, <code>copilot</code>, <code>gemini</code>, <code>antigravity</code> or <code>mcp</code>), <code>rule</code>, <code>why</code> (up to 300 characters), <code>summary</code> (up to 200), <code>detail</code> (the exact command or canonical tool call, up to 4,096), optional <code>context</code> (<code>cwd</code>, the folder's name only; <code>session</code>) and <code>map</code> (the guard's map version). The full contract is in <a href="https://github.com/GautamTalksDev/counterseal/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
 
   <h2 id="guard-cli">Guard your coding agent</h2>
   <p><code>counterseal guard</code> puts a hook in front of your coding agent's shell commands. A command on the shell map waits for your passkey; every other command is left to the agent's own permission settings. It is in this repository (CLI 0.3.0, coming to npm), not on npm yet: until then run <code>node cli/leash.mjs guard ...</code> from a clone.</p>
@@ -147,7 +147,7 @@ npx counterseal guard install          # finds Claude Code, Codex and Cursor; or
 npx counterseal guard check -- terraform destroy     # what the map says, offline
 npx counterseal guard status           # what is installed, and whether the key works</pre>
   <p><strong>Claude Code plugin.</strong> The same hook as a plugin, from this repository's marketplace file (no form):</p>
-  <pre>claude plugin marketplace add GautamTalksDev/leash
+  <pre>claude plugin marketplace add GautamTalksDev/counterseal
 claude plugin install counterseal@counterseal
 npx counterseal guard install --agents none     # makes the key the plugin's hook uses</pre>
   <p>The plugin needs <code>node</code> on your PATH and runs its own pinned copy of the guard, never <code>npx</code>. The plugin sets the hook to block the command if the hook itself crashes or times out; Claude Code 2.1.295 or later honours that, and older versions let such a command through. Claude Code may say one plugin option is not set: it is only for the optional MCP server and can be left empty. If you use the plugin, <code>guard install</code> adds no second hook to Claude Code (two would run, and the second would deny a command you approved).</p>
@@ -241,7 +241,7 @@ steps:
     <li><strong>Receipts.</strong> A gate decision's public receipt says only <code>DEPLOY github.com</code>, the decision and the rule; never the repository unless you chose that for the gate.</li>
     <li><strong>Not yet run against real GitHub tokens.</strong> The action is in the Counterseal repository (<code>action/deploy-gate</code>), not on the Marketplace, and its tests use a stand-in that signs like GitHub.</li>
   </ul>
-  <p>Usage, what is checked, limits and errors: <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/DEPLOY_GATE.md">docs/DEPLOY_GATE.md</a>. The contract is in <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
+  <p>Usage, what is checked, limits and errors: <a href="https://github.com/GautamTalksDev/counterseal/blob/main/docs/DEPLOY_GATE.md">docs/DEPLOY_GATE.md</a>. The contract is in <a href="https://github.com/GautamTalksDev/counterseal/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
   <h2 id="mcp-wrap">Any MCP server behind Counterseal</h2>
   <p><code>counterseal mcp wrap</code> sits between your MCP client and a local (stdio) MCP server. Destructive tool calls wait for your passkey, and the server's tool definitions are pinned, so a tool the server changes after you approved it is hidden until you look. It is in the repository and not yet published (CLI 0.3.0). Put it in front of the server's own command:</p>
   <pre>{ "mcpServers": { "supabase": {
@@ -471,7 +471,7 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
 <footer class="foot">
   <div class="foot-in">
     <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
-    <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/security/standards/">Standards</a><a href="/privacy/">Privacy</a><a href="/privacy/subprocessors/">Subprocessors</a><a href="/privacy/dpa/">DPA template</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/leash" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
+    <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/security/standards/">Standards</a><a href="/privacy/">Privacy</a><a href="/privacy/subprocessors/">Subprocessors</a><a href="/privacy/dpa/">DPA template</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/counterseal" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
     <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend or Shopify.</span>
   </div>
 </footer>

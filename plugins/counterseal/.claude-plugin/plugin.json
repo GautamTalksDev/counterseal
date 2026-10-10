@@ -8,7 +8,7 @@
     "url": "https://github.com/GautamTalksDev"
   },
   "homepage": "https://counterseal.gautamkhosla.com/docs/#guard",
-  "repository": "https://github.com/GautamTalksDev/leash",
+  "repository": "https://github.com/GautamTalksDev/counterseal",
   "license": "Apache-2.0",
   "keywords": ["guard", "approvals", "passkey", "safety", "hooks", "irreversible"],
   "userConfig": {

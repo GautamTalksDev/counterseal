@@ -1,0 +1,14 @@
+Counterseal
+Copyright 2026 Gautam Khosla (GautamTalksDev)
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party material bundled in this repository:
+
+  site/public/fonts/  Geist, Geist Mono and Instrument Serif, used under the SIL Open Font License 1.1.
+                      Each font's license text is next to it (OFL-*.txt).
+
+The tool definition hash used by "counterseal mcp wrap" follows the published recipe of mcp-pin
+(https://github.com/GautamTalksDev/mcp-pin, MIT). cli/spawn.mjs is a port of its process spawning code.
+
+The runtime has no third-party npm dependencies.

@@ -6,7 +6,7 @@
 #
 # Copy action/deploy-gate from the Counterseal repository to .github/actions/counterseal-gate in your repository (the action is
 # not on the Marketplace). Or, to use it from the Counterseal repository directly, pin a full commit:
-#   uses: GautamTalksDev/leash/action/deploy-gate@<full commit sha>
+#   uses: GautamTalksDev/counterseal/action/deploy-gate@<full commit sha>
 name: Deploy
 on:
   push:

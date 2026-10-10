@@ -312,7 +312,7 @@ available to people:
 
 1. **Publish the CLI** (above): `guard.mjs` and `shellmap.mjs` are in the package's `files`. Until 0.3.0 is on npm, `npx counterseal guard`
    runs nothing (0.1.1 has no such command); the docs and README say so.
-2. **The plugin needs the repository to be readable by the people who add it.** `claude plugin marketplace add GautamTalksDev/leash`
+2. **The plugin needs the repository to be readable by the people who add it.** `claude plugin marketplace add GautamTalksDev/counterseal`
    reads `.claude-plugin/marketplace.json` from the default branch, so the files must be on the branch people get (not only on
    a feature branch) and the repository must be public. No form and no store is involved. Submitting to Anthropic's directory
    is a separate, optional step with its own review (their portal), not done here.
