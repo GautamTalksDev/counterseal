@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { check, COPIES, sqlBlock } from '../../scripts/sync-guard.mjs';
 import { readFileSync } from 'node:fs';
 
-test('every copy of a guard file matches its source (run: node scripts/sync-guard.mjs)', () => {
-  assert.deepEqual(check(), []);
+test('every copy of a guard file matches its source, and the API map and the SQL block are the server\'s (run: node scripts/sync-guard.mjs)', async () => {
+  assert.deepEqual(await check(), []);
   assert.ok(COPIES.length >= 1);
 });
 

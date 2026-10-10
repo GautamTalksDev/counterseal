@@ -66,6 +66,7 @@ export async function startStub(opts = {}) {
     const key = auth.slice(7), k = state.keys.get(key);
     if (!k || k.revoked || (k.expiresAt && k.expiresAt < Date.now())) return err(res, 401, 'guard_key_invalid', 'That guard key is not valid.');
     const f = take('any'); if (f) return err(res, f, 'stub_failure', 'injected failure');
+    if (state.frozen) return err(res, 423, 'account_frozen', 'This account is frozen. Unfreeze it with your passkey first; approvals wait until then.'); // Freeze (Brakes): ask, poll and use all answer 423
 
     if (m === 'POST' && p === '/v1/approvals') {
       const ct = String(req.headers['content-type'] || '');

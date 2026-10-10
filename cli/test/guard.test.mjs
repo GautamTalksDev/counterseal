@@ -207,6 +207,52 @@ test('server errors: 5xx on create is unavailable; 429 and 401 always deny with 
   assert.match(denied(r), /Account, Guard keys/);
 });
 
+test('a frozen account (Brakes): asking, waiting and using all answer 423, and the guard says so and stops, even when failing open', async () => {
+  // asking
+  const t = await setup({ onUnavailable: 'allow' });
+  t.stub.state.frozen = true;
+  const asked = await hook(t, 'claude-code', claude('terraform destroy'));
+  const m = denied(asked);
+  assert.match(m, /Counterseal is frozen: your human froze the account/);
+  assert.match(m, /unfreeze it with their passkey/);
+  assert.match(m, /Do not retry it/);
+  assert.match(m, /\(sh\.terraform-destroy\)/);
+  assert.equal(t.stub.state.log.length, 1, 'one request, no retry loop');
+  assert.equal(t.stub.holds().length, 0, 'nothing was held');
+  // commands that are not on the map are untouched
+  assert.equal((await hook(t, 'claude-code', claude('ls'))).stdout, '');
+  // the other agents get their own shapes
+  assert.equal(JSON.parse((await hook(t, 'cursor', cursorShell('terraform destroy'))).stdout).permission, 'deny');
+  assert.match(denied(await hook(t, 'codex', claude('terraform destroy'))), /Counterseal is frozen/);
+  // waiting: the freeze ends the wait at once instead of timing out
+  const w = await setup({}, { LEASH_GUARD_WAIT: '30' });
+  const t0 = Date.now();
+  const waiting = hook(w, 'claude-code', claude('git push --force origin main'));
+  for (let i = 0; i < 100 && !w.stub.holds().length; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(w.stub.holds().length, 1, 'the command is waiting');
+  w.stub.state.frozen = true;
+  const r2 = await waiting;
+  assert.match(denied(r2), /Counterseal is frozen/);
+  assert.ok(Date.now() - t0 < 3000, 'the wait ended when the freeze began');
+  // using: approved, then the use is refused with 423
+  const u = await setup({ mode: { 'claude-code': 'retry' } });
+  await hook(u, 'claude-code', claude('kubectl delete ns prod'));
+  u.stub.approve();
+  u.stub.state.fail.use = 423;
+  const used = await hook(u, 'claude-code', claude('kubectl delete ns prod'));
+  assert.match(denied(used), /Counterseal is frozen/);
+  assert.equal(u.stub.holds()[0].status, 'approved', 'the approval was not used');
+});
+
+test('status says when the account is frozen, without calling the key bad', async () => {
+  const t = await signedIn();
+  assert.equal((await cli(t, ['install', '--agents', 'claude-code'])).status, 0);
+  t.stub.state.frozen = true;
+  const s = await cli(t, ['status']);
+  assert.equal(s.status, 0, s.stdout);
+  assert.match(s.stdout, /the account is FROZEN: nothing is approved until you unfreeze it with your passkey/);
+});
+
 test('an expired key (made by a CLI sign-in that ended) fails closed with the same advice', async () => {
   const t = await setup();
   for (const k of t.stub.state.keys.values()) k.expiresAt = Date.now() - 1000;

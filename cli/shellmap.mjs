@@ -678,7 +678,8 @@ function hit(st, rule, why, text) {
   if (st.o.disable.has(rule)) return;
   const t = redact(String(text).split(SENT).join('<?>')).replace(/\s+/g, ' ').trim().slice(0, 200);
   if (st.hits.some((h) => h.rule === rule && h.text === t)) return;
-  st.hits.push({ rule, why: st.via ? `${why} (run by ${st.via})` : why, text: t });
+  const w = st.via ? `${why} (run by ${st.via})` : String(why);
+  st.hits.push({ rule, why: w.length > 300 ? w.slice(0, 297).trimEnd() + '...' : w, text: t }); // the Approvals API takes at most 300
 }
 
 // ---- words
@@ -1460,63 +1461,131 @@ UNWRAP.popd = (a, cx, st) => { st.cwd = null; return null; };
 // Method and path globs of the server's irreversible map (server/src/providers.js), so that curl, wget and gh api
 // to a brokered API are held too. A test checks this copy against the server. `guard install` stores the live map
 // (GET /v1/meta) next to the config, and that replaces this copy when it is present.
-const A = (id, m, p, why) => ({ id, m, p, why });
+// BEGIN GENERATED API MAP (node scripts/sync-guard.mjs writes this from server/src/providers.js; do not edit by hand)
 export const BUNDLED_API_MAP = {
+  mapVersion: "2026-10-10.1",
   providers: [
-    { id: 'github', host: 'api.github.com', base: '', rules: [
-      A('gh.delete', 'DELETE', '/**', 'Any DELETE on GitHub removes something (repo, branch, release, key, member).'),
-      A('gh.force-push', 'PATCH', '/repos/*/*/git/refs/**', 'Force-updating a ref rewrites history and can drop commits for everyone.'),
-      A('gh.transfer', 'POST', '/repos/*/*/transfer', 'Transferring a repository hands it to another owner.'),
-      A('gh.visibility', 'PATCH', '/repos/*/*', 'Changing visibility can publish private code; archiving freezes a repo.'),
-      A('gh.protection', 'PUT', '/repos/*/*/branches/*/protection', 'Rewriting branch protection can remove the rules that guard main.'),
-      A('gh.graphql', 'POST', '/graphql', 'A GitHub GraphQL mutation (deleteRepository, transferRepository, updateRepository and every other write), or a request that cannot be read.'),
-      A('gh.graphql-get', 'GET', '/graphql', 'GitHub GraphQL over GET is not a normal client path.'),
-      A('gh.actions-secret', 'PUT', '/repos/*/*/actions/secrets/*', 'Overwriting a CI secret silently changes what production deploys with.'),
+    { id: "github", host: "api.github.com", base: "", rules: [
+      { id: "gh.delete", m: "DELETE", p: "/**", why: "Any DELETE on GitHub removes something (repo, branch, release, key, member).", body: false },
+      { id: "gh.force-push", m: "PATCH", p: "/repos/*/*/git/refs/**", why: "Force-updating a ref rewrites history and can drop commits for everyone.", body: true },
+      { id: "gh.transfer", m: "POST", p: "/repos/*/*/transfer", why: "Transferring a repository hands it to another owner.", body: false },
+      { id: "gh.visibility", m: "PATCH", p: "/repos/*/*", why: "Changing visibility can publish private code; archiving freezes a repo.", body: true },
+      { id: "gh.protection", m: "PUT", p: "/repos/*/*/branches/*/protection", why: "Rewriting branch protection can remove the rules that guard main.", body: false },
+      { id: "gh.graphql", m: "POST", p: "/graphql", why: "A GitHub GraphQL mutation (deleteRepository, transferRepository, updateRepository and every other write), or a request Counterseal cannot read.", body: true },
+      { id: "gh.graphql-get", m: "GET", p: "/graphql", why: "GitHub GraphQL over GET is not a normal client path.", body: false },
+      { id: "gh.actions-secret", m: "PUT", p: "/repos/*/*/actions/secrets/*", why: "Overwriting a CI secret silently changes what production deploys with.", body: false },
     ] },
-    { id: 'cloudflare', host: 'api.cloudflare.com', base: '/client/v4', rules: [
-      A('cf.delete', 'DELETE', '/**', 'Deletes a zone, DNS record, Worker, bucket, database or token.'),
-      A('cf.purge', 'POST', '/zones/*/purge_cache', 'Purging everything, a whole host or a URL prefix can take a site down under load.'),
-      A('cf.worker-put', 'PUT', '/accounts/*/workers/scripts/**', 'Uploading over a Worker replaces production code.'),
-      A('cf.dns-write', 'PUT,PATCH', '/zones/*/dns_records/*', 'Overwriting a DNS record can point a domain somewhere else.'),
-      A('cf.r2-config', 'PUT', '/accounts/*/r2/buckets/*/{lifecycle,cors,domains/**}', 'Bucket lifecycle rules can delete objects; domain changes expose a bucket.'),
-      A('cf.token-roll', 'PUT', '/user/tokens/*/value', 'Rolling an API token breaks everything using it.'),
-      A('cf.d1-sql', 'POST', '/accounts/*/d1/database/*/{query,raw}', 'SQL against a production D1 database that is not a single plain read.'),
-      A('cf.d1-import', 'POST', '/accounts/*/d1/database/*/import', 'Importing an SQL file into a production D1 database runs SQL that cannot be read.'),
-      A('cf.d1-restore', 'POST', '/accounts/*/d1/database/*/time_travel/restore', 'Restoring a D1 database to an earlier point overwrites everything written since.'),
+    { id: "cloudflare", host: "api.cloudflare.com", base: "/client/v4", rules: [
+      { id: "cf.delete", m: "DELETE", p: "/**", why: "Deletes a zone, DNS record, Worker, bucket, database or token.", body: false },
+      { id: "cf.purge", m: "POST", p: "/zones/*/purge_cache", why: "Purging everything, a whole host or a URL prefix can take a site down under load.", body: true },
+      { id: "cf.worker-put", m: "PUT", p: "/accounts/*/workers/scripts/**", why: "Uploading over a Worker replaces production code.", body: false },
+      { id: "cf.dns-write", m: "PUT,PATCH", p: "/zones/*/dns_records/*", why: "Overwriting a DNS record can point a domain somewhere else.", body: false },
+      { id: "cf.r2-config", m: "PUT", p: "/accounts/*/r2/buckets/*/{lifecycle,cors,domains/**}", why: "Bucket lifecycle rules can delete objects; domain changes expose a bucket.", body: false },
+      { id: "cf.token-roll", m: "PUT", p: "/user/tokens/*/value", why: "Rolling an API token breaks everything using it.", body: false },
+      { id: "cf.d1-sql", m: "POST", p: "/accounts/*/d1/database/*/{query,raw}", why: "SQL against a production D1 database that is not a single plain read.", body: true },
+      { id: "cf.d1-import", m: "POST", p: "/accounts/*/d1/database/*/import", why: "Importing an SQL file into a production D1 database runs SQL Counterseal cannot read.", body: true },
+      { id: "cf.d1-restore", m: "POST", p: "/accounts/*/d1/database/*/time_travel/restore", why: "Restoring a D1 database to an earlier point overwrites everything written since.", body: false },
     ] },
-    { id: 'railway', host: 'backboard.railway.app', base: '/graphql/v2', rules: [
-      A('rw.mutation', 'POST', '/**', 'A Railway mutation other than a redeploy or restart, or a request that cannot be read.'),
-      A('rw.get-mutation', 'GET', '/**', 'A Railway mutation sent over GET.'),
-      A('rw.method', 'PUT,PATCH,DELETE', '/**', 'Railway\'s API is GraphQL over POST; a PUT, PATCH or DELETE is not a normal client path.'),
+    { id: "railway", host: "backboard.railway.app", base: "/graphql/v2", rules: [
+      { id: "rw.mutation", m: "POST", p: "/**", why: "A Railway mutation other than a redeploy or restart, or a request Counterseal cannot read (PocketOS lost production to one volumeDelete).", body: true },
+      { id: "rw.get-mutation", m: "GET", p: "/**", why: "A Railway mutation sent over GET.", body: true },
+      { id: "rw.method", m: "PUT,PATCH,DELETE", p: "/**", why: "Railway's API is GraphQL over POST; a PUT, PATCH or DELETE is not a normal client path.", body: false },
     ] },
-    { id: 'stripe', host: 'api.stripe.com', base: '', rules: [
-      A('st.delete', 'DELETE', '/**', 'Deletes customers, products, webhooks or cancels subscriptions.'),
-      A('st.money', 'POST', '/v1/{refunds,payouts,transfers,charges,topups}', 'Moves money.'),
-      A('st.money2', 'POST', '/v1/payment_intents/*/{confirm,capture}', 'Moves money.'),
-      A('st.pi-confirm', 'POST', '/v1/payment_intents', 'Creating a payment intent with confirm=true charges the customer.'),
-      A('st.refund', 'POST', '/v1/{charges,application_fees}/*/{refund,refunds}', 'Refunds money.'),
-      A('st.invoice', 'POST', '/v1/invoices/*/{pay,void}', 'Paying or voiding an invoice cannot be undone.'),
-      A('st.credit-note', 'POST', '/v1/credit_notes', 'Issuing a credit note credits or refunds the customer.'),
-      A('st.credit-note-void', 'POST', '/v1/credit_notes/*/void', 'Voiding a credit note cannot be undone.'),
-      A('st.cancel', 'POST', '/v1/subscriptions/*/cancel', 'Cancels a paying customer.'),
-      A('st.cancel-at', 'POST', '/v1/subscriptions/*', 'Schedules a paying customer to be cancelled.'),
-      A('st.webhook', 'POST', '/v1/webhook_endpoints/**', 'Changing webhooks can silently stop order fulfilment.'),
+    { id: "stripe", host: "api.stripe.com", base: "", rules: [
+      { id: "st.delete", m: "DELETE", p: "/**", why: "Deletes customers, products, webhooks or cancels subscriptions.", body: false },
+      { id: "st.money", m: "POST", p: "/v1/{refunds,payouts,transfers,charges,topups}", why: "Moves money.", body: false },
+      { id: "st.money2", m: "POST", p: "/v1/payment_intents/*/{confirm,capture}", why: "Moves money.", body: false },
+      { id: "st.pi-confirm", m: "POST", p: "/v1/payment_intents", why: "Creating a payment intent with confirm=true charges the customer.", body: true },
+      { id: "st.refund", m: "POST", p: "/v1/{charges,application_fees}/*/{refund,refunds}", why: "Refunds money.", body: false },
+      { id: "st.invoice", m: "POST", p: "/v1/invoices/*/{pay,void}", why: "Paying or voiding an invoice cannot be undone.", body: false },
+      { id: "st.credit-note", m: "POST", p: "/v1/credit_notes", why: "Issuing a credit note credits or refunds the customer.", body: false },
+      { id: "st.credit-note-void", m: "POST", p: "/v1/credit_notes/*/void", why: "Voiding a credit note cannot be undone.", body: false },
+      { id: "st.cancel", m: "POST", p: "/v1/subscriptions/*/cancel", why: "Cancels a paying customer.", body: false },
+      { id: "st.cancel-at", m: "POST", p: "/v1/subscriptions/*", why: "Schedules a paying customer to be cancelled.", body: true },
+      { id: "st.webhook", m: "POST", p: "/v1/webhook_endpoints/**", why: "Changing webhooks can silently stop order fulfilment.", body: false },
     ] },
-    { id: 'supabase', host: 'api.supabase.com', base: '', rules: [
-      A('sb.delete', 'DELETE', '/**', 'Deletes a project, function, branch or secret.'),
-      A('sb.sql', 'POST', '/v1/projects/*/database/query', 'SQL on the database that is not a single plain read (SELECT, WITH ... SELECT, EXPLAIN, SHOW).'),
-      A('sb.migration', 'POST,PUT,PATCH', '/v1/projects/*/database/migrations', 'A database migration runs schema changes (and any SQL) on production.'),
-      A('sb.pause', 'POST', '/v1/projects/*/{pause,restore}', 'Pausing or restoring a project takes production offline.'),
-      A('sb.db-password', 'POST', '/v1/projects/*/database/password', 'Resetting the database password breaks every existing connection.'),
-      A('sb.config', 'PUT,PATCH', '/v1/projects/*/config/**', 'Changes production database, auth or network configuration.'),
-      A('sb.secrets', 'POST', '/v1/projects/*/secrets', 'Overwriting project secrets changes production configuration.'),
+    { id: "supabase", host: "api.supabase.com", base: "", rules: [
+      { id: "sb.delete", m: "DELETE", p: "/**", why: "Deletes a project, function, branch or secret.", body: false },
+      { id: "sb.sql", m: "POST", p: "/v1/projects/*/database/query", why: "SQL on the database that is not a single plain read (SELECT, WITH ... SELECT, EXPLAIN, SHOW).", body: true },
+      { id: "sb.migration", m: "POST,PUT,PATCH", p: "/v1/projects/*/database/migrations", why: "A database migration runs schema changes (and any SQL) on production.", body: false },
+      { id: "sb.pause", m: "POST", p: "/v1/projects/*/{pause,restore}", why: "Pausing or restoring a project takes production offline.", body: false },
+      { id: "sb.db-password", m: "POST", p: "/v1/projects/*/database/password", why: "Resetting the database password breaks every existing connection.", body: false },
+      { id: "sb.config", m: "PUT,PATCH", p: "/v1/projects/*/config/**", why: "Changes production database, auth or network configuration.", body: false },
+      { id: "sb.secrets", m: "POST", p: "/v1/projects/*/secrets", why: "Overwriting project secrets changes production configuration.", body: false },
+    ] },
+    { id: "vercel", host: "api.vercel.com", base: "", rules: [
+      { id: "vc.delete", m: "DELETE", p: "/**", why: "Any DELETE on Vercel removes something (project, deployment, domain, alias, environment variable, team). Deleting a project also deletes its deployments, domains, environment variables and settings. The API has no undelete.", body: false },
+      { id: "vc.deploy", m: "POST", p: "{,/v*}/deployments", why: "Creating a deployment can go straight to production: when the request does not name a target, Vercel infers it from the branch. A production deploy replaces what visitors see, and rolling back is a second production change.", body: false },
+      { id: "vc.production", m: "POST", p: "{,/v*}/{projects/*/promote/*,projects/*/rollback/*,deployments/*/aliases,projects/*/rolling-release/start,projects/*/rolling-release/approve-stage,projects/*/rolling-release/complete,projects/*/routes/versions,bulk-redirects/versions}", why: "Points production traffic or a live domain somewhere else: promote, rollback, assigning an alias (it moves off the deployment that had it), rolling releases, and promoting or restoring routing rules and bulk redirects. Visitors see it at once, and undoing it is another production change.", body: false },
+      { id: "vc.pause", m: "POST", p: "{,/v*}/projects/*/pause", why: "Pausing a project takes its production deployment offline: visitors get a 503 until someone resumes the project.", body: false },
+      { id: "vc.project-settings", m: "PATCH", p: "{,/v*}/projects/*", why: "Changes project settings: build and install commands, root directory, framework, deployment protection, trusted IPs. A wrong value breaks the next build or exposes previews, and the old value is not kept.", body: false },
+      { id: "vc.security", m: "POST,PUT,PATCH", p: "{,/v*}/security/{attack-mode,firewall/config,firewall/config/*/activate,firewall/bypass}", why: "Changes the firewall or Attack Challenge mode of a live project. A wrong rule can block every visitor or open the site to attack, and activating a config replaces the active one.", body: false },
+      { id: "vc.domain", m: "POST,PATCH", p: "{,/v*}/{domains/*,projects/*/domains/*,projects/*/domains/*/move,registrar/domains/*/nameservers,registrar/domains/*/auto-renew}", why: "Moves or repoints a domain: moving an apex domain to another team or project, changing a project domain, nameservers, or turning off auto-renew (a domain that lapses can be lost). Traffic and email can go elsewhere at once.", body: false },
+      { id: "vc.dns", m: "PUT,PATCH", p: "{,/v*}/domains/{records/*,*/records}", why: "Overwriting a DNS record can point a domain somewhere else, and the previous value is not kept.", body: false },
+      { id: "vc.money", m: "POST", p: "{,/v*}/{registrar/domains/buy,registrar/domains/*/buy,registrar/domains/*/transfer,registrar/domains/*/renew,billing/buy}", why: "Spends money: buying, transferring or renewing a domain, or buying credits, charged to the team.", body: false },
+      { id: "vc.env", m: "PATCH", p: "{,/v*}/{projects/*/env/*,env}", why: "Overwrites an environment variable. The old value is not kept, and the next deployment that reads the new one can break production.", body: false },
+      { id: "vc.env-upsert", m: "POST", p: "{,/v*}/projects/*/env", why: "Creating environment variables with upsert=true overwrites any that already exist. The old values are not kept.", body: true },
+      { id: "vc.cache", m: "POST", p: "{,/v*}/edge-cache/dangerously-*", why: "Deleting cache entries forces every next request through to your origin at once (a cache stampede). Vercel marks these calls dangerous and not recommended.", body: false },
+      { id: "vc.restore", m: "POST", p: "{,/v*}/global-config/*/backups/*/restore", why: "Restoring an Edge Config backup replaces the live configuration with the backup. Changes made since are lost.", body: false },
+      { id: "vc.access", m: "POST,PUT,PATCH", p: "{,/v*}/{teams/*/members,teams/*/members/*,projects/*/members,access-groups/*/projects,access-groups/*/projects/*,projects/*/transfer-request,projects/transfer-request/*}", why: "Gives someone access or hands something over: team invites and role changes, project members, access groups, project transfers. Access given to the wrong person is a way in that does not go through Counterseal.", body: false },
+      { id: "vc.token", m: "POST", p: "{,/v*}/{user/tokens,api-keys}", why: "Makes a new Vercel token or API key. The agent would then hold a real key that does not go through Counterseal.", body: false },
+    ] },
+    { id: "neon", host: "console.neon.tech", base: "/api/v2", rules: [
+      { id: "neon.delete", m: "DELETE", p: "/**", why: "Any DELETE on Neon removes something. A deleted project (its computes, branches, databases and roles) can be recovered for 7 days; a deleted branch, database, role, snapshot or stored object has no documented recovery, and deleting a branch drops its connections.", body: false },
+      { id: "neon.restore", m: "POST", p: "/projects/*/{branches/*/restore,branches/*/finalize_restore,snapshots/*/restore}", why: "Restoring overwrites all data and schema in the branch and interrupts its connections. Neon keeps the replaced state as a backup branch, which is the only way back.", body: false },
+      { id: "neon.password", m: "POST", p: "/projects/*/branches/*/roles/*/reset_password", why: "Resetting a role password drops its connections and breaks every app that still uses the old password.", body: false },
+      { id: "neon.settings", m: "PATCH", p: "/projects/{*,*/endpoints/*,*/branches/*/databases/*}", why: "Changes project, compute or database settings: history retention, the IP allow list, compute size and whether it is disabled, a database name. A wrong value locks clients out or breaks connection strings.", body: false },
+      { id: "neon.retention", m: "PATCH,PUT", p: "/projects/*/{branches/*,snapshots/*,branches/*/backup_schedule}", why: "Changes whether a branch is protected, when a branch or snapshot expires, or how often backups are taken. A shorter life or a missing backup is only noticed when it is needed.", body: false },
+      { id: "neon.network", m: "POST", p: "/{projects/*/vpc_endpoints/*,organizations/*/vpc/region/*/vpc_endpoints/*}", why: "Restricting a project to a VPC endpoint locks out every client that is not on it.", body: false },
+      { id: "neon.transfer", m: "POST,PUT", p: "/{projects/*/transfer_requests,projects/*/transfer_requests/*,organizations/*/projects/transfer,users/me/projects/transfer}", why: "Transferring a project hands it to another account or organization.", body: false },
+      { id: "neon.secrets", m: "POST", p: "/{api_keys,organizations/*/api_keys,projects/*/branches/*/credentials,projects/*/branches/*/credentials/*/reveal,projects/*/branches/*/credentials/*/rotate,projects/*/branches/*/realtime/rotate_secret}", why: "Makes, reveals or rotates a key. A new or revealed key is one the agent holds outside Counterseal, and a rotated one stops working for everything that used the old value.", body: false },
+      { id: "neon.access", m: "POST,PUT,PATCH", p: "/{projects/*/permissions,projects/*/members/*/role,organizations/*/members/*,organizations/*/invitations}", why: "Gives someone access or changes a role. Access given to the wrong person is a way in that does not go through Counterseal.", body: false },
+      { id: "neon.auth", m: "POST,PUT,PATCH", p: "/projects/{auth/**,*/auth/**,*/branches/*/auth,*/branches/*/auth/**}", why: "Changes Neon Auth: trusted redirect domains, OAuth providers, email servers, user roles. A wrong trusted domain or role can let the wrong people sign in.", body: false },
+      { id: "neon.function", m: "POST,PATCH", p: "/projects/*/branches/*/functions/{*,*/deployments}", why: "Deploying or changing a branch function replaces the code that runs there (the newest deployment becomes active).", body: false },
+    ] },
+    { id: "fly", host: "api.machines.dev", base: "/v1", rules: [
+      { id: "fly.delete", m: "DELETE", p: "/**", why: "Any DELETE on Fly.io removes something. Destroying a volume deletes its data with no undo (its snapshots may stay restorable for a few days); destroying an app with force=true stops every Machine and deletes the app at once.", body: false },
+      { id: "fly.exec", m: "POST", p: "/apps/*/machines/*/exec", why: "Runs a command inside a live Machine. Anything the Machine can do to its volume and its network, this can do.", body: false },
+      { id: "fly.machine-update", m: "POST", p: "/apps/*/machines/*", why: "Replaces a Machine configuration (image, environment, mounts, services). It is a deploy to whatever that Machine serves.", body: false },
+      { id: "fly.machine-stop", m: "POST", p: "/apps/*/machines/*/{stop,suspend,signal,cordon}", why: "Takes a Machine out of service: stopped, suspended, killed by a signal, or cordoned so the proxy sends it no traffic.", body: false },
+      { id: "fly.volume", m: "PUT", p: "/apps/*/volumes/{*,*/extend}", why: "Extending a volume cannot be undone (volumes cannot be made smaller) and is billed. Changing snapshot retention or backups decides how long data can be recovered.", body: false },
+      { id: "fly.secrets", m: "POST", p: "/apps/*/{secrets,secrets/*,secretkeys/*,secretkeys/*/generate}", why: "Overwrites app secrets. The old value is not kept.", body: false },
+      { id: "fly.token", m: "POST", p: "/apps/*/deploy_token", why: "Makes a deploy token. The agent would then hold a real key that does not go through Counterseal.", body: false },
+      { id: "fly.postgres", m: "POST,PATCH", p: "/postgres/*/users/{*,*/rotate_password}", why: "Rotating a Postgres password or changing a role breaks every client that still uses the old one.", body: false },
+    ] },
+    { id: "resend", host: "api.resend.com", base: "", rules: [
+      { id: "rs.delete", m: "DELETE", p: "/**", why: "Any DELETE on Resend removes something (domain, audience, contact, segment, API key, webhook, template). A deleted sending domain stops all sending from it, and the API has no undelete.", body: false },
+      { id: "rs.batch", m: "POST", p: "/emails/batch", why: "Sends up to 100 emails in one call, each to up to 50 recipients. Sent email cannot be unsent.", body: false },
+      { id: "rs.broadcast", m: "POST", p: "/broadcasts/*/send", why: "Sends a broadcast to every contact in its segment. Sent email cannot be unsent.", body: false },
+      { id: "rs.broadcast-now", m: "POST", p: "/broadcasts", why: "Creating a broadcast with send=true sends it to its whole segment at once. Only a draft is safe. Sent email cannot be unsent.", body: true },
+      { id: "rs.recipients", m: "POST", p: "/emails", why: "An email to more than one recipient (to, cc or bcc), a list hidden in one address, or a request Counterseal cannot read. One recipient passes; sent email cannot be unsent.", body: true },
+      { id: "rs.automation", m: "POST", p: "/automations", why: "An automation that is enabled emails contacts on its own from then on. Create it disabled and enable it yourself.", body: true },
+      { id: "rs.automation-edit", m: "PATCH", p: "/automations/*", why: "Enabling an automation, or changing the steps of one, changes what it emails to contacts from then on.", body: true },
+      { id: "rs.suppression", m: "POST", p: "/suppressions/batch/remove", why: "Removing suppressions lets email go again to addresses that bounced or complained, which can hurt the sending reputation of the whole domain.", body: false },
+      { id: "rs.webhook-secret", m: "POST", p: "/webhooks/*/signing-secret/rotate", why: "Rotating a webhook signing secret breaks verification for every receiver that still uses the old one.", body: false },
+      { id: "rs.inbox-send", m: "POST", p: "/inboxes/*/{drafts/*/send,threads/*/emails/*/reply,threads/*/emails/*/forward}", why: "Sends from an inbox: a draft, a reply (with reply_all to everyone on the thread) or a forward to up to 50 recipients. Sent email cannot be unsent.", body: false },
+      { id: "rs.api-key", m: "POST", p: "/api-keys", why: "Makes a Resend API key, possibly with full access. The agent would then hold a real key that does not go through Counterseal.", body: false },
+    ] },
+    { id: "shopify", host: "*.myshopify.com", base: "", rules: [
+      { id: "sh.get", m: "GET", p: "/admin/api/*/graphql.json", why: "Shopify GraphQL over GET is not a normal client path.", body: false },
+      { id: "sh.method", m: "PUT,PATCH,DELETE", p: "/**", why: "Shopify GraphQL is POST only; a PUT, PATCH or DELETE is not a normal client path. (Every other path on the store is refused before the map is asked.)", body: false },
+      { id: "sh.unreadable", m: "POST", p: "/admin/api/*/graphql.json", why: "A GraphQL request Counterseal cannot read with certainty: a batch, a persisted query, a fragment at the mutation root, a repeated key, or a body that is not one JSON object with a query.", body: true },
+      { id: "sh.bulk", m: "POST", p: "/admin/api/*/graphql.json", why: "A bulk operation runs a mutation once per line of an uploaded file, which Counterseal cannot read.", body: true },
+      { id: "sh.delete", m: "POST", p: "/admin/api/*/graphql.json", why: "A Shopify mutation that deletes or removes data: any name with delete or destroy, a shipping profile, a locale and its translations, inventory at a location, a location, or the app itself. Shopify says product, order and app removals are permanent.", body: true },
+      { id: "sh.money", m: "POST", p: "/admin/api/*/graphql.json", why: "A Shopify mutation that moves money or changes what counts as paid: refunds, captures, charges to customers or to the merchant, marking an order paid, voiding a payment, buying a shipping label, a payout.", body: true },
+      { id: "sh.giftcard", m: "POST", p: "/admin/api/*/graphql.json", why: "Gift cards and store credit are spendable value: creating, crediting, debiting or deactivating them (a deactivated gift card cannot be re-enabled).", body: true },
+      { id: "sh.cancel", m: "POST", p: "/admin/api/*/graphql.json", why: "Cancelling an order is irreversible (Shopify), and can refund the customer, restock inventory and notify them. A cancelled or expired subscription contract cannot be activated again.", body: true },
+      { id: "sh.customer-data", m: "POST", p: "/admin/api/*/graphql.json", why: "Erases, merges or disables protections on customer data: a data erasure request (Shopify has a separate mutation to cancel one), merging two customers, revoking a stored payment method, switching off privacy features.", body: true },
+      { id: "sh.access", m: "POST", p: "/admin/api/*/graphql.json", why: "Makes a delegate access token (a key the agent would hold outside Counterseal) or revokes access scopes the app depends on.", body: true },
+      { id: "sh.theme", m: "POST", p: "/admin/api/*/graphql.json", why: "Publishing a theme, or writing theme files, can change the live storefront. Counterseal cannot tell which theme is live.", body: true },
+      { id: "sh.webhook", m: "POST", p: "/admin/api/*/graphql.json", why: "A webhook subscription sends store events (orders, customers) to a URL. Changing one can stop fulfilment or send customer data elsewhere.", body: true },
     ] },
   ],
 };
-// hosts that are on the roadmap map: DELETE is held for them even before their other rules are known here
-const DELETE_ONLY_HOSTS = { 'api.vercel.com': 'vercel', 'console.neon.tech': 'neon', 'api.machines.dev': 'fly', 'api.resend.com': 'resend' };
+// END GENERATED API MAP
 
-/** the map in the shape the curl rule uses, from the body of GET /v1/meta (providers with irreversible rules) */
+/** the map in the shape the curl rule uses, from the body of GET /v1/meta (providers with irreversible rules).
+ * The server does not send each provider's base path yet, so it is taken from the bundled map by host. */
 export function apiMapFromMeta(meta) {
   const bases = Object.fromEntries(BUNDLED_API_MAP.providers.map((p) => [p.host, p.base]));
   const providers = [];
@@ -1528,7 +1597,17 @@ export function apiMapFromMeta(meta) {
   }
   return { providers, mapVersion: typeof meta?.mapVersion === 'string' ? meta.mapVersion : null };
 }
-const hostMap = (map) => new Map((map?.providers || BUNDLED_API_MAP.providers).map((p) => [lc(p.host), p]));
+/** providers by host. A host such as *.myshopify.com (a store address per credential) matches one label in front of it. */
+function hostMap(map) {
+  const exact = new Map(), wild = [];
+  for (const p of map?.providers || BUNDLED_API_MAP.providers) {
+    const h = lc(p.host);
+    if (h.startsWith('*.')) wild.push([h.slice(1), p]); else exact.set(h, p);
+  }
+  return { exact, wild };
+}
+const entryFor = (hm, host) => hm.exact.get(host) ?? hm.wild.find(([sfx]) => host.endsWith(sfx) && host.length > sfx.length && !host.slice(0, -sfx.length).includes('.'))?.[1];
+const knownHosts = (hm) => [...hm.exact.keys(), ...hm.wild.map(([s]) => s)];
 
 // rules whose server side test reads the body; the guard repeats the part of it that it can
 const jsonOf = (t) => { try { const j = JSON.parse(t); return j && typeof j === 'object' ? j : null; } catch { return null; } };
@@ -1538,7 +1617,7 @@ function bodyFields(b) {
   const f = new Map();
   if (j && !Array.isArray(j)) { for (const [k, v] of Object.entries(j)) f.set(lc(k), v); return f; }
   if (j) return null;
-  for (const part of b.text.split('&')) { const e = part.indexOf('='); const k = lc(decodeURIComponent((e < 0 ? part : part.slice(0, e)).replace(/\+/g, ' ')).replace(/\[.*$/, '')); if (k) f.set(k, e < 0 ? '' : part.slice(e + 1)); }
+  for (const part of b.text.split('&')) { const e = part.indexOf('='); const k = lc(safeDecode(e < 0 ? part : part.slice(0, e)).replace(/\[.*$/, '')); if (k) f.set(k, e < 0 ? '' : part.slice(e + 1)); }
   return f;
 }
 const truthy = (v) => v !== undefined && v !== null && v !== false && !['', 'false', '0'].includes(String(v).toLowerCase());
@@ -1554,7 +1633,26 @@ const BODY_TESTS = {
   'cf.d1-import': (b) => { const f = bodyFields(b); return !f || !['init', 'poll'].includes(f.get('action')); },
   'cf.d1-sql': (b) => sqlBodyHold(b),
   'sb.sql': (b) => sqlBodyHold(b),
+  // Vercel: creating variables with upsert=true overwrites the ones that exist
+  'vc.env-upsert': (b, search) => { const f = bodyFields(b); return !f || truthy(f.get('upsert')) || /(^|[?&;])upsert(=|&|$)/i.test(search || '') && !/(^|[?&;])upsert=(false|0)(&|$)/i.test(search || ''); },
+  // Resend: one recipient passes; a list, cc, bcc, or a body that is not one JSON object is held
+  'rs.recipients': (b) => {
+    const j = b?.text == null ? null : jsonOf(b.text);
+    if (!j || Array.isArray(j)) return true;
+    const one = (v) => typeof v === 'string' && v.length <= 320 && !/[,;]/.test(v) && (v.match(/@/g) || []).length === 1;
+    const empty = (v) => v === undefined || v === '' || (Array.isArray(v) && !v.length);
+    const single = Array.isArray(j.to) ? j.to.length === 1 && one(j.to[0]) : one(j.to);
+    return !single || !empty(j.cc) || !empty(j.bcc);
+  },
+  'rs.broadcast-now': (b) => { const j = b?.text == null ? null : jsonOf(b.text); return !j || Array.isArray(j) || (j.send !== undefined && j.send !== false); },
+  'rs.automation': (b) => { const j = b?.text == null ? null : jsonOf(b.text); return !j || Array.isArray(j) || (Object.hasOwn(j, 'status') && j.status !== 'disabled'); },
+  'rs.automation-edit': (b) => { const j = b?.text == null ? null : jsonOf(b.text); return !j || Array.isArray(j) || (Object.hasOwn(j, 'status') && j.status !== 'disabled') || Object.hasOwn(j, 'steps') || Object.hasOwn(j, 'connections'); },
 };
+// Shopify: the Admin API is GraphQL over POST to one path, and the server tells deletes, refunds, cancellations, gift cards,
+// theme and webhook changes apart by the mutation's name. The guard does not carry that table: every mutation, and any
+// request it cannot read, is held. A plain query passes.
+const SHOPIFY_MUTATION = (b) => b?.text == null || /\bmutation\b/i.test(b.text);
+for (const id of ['sh.unreadable', 'sh.bulk', 'sh.delete', 'sh.money', 'sh.giftcard', 'sh.cancel', 'sh.customer-data', 'sh.access', 'sh.theme', 'sh.webhook']) BODY_TESTS[id] = SHOPIFY_MUTATION;
 const safeDecode = (s) => { try { return decodeURIComponent(s.replace(/\+/g, ' ')); } catch { return s; } };
 function sqlBodyHold(b) {
   const f = bodyFields(b);
@@ -1597,25 +1695,26 @@ function parseUrl(u) {
 const METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 const OVERRIDE_HEADER = /^(x-http-method-override|x-method-override|x-http-method)\s*:/i;
 /** hold when this request goes to a host on the map and trips one of its rules */
+const SHOPIFY_WHY = 'A Shopify GraphQL mutation (the map holds deletes, refunds, cancellations, gift cards, theme and webhook changes and more; the guard holds every mutation), or a request it cannot read.';
 function apiRequestHold(cx, req) {
-  const map = hostMap(cx.st.o.apiMap);
+  const hm = hostMap(cx.st.o.apiMap);
   const u = parseUrl(req.url);
   let host = u.host;
   if (host.includes(SENT)) { // the host is built from a value: use a known host that appears literally
-    const known = [...map.keys(), ...Object.keys(DELETE_ONLY_HOSTS)].find((h) => req.url.toLowerCase().includes(h));
+    const url = req.url.toLowerCase();
+    const known = knownHosts(hm).find((h) => url.includes(h));
     if (!known) return null;
-    host = known;
+    host = known.startsWith('.') ? 'x' + known : known; // a wildcard host such as *.myshopify.com: any one label
   }
   const path = u.path.split('/').map((x) => (x.includes(SENT) ? 'x' : x)).join('/') || '/';
-  const entry = map.get(host);
+  const entry = entryFor(hm, host);
+  if (!entry) return null;
   const override = req.headers.some((h) => OVERRIDE_HEADER.test(h)) || /(^|[?&])_method=/i.test(u.search) || (req.body?.text != null && /(^|[&{,"\s])_method\b/.test(req.body.text));
-  if (!entry) {
-    if (DELETE_ONLY_HOSTS[host] && (req.method === 'DELETE' || override)) return { id: 'sh.curl-api', why: `A DELETE to ${host} removes something for good.` };
-    return null;
-  }
   if (override) return { id: 'sh.curl-api', why: `The request asks ${host} to treat it as a different method, which the map cannot read.` };
   const r = apiHold(entry, req.method, path, req.body, u.search);
-  return r ? { id: 'sh.curl-api', why: `${r.why} (${r.id}, ${req.method} ${host})` } : null;
+  if (!r) return null;
+  const shopify = BODY_TESTS[r.id] === SHOPIFY_MUTATION && req.method === 'POST';
+  return { id: 'sh.curl-api', why: `${req.method} ${host} (${r.id}): ${shopify ? SHOPIFY_WHY : r.why}` };
 }
 
 // ---- reading curl, wget and httpie command lines
@@ -1925,7 +2024,7 @@ rule('sh.gh', 'gh: repo delete, archive, rename, edit --visibility, release dele
     const unreadable = hasInput || fields.some((f) => /=@/.test(f)) || a.posW.slice(1, 2).some((w) => !w.lit) || fields.some((f) => f.includes(SENT));
     const text = unreadable ? null : (fields.length ? JSON.stringify(Object.fromEntries(fields.map((f) => { const e = f.indexOf('='); return e < 0 ? [f, ''] : [f.slice(0, e), f.slice(e + 1)]; }))) : '{}');
     const path = ep.startsWith('/') ? ep : '/' + ep;
-    const entry = hostMap(cx.st.o.apiMap).get('api.github.com') || BUNDLED_API_MAP.providers[0];
+    const entry = entryFor(hostMap(cx.st.o.apiMap), 'api.github.com') || BUNDLED_API_MAP.providers.find((p) => p.id === 'github');
     const u = parseUrl('https://api.github.com' + path);
     if (/^\/graphql/i.test(u.path)) {
       const q = fields.filter((f) => /^query=/.test(f)).join('\n');
@@ -2048,7 +2147,7 @@ rule('sh.stripe', 'stripe CLI: refunds create, payouts create, transfers create,
     const method = g.toUpperCase();
     if (method === 'GET') return null;
     const path = a.pos[1] || '';
-    const entry = hostMap(cx.st.o.apiMap).get('api.stripe.com') || BUNDLED_API_MAP.providers.find((p) => p.id === 'stripe');
+    const entry = entryFor(hostMap(cx.st.o.apiMap), 'api.stripe.com') || BUNDLED_API_MAP.providers.find((p) => p.id === 'stripe');
     const data = collect(cx.args, ['-d', '--data']);
     const r = apiHold(entry, method, parseUrl('https://api.stripe.com' + (path.startsWith('/') ? path : '/' + path)).path, { text: data.length ? data.join('&') : '' }, '');
     return r ? `${r.why} (${r.id})` : null;

@@ -789,6 +789,33 @@ PASS | wget https://example.com/file.tar.gz
 PASS | wget -O- https://api.github.com/repos/o/r
 PASS | http GET api.github.com/repos/o/r
 PASS | curl -d "terraform destroy" https://example.com
+HOLD sh.curl-api | curl -X POST https://api.vercel.com/v13/deployments -d '{}'
+HOLD sh.curl-api | curl -X DELETE https://api.vercel.com/v9/projects/p
+HOLD sh.curl-api | curl -X PATCH https://api.vercel.com/v9/projects/p -d '{"name":"x"}'
+HOLD sh.curl-api | curl -X POST "https://api.vercel.com/v10/projects/p/env?upsert=true" -d '{"key":"A"}'
+HOLD sh.curl-api | curl -X POST https://api.vercel.com/v9/projects/p/promote/d1
+HOLD sh.curl-api | curl -X DELETE https://console.neon.tech/api/v2/projects/p
+HOLD sh.curl-api | curl -X POST https://console.neon.tech/api/v2/projects/p/branches/b/restore -d '{}'
+HOLD sh.curl-api | curl -X DELETE https://api.machines.dev/v1/apps/a/volumes/v1
+HOLD sh.curl-api | curl -X POST https://api.machines.dev/v1/apps/a/machines/m1/stop
+HOLD sh.curl-api | curl -X POST https://api.resend.com/emails/batch -d '[]'
+HOLD sh.curl-api | curl -X POST https://api.resend.com/emails -d '{"to":["a@x.com","b@x.com"],"subject":"s"}'
+HOLD sh.curl-api | curl -X POST https://api.resend.com/emails -d '{"to":"a@x.com","bcc":"b@x.com"}'
+HOLD sh.curl-api | curl -X POST https://api.resend.com/broadcasts -d '{"name":"n","send":true}'
+HOLD sh.curl-api | curl -X DELETE https://api.resend.com/domains/d1
+HOLD sh.curl-api | curl -X POST https://my-store.myshopify.com/admin/api/2026-07/graphql.json -H 'X-Shopify-Access-Token: shpat_x' -d '{"query":"mutation { productDelete(input:{id:\"gid://shopify/Product/1\"}) { deletedProductId } }"}'
+HOLD sh.curl-api | curl -X POST https://my-store.myshopify.com/admin/api/2026-07/graphql.json -d @query.json
+HOLD sh.curl-api | curl -X POST https://$STORE.myshopify.com/admin/api/2026-07/graphql.json -d @query.json
+HOLD sh.curl-api | curl https://my-store.myshopify.com/admin/api/2026-07/graphql.json
+PASS | curl https://api.vercel.com/v9/projects
+PASS | curl -X POST https://api.vercel.com/v10/projects/p/env -d '{"key":"A","value":"b","type":"plain","target":["preview"]}'
+PASS | curl https://console.neon.tech/api/v2/projects
+PASS | curl https://api.machines.dev/v1/apps/a/machines
+PASS | curl https://api.resend.com/emails
+PASS | curl -X POST https://api.resend.com/emails -d '{"to":"a@x.com","from":"b@y.com","subject":"s","html":"h"}'
+PASS | curl -X POST https://api.resend.com/broadcasts -d '{"name":"n"}'
+PASS | curl -X POST https://my-store.myshopify.com/admin/api/2026-07/graphql.json -d '{"query":"{ shop { name } }"}'
+PASS | curl https://my-store.myshopify.com/products.json
 GAP | curl -X DELETE "$API/repos/o/r"
 GAP | curl -X DELETE "$(cat url.txt)"
 

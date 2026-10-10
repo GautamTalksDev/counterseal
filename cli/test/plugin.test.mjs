@@ -66,7 +66,7 @@ test('the skill has a name and a description and no dash characters', () => {
   assert.ok(fm, 'frontmatter');
   assert.equal(fm[1], 'counterseal');
   assert.ok(fm[2].length > 50 && fm[2].length <= 1024);
-  assert.ok(!/[–—]/.test(t));
+  assert.ok(!/[\u2013\u2014]/.test(t));
   for (const needle of ['Counterseal held this command', 'exactly the same command', 'seatbelt, not a sandbox']) assert.ok(t.includes(needle), needle);
 });
 
@@ -84,7 +84,7 @@ test('marketplace.json: a name Claude Code accepts, an owner, one plugin whose s
   assert.ok(existsSync(join(ROOT, p.source, '.claude-plugin', 'plugin.json')));
   assert.equal(p.version, undefined, 'the version lives in plugin.json only');
   assert.ok(p.description.length > 40);
-  assert.ok(!/[–—]/.test(JSON.stringify(m)));
+  assert.ok(!/[\u2013\u2014]/.test(JSON.stringify(m)));
 });
 
 test('the plugin folder is self-contained: the hook runs from a copy with nothing else around it', async () => {

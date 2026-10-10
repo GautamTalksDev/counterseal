@@ -173,6 +173,7 @@ function messages(kind, o = {}) {
     case 'nokey': return `Counterseal's guard is installed but has no key, so it is holding this command (${o.rule}). Ask your human to run: leashcli guard install`;
     case 'badkey': return 'Counterseal\'s guard key is no longer valid (it was revoked, or the command line sign-in that made it ended). Ask your human to make a lasting guard key in the app (Account, Guard keys) or to run: leashcli guard install';
     case 'limited': return `Counterseal is holding this command (${o.rule}) and cannot ask for approval right now: ${clean(o.message, 200)}${noWay}`;
+    case 'frozen': return `Counterseal is frozen: your human froze the account, so every agent token and every approval is stopped until they unfreeze it with their passkey. This command (${o.rule}) is held. Tell your human. Do not retry it, and do not look for another way to do the same thing.`;
     case 'badurl': return `Counterseal's guard is set to a server address it will not send a key to (${clean(o.server, 80)}), so it is holding this command (${o.rule}). Tell your human.`;
     case 'cannotuse': return `Counterseal could not use the approval for this command (${clean(o.message, 200)}).${url}${noWay}`;
     default: return 'Counterseal is holding this command.';
@@ -285,6 +286,7 @@ export async function runHook({ agent, mode, input, over = false, env = process.
 
   const created = await call(io, cfg, key, 'POST', '/v1/approvals', body);
   if (created.status === 401) return deny(messages('badkey'));
+  if (created.status === 423) return deny(messages('frozen', { rule: hit.rule })); // Freeze is a deliberate stop: onUnavailable never lets it through
   if (created.status === 429) return deny(messages('limited', { rule: hit.rule, message: created.body.message || 'too many holds' }));
   if (created.status === 0 || created.status >= 500 || ![200, 202].includes(created.status)) {
     if (created.status >= 400 && created.status < 500) return deny(messages('limited', { rule: hit.rule, message: created.body.message || `the server refused the request (${created.status})` }));
@@ -301,6 +303,7 @@ export async function runHook({ agent, mode, input, over = false, env = process.
     if (u.status === 410 || (u.status === 409 && u.body.error === 'already_used')) return deny(messages('expired', { url }));
     if (u.status === 0 || u.status >= 500) return unavailable(u.error ? 'the server could not be reached' : `the server answered ${u.status}`);
     if (u.status === 401) return deny(messages('badkey'));
+    if (u.status === 423) return deny(messages('frozen', { rule: hit.rule }));
     return deny(messages('cannotuse', { message: u.body.message || u.body.error || `status ${u.status}`, url }));
   };
 
@@ -321,6 +324,7 @@ export async function runHook({ agent, mode, input, over = false, env = process.
     const w = Math.max(0, Math.min(20, left));
     const g = await call(io, cfg, key, 'GET', `/v1/approvals/${a.id}?wait=${w}`, undefined, w * 1000);
     if (g.status === 401) return deny(messages('badkey'));
+    if (g.status === 423) return deny(messages('frozen', { rule: hit.rule })); // a freeze ends the wait at once
     if (g.status === 429) { await io.sleep(Math.min(5000, Math.max(0, deadline - io.now()))); continue; }
     if (g.status !== 200) {
       if (++failures >= 3 || (g.status >= 400 && g.status < 500)) return g.status >= 400 && g.status < 500 ? deny(messages('expired', { url })) : unavailable(g.error ? 'the server could not be reached' : `the server answered ${g.status}`);
@@ -654,8 +658,9 @@ async function status(env, cwd) {
   out(`info    fail mode: ${c.onUnavailable === 'deny' ? 'closed (commands on the map are denied when the server cannot be reached)' : 'OPEN (commands on the map run when the server cannot be reached)'}; waits up to ${c.waitSeconds} s for the passkey`);
   out(`info    shell map ${SHELL_MAP_VERSION}, ${SHELL_RULES.length} rules; API map: ${readJson(p.map)?.meta?.mapVersion ?? 'bundled copy'}`);
   try {
-    const r = await fetch(c.server + '/v1/approvals/00000000000000000000000000000000?wait=0', { headers: { authorization: `Bearer ${cfg.key}`, accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(10000) });
-    line(r.status === 404, r.status === 404 ? 'the server accepts the key' : r.status === 401 ? 'the server does not accept the key (revoked, or the sign-in that made it ended). Run leashcli guard install' : `the server answered ${r.status}`);
+    const r = await fetch(c.server + '/v1/approvals/000000000000000000000000?wait=0', { headers: { authorization: `Bearer ${cfg.key}`, accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(10000) });
+    if (r.status === 423) out('info    the server accepts the key, but the account is FROZEN: nothing is approved until you unfreeze it with your passkey in the app');
+    else line(r.status === 404, r.status === 404 ? 'the server accepts the key' : r.status === 401 ? 'the server does not accept the key (revoked, or the sign-in that made it ended). Run leashcli guard install' : `the server answered ${r.status}`);
   } catch (e) { line(false, `the server could not be reached (${e?.message || 'network'})`); }
   out('info    untested end to end: Cursor, Codex, Windows. A seatbelt, not a sandbox.');
   process.exitCode = bad ? 1 : 0;

@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // Keeps the copies of the guard files in step with their sources.
-//   node scripts/sync-guard.mjs           write the copies
-//   node scripts/sync-guard.mjs --check   exit 1 if a copy differs (CI and server/test run this)
+//   node scripts/sync-guard.mjs           write the generated block and the copies
+//   node scripts/sync-guard.mjs --check   exit 1 if anything differs (CI and cli/test/copies.test.mjs run this)
 //
-//   sdk/shellmap.mjs                      the shell map. Its SQL part is a verbatim copy of the SQL part of
-//                                         server/src/providers.js (checked here), so both read SQL the same way.
+//   sdk/shellmap.mjs                      the shell map. Two parts of it are not written by hand:
+//                                         - its SQL part is a verbatim copy of the SQL part of server/src/providers.js
+//                                           (checked here), so both read SQL the same way;
+//                                         - its bundled API map (the fallback for curl, wget and gh api) is generated
+//                                           from PROVIDERS in server/src/providers.js, so it can never be out of date.
 //   cli/shellmap.mjs                      the copy the npm package ships (the SDK is not published)
 //   plugins/counterseal/scripts/*.mjs     the plugin runs pinned copies of the CLI files, never npx at hook time
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -19,6 +22,29 @@ export function sqlBlock(text) {
   const a = text.indexOf(SQL_HEAD), b = text.indexOf(SQL_TAIL);
   return a < 0 || b < a ? null : text.slice(a, b + SQL_TAIL.length);
 }
+
+export const API_BEGIN = '// BEGIN GENERATED API MAP (node scripts/sync-guard.mjs writes this from server/src/providers.js; do not edit by hand)\n';
+export const API_END = '// END GENERATED API MAP\n';
+const J = (v) => JSON.stringify(v).replace(/[\u007f-\uFFFF]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+/** the bundled API map as source text: every provider, every rule (id, method, path glob, why) and whether the server
+ * also reads the body for it (`body`), from the server's own table */
+export async function apiMapBlock() {
+  const { PROVIDERS, MAP_VERSION } = await import('../server/src/providers.js');
+  const out = [API_BEGIN, `export const BUNDLED_API_MAP = {\n  mapVersion: ${J(MAP_VERSION)},\n  providers: [\n`];
+  for (const [id, p] of Object.entries(PROVIDERS)) {
+    out.push(`    { id: ${J(id)}, host: ${J(p.host)}, base: ${J(p.base || '')}, rules: [\n`);
+    for (const r of p.irreversible) out.push(`      { id: ${J(r.id)}, m: ${J(r.m)}, p: ${J(r.p)}, why: ${J(r.why)}, body: ${!!r.body} },\n`);
+    out.push('    ] },\n');
+  }
+  out.push('  ],\n};\n', API_END);
+  return out.join('');
+}
+/** the text between the markers (markers included), or null */
+export function apiBlockOf(text) {
+  const a = text.indexOf(API_BEGIN), b = text.indexOf(API_END);
+  return a < 0 || b < a ? null : text.slice(a, b + API_END.length);
+}
+
 export const COPIES = [
   ['sdk/shellmap.mjs', 'cli/shellmap.mjs'],
   ['cli/guard.mjs', 'plugins/counterseal/scripts/guard.mjs'],
@@ -29,19 +55,30 @@ export const COPIES = [
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
 /** a list of problems; empty when everything is in step */
-export function check() {
+export async function check() {
   const bad = [];
-  const server = sqlBlock(read('server/src/providers.js')), guard = sqlBlock(read('sdk/shellmap.mjs'));
+  const src = read('sdk/shellmap.mjs');
+  const server = sqlBlock(read('server/src/providers.js')), guard = sqlBlock(src);
   if (!server) bad.push('server/src/providers.js: the SQL block was not found');
   else if (!guard) bad.push('sdk/shellmap.mjs: the SQL block was not found');
   else if (server !== guard) bad.push('sdk/shellmap.mjs: its SQL block differs from server/src/providers.js (copy it over, byte for byte)');
+  const have = apiBlockOf(src);
+  if (!have) bad.push('sdk/shellmap.mjs: the generated API map markers were not found');
+  else if (have !== await apiMapBlock()) bad.push('sdk/shellmap.mjs: the bundled API map is not the server\'s map (run node scripts/sync-guard.mjs)');
   for (const [from, to] of COPIES) {
     if (!existsSync(join(ROOT, to))) bad.push(`${to}: missing (run node scripts/sync-guard.mjs)`);
     else if (read(from) !== read(to)) bad.push(`${to}: differs from ${from} (run node scripts/sync-guard.mjs)`);
   }
   return bad;
 }
-export function sync() {
+export async function sync() {
+  const f = join(ROOT, 'sdk/shellmap.mjs');
+  const src = readFileSync(f, 'utf8');
+  const have = apiBlockOf(src);
+  if (!have) throw new Error('sdk/shellmap.mjs: the generated API map markers were not found');
+  const at = src.indexOf(have);
+  const next = src.slice(0, at) + await apiMapBlock() + src.slice(at + have.length);
+  if (next !== src) writeFileSync(f, next);
   for (const [from, to] of COPIES) {
     mkdirSync(dirname(join(ROOT, to)), { recursive: true });
     writeFileSync(join(ROOT, to), read(from));
@@ -50,13 +87,13 @@ export function sync() {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   if (process.argv.includes('--check')) {
-    const bad = check();
+    const bad = await check();
     if (bad.length) { console.error(bad.join('\n')); process.exit(1); }
     console.log('guard copies in step');
   } else {
-    sync();
-    const bad = check();
+    await sync();
+    const bad = await check();
     if (bad.length) { console.error(bad.join('\n')); process.exit(1); }
-    console.log(`wrote ${COPIES.length} copies`);
+    console.log(`wrote the API map block and ${COPIES.length} copies`);
   }
 }
