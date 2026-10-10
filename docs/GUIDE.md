@@ -182,7 +182,7 @@ keys it makes end with it. The code is typed in the app, never sent as a link: n
 approves a code gives that command line their account. Each sign-in alerts your devices and can be revoked in the app
 (Account), with every token and key it made.
 
-**One host.** The product lives at counterseal.gautamkhosla.com. The old LEASH address, leash.gautamkhosla.com, answers every request with a 301 to the same path on counterseal.
+**One host.** The product lives at counterseal.gautamkhosla.com. The old address, leash.gautamkhosla.com, answers every request with a 301 to the same path on counterseal.
 
 ### Connect your agent (MCP)
 
