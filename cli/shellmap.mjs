@@ -203,7 +203,7 @@ const STOP_WORDS = new Set(['then', 'elif', 'else', 'fi', 'do', 'done', 'esac', 
 
 class Parser {
   constructor(src, depth = 0, budget = { n: 0 }) {
-    this.s = String(src); this.i = 0; this.depth = depth; this.b = budget; this.pending = [];
+    this.s = String(src); this.i = 0; this.depth = depth; this.b = budget; this.pending = []; this.allMeta = false; this.dq = false;
     if (depth > MAX_DEPTH) throw new Unreadable('nested too deeply');
   }
   eof() { return this.i >= this.s.length; }
@@ -505,42 +505,60 @@ class Parser {
     return { op, fd: m[1], target: this.readWord() };
   }
 
-  // one word: parts are literals (q: quoted), variables, substitutions
-  readWord(pattern = false) {
+  // one word: parts are literals (q: quoted), variables, substitutions. A word with a brace expression also gets
+  // `alts`: the words brace expansion makes of its text (that happens first, on the text as typed).
+  // this.allMeta: the text of a ${V:-word}, where blanks and ; do not end the word; this.dq: that text inside double
+  // quotes, where a single quote is just a letter.
+  readWord(pattern = false, noBrace = false) {
     this.tick();
-    const start = this.i, parts = [];
+    const start = this.i, parts = [], dq = this.dq;
     let lit = '';
-    const flush = () => { if (lit) { parts.push({ k: 'lit', s: lit, q: false }); lit = ''; } };
+    const flush = () => { if (lit) { parts.push({ k: 'lit', s: lit, q: dq }); lit = ''; } };
     for (;;) {
       const c = this.s[this.i];
       if (c === undefined) break;
-      if (META.has(c)) {
+      if (META.has(c) && !this.allMeta) {
         if ((c === '<' || c === '>') && this.s[this.i + 1] === '(') { flush(); parts.push(this.procSub()); continue; }
         if (c === '|' && pattern) { lit += c; this.i++; continue; }
         break;
       }
-      if (c === "'") {
+      if (c === "'" && !dq) {
         const j = this.s.indexOf("'", this.i + 1);
         if (j < 0) throw new Unreadable('unterminated quote');
         flush(); parts.push({ k: 'lit', s: this.s.slice(this.i + 1, j), q: true }); this.i = j + 1;
       } else if (c === '"') {
         flush(); this.i++; this.dquote(parts);
       } else if (c === '\\') {
-        if (this.s[this.i + 1] === '\n') { this.i += 2; continue; }
-        flush(); parts.push({ k: 'lit', s: this.s[this.i + 1] ?? '\\', q: true }); this.i += 2;
+        const n = this.s[this.i + 1];
+        if (n === '\n') { this.i += 2; continue; }
+        if (dq) { if (n !== undefined && '$`"\\'.includes(n)) { lit += n; this.i += 2; } else { lit += '\\'; this.i++; } continue; }
+        flush(); parts.push({ k: 'lit', s: n ?? '\\', q: true }); this.i += 2;
       } else if (c === '$') {
-        flush(); this.dollar(parts, false);
+        flush(); this.dollar(parts, dq);
       } else if (c === '`') {
-        flush(); parts.push(this.backtick(false));
-      } else if (c === '~' && this.i === start) {
+        flush(); parts.push(this.backtick(dq));
+      } else if (c === '~' && this.i === start && !dq) {
         let j = this.i + 1;
-        while (j < this.s.length && !META.has(this.s[j]) && this.s[j] !== '/' && this.s[j] !== ':') j++;
-        parts.push({ k: 'tilde', user: this.s.slice(this.i + 1, j) }); this.i = j;
+        while (j < this.s.length && /[A-Za-z0-9._+-]/.test(this.s[j])) j++;
+        const e = this.s[j];
+        if (e === undefined || e === '/' || e === ':' || (META.has(e) && !this.allMeta)) { parts.push({ k: 'tilde', user: this.s.slice(this.i + 1, j) }); this.i = j; } else { lit += c; this.i++; }
       } else { lit += c; this.i++; }
     }
     flush();
     if (this.i === start) throw new Unreadable('unexpected ' + JSON.stringify(this.s[this.i] ?? 'end of text'));
-    return { parts, start, end: this.i, raw: this.s.slice(start, this.i) };
+    const word = { parts, start, end: this.i, raw: this.s.slice(start, this.i) };
+    if (!pattern && !noBrace && !this.allMeta && word.raw.includes('{') && /[,.]/.test(word.raw)) {
+      const raws = braceExpandRaw(word.raw);
+      if (raws.length > 1 || raws[0] !== word.raw) word.alts = raws.map((t) => this.altWord(t, start));
+    }
+    return word;
+  }
+  altWord(t, at) {
+    if (t === '') return { parts: [], start: at, end: at, raw: '' };
+    const p = new Parser(t, this.depth + 1, this.b);
+    const w = p.readWord(false, true);
+    if (!p.eof()) throw new Unreadable('brace expansion made a word the parser cannot read');
+    return w;
   }
   procSub() {
     this.i += 2;
@@ -683,15 +701,48 @@ function hit(st, rule, why, text) {
 }
 
 // ---- words
-function braceAlts(s, depth = 0) {
-  if (!s.includes('{') || depth > 6) return [s];
+// Brace expansion works on the text of one word as typed, before quotes or variables are looked at: braces inside
+// quotes, ${..}, $(..) and `..` are left alone, and $V{a,b} is $Va and $Vb (the variable names change).
+function skipBalanced(s, i) { // s[i] is ( or {; the index of the matching close (or of the last character)
+  const open = s[i], close = open === '(' ? ')' : '}';
+  let d = 0;
+  for (let j = i; j < s.length; j++) {
+    const c = s[j];
+    if (c === '\\') j++;
+    else if (c === "'") { const e = s.indexOf("'", j + 1); if (e < 0) return s.length - 1; j = e; }
+    else if (c === '"') { for (j++; j < s.length && s[j] !== '"'; j++) if (s[j] === '\\') j++; }
+    else if (c === open) d++;
+    else if (c === close) { d--; if (d === 0) return j; }
+  }
+  return s.length - 1;
+}
+function opaqueMask(s) { // true for every character that is quoted, escaped or inside an expansion
+  const m = new Array(s.length).fill(false);
+  const mark = (a, b) => { for (let k = a; k <= b && k < s.length; k++) m[k] = true; };
   for (let i = 0; i < s.length; i++) {
-    if (s[i] !== '{') continue;
+    const c = s[i];
+    if (c === '\\') { mark(i, i + 1); i++; }
+    else if (c === "'") { const e = s.indexOf("'", i + 1); const end = e < 0 ? s.length - 1 : e; mark(i, end); i = end; }
+    else if (c === '"') { let j = i + 1; for (; j < s.length && s[j] !== '"'; j++) { if (s[j] === '\\') j++; else if (s[j] === '$' && (s[j + 1] === '(' || s[j + 1] === '{')) j = skipBalanced(s, j + 1); } mark(i, j); i = j; }
+    else if (c === '$' && (s[i + 1] === '(' || s[i + 1] === '{')) { const e = skipBalanced(s, i + 1); mark(i, e); i = e; }
+    else if (c === '$' && s[i + 1] === "'") { let j = i + 2; for (; j < s.length && s[j] !== "'"; j++) if (s[j] === '\\') j++; mark(i, j); i = j; }
+    else if (c === '`') { let j = i + 1; for (; j < s.length && s[j] !== '`'; j++) if (s[j] === '\\') j++; mark(i, j); i = j; }
+    else if ((c === '<' || c === '>') && s[i + 1] === '(') { const e = skipBalanced(s, i + 1); mark(i, e); i = e; }
+  }
+  return m;
+}
+function braceExpandRaw(s, depth = 0) {
+  if (depth > 6 || !s.includes('{')) return [s];
+  const op = opaqueMask(s);
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== '{' || op[i]) continue;
     let d = 0, j = i;
     const commas = [];
     for (; j < s.length; j++) {
-      if (s[j] === '{') d++;
-      else if (s[j] === '}') { d--; if (d === 0) break; } else if (s[j] === ',' && d === 1) commas.push(j);
+      if (op[j]) continue;
+      const c = s[j];
+      if (c === '{') d++;
+      else if (c === '}') { d--; if (d === 0) break; } else if (c === ',' && d === 1) commas.push(j);
     }
     if (j >= s.length) continue;
     let alts = null;
@@ -699,67 +750,215 @@ function braceAlts(s, depth = 0) {
       alts = []; let from = i + 1;
       for (const c of commas) { alts.push(s.slice(from, c)); from = c + 1; }
       alts.push(s.slice(from, j));
-    } else {
+    } else if (!op.slice(i + 1, j).some(Boolean)) {
       const inner = s.slice(i + 1, j);
       let m = /^(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?$/.exec(inner);
       if (m) {
         const a = +m[1], b = +m[2], k = Math.max(1, Math.abs(+(m[3] || 1))), dir = a <= b ? 1 : -1;
+        const width = /^-?0\d/.test(m[1]) || /^-?0\d/.test(m[2]) ? Math.max(m[1].replace('-', '').length, m[2].replace('-', '').length) : 0;
         alts = [];
-        for (let x = a; dir > 0 ? x <= b : x >= b; x += dir * k) { alts.push(String(x)); if (alts.length > 100) return [s]; }
-      } else if ((m = /^([A-Za-z])\.\.([A-Za-z])$/.exec(inner))) {
-        const a = m[1].charCodeAt(0), b = m[2].charCodeAt(0), dir = a <= b ? 1 : -1;
+        for (let x = a; dir > 0 ? x <= b : x >= b; x += dir * k) { const t = String(Math.abs(x)); alts.push((x < 0 ? '-' : '') + (width ? t.padStart(width, '0') : t)); if (alts.length > 100) return [s]; }
+      } else if ((m = /^([A-Za-z])\.\.([A-Za-z])(?:\.\.(-?\d+))?$/.exec(inner))) {
+        const a = m[1].charCodeAt(0), b = m[2].charCodeAt(0), k = Math.max(1, Math.abs(+(m[3] || 1))), dir = a <= b ? 1 : -1;
         alts = [];
-        for (let x = a; dir > 0 ? x <= b : x >= b; x += dir) alts.push(String.fromCharCode(x));
+        for (let x = a; dir > 0 ? x <= b : x >= b; x += dir * k) alts.push(String.fromCharCode(x));
       }
     }
     if (!alts) continue;
     const pre = s.slice(0, i), post = s.slice(j + 1), out = [];
-    for (const a of alts) for (const x of braceAlts(pre + a + post, depth + 1)) { out.push(x); if (out.length > 256) return [s]; }
+    for (const a of alts) for (const x of braceExpandRaw(pre + a + post, depth + 1)) { out.push(x); if (out.length > 256) return [s]; }
     return out;
   }
   return [s];
 }
 
-function varValue(p, st) {
+// ---- parameter expansion: the forms bash has, for the values the line makes known.
+// A variable the line never set is "unset" for ${V:-w} and friends (the default is the likely value: the person who
+// writes ${TF:-terraform} means terraform); every other form of an unknown value is unknown (SENT).
+const VARNAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const unknownText = (v) => typeof v !== 'string' || v.includes(SENT);
+function lookupVar(name, st) {
+  const v = st.vars.get(name);
+  if (v !== undefined) return { known: true, value: v };
+  switch (name) {
+    case 'HOME': return { known: true, value: st.o.home ?? SENT };
+    case 'PWD': return { known: true, value: st.cwd ?? SENT };
+    case 'TMPDIR': case 'TMP': case 'TEMP': return { known: true, value: '/tmp' };
+    default: return { known: false, value: SENT };
+  }
+}
+// a shell pattern (* ? [..]) as a regular expression; null when it uses anything this does not read
+function globToRegex(g) {
+  if (/['"\\$`]/.test(g)) return null;
+  let re = '';
+  for (let i = 0; i < g.length; i++) {
+    const c = g[i];
+    if (c === '*') re += '[\\s\\S]*';
+    else if (c === '?') re += '[\\s\\S]';
+    else if (c === '[') {
+      const j = g.indexOf(']', i + 2);
+      if (j < 0) { re += '\\['; continue; }
+      let cls = g.slice(i + 1, j);
+      if (!/^[!^]?[A-Za-z0-9_.,:;@%+=~ /-]+$/.test(cls) || cls.includes('[:')) return null;
+      if (cls[0] === '!' || cls[0] === '^') cls = '^' + cls.slice(1);
+      re += '[' + cls + ']'; i = j;
+    } else re += c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  }
+  return new RegExp('^(?:' + re + ')$');
+}
+/**
+ * The pieces of the word after :- := :+ or / in ${..}: quotes and expansions inside it work as usual (in double
+ * quotes a single quote is just a letter). Null when it cannot be read.
+ */
+function wordChunks(text, st, dq) {
+  if (text === '' || !/['"\\$`~]/.test(text)) return [{ text, quoted: dq, expansion: true }];
+  try {
+    const p = new Parser(text, st.depth + 1, st.b);
+    p.allMeta = true; p.dq = dq;
+    const w = p.readWord(false, true);
+    if (!p.eof()) return null;
+    const out = [];
+    for (const part of w.parts) {
+      if (part.k === 'lit' && !part.q) out.push({ text: part.s, quoted: false, expansion: true });
+      else out.push(...partChunks(part, st));
+    }
+    return out;
+  } catch (e) { if (e instanceof Unreadable) return null; throw e; }
+}
+const chunkText = (cs) => (cs ? cs.map((c) => c.text).join('') : SENT);
+/** the value of a ${..}: a string, or the chunks of the default word that was used */
+function paramExpand(p, st) {
   if (p.subs) for (const b of p.subs) if (b) walk(b, fork(st));
-  if (p.mod) return SENT;
-  const v = st.vars.get(p.name);
-  if (v !== undefined) return v;
-  switch (p.name) {
-    case 'HOME': return st.o.home ?? SENT;
-    case 'PWD': return st.cwd ?? SENT;
-    case 'TMPDIR': case 'TMP': case 'TEMP': return '/tmp';
-    default: return SENT;
+  const name = p.name, mod = p.mod ?? '';
+  if (name === '!' && VARNAME.test(mod)) { // ${!R}: the variable that R names
+    const r = lookupVar(mod, st);
+    if (!r.known || unknownText(r.value) || !VARNAME.test(r.value)) return SENT;
+    const t = lookupVar(r.value, st);
+    return t.known ? t.value : SENT;
+  }
+  if (name === '#' && VARNAME.test(mod)) { const r = lookupVar(mod, st); return r.known && !unknownText(r.value) ? String([...r.value].length) : SENT; }
+  if (!VARNAME.test(name) && !/^[0-9]+$/.test(name)) return mod ? SENT : lookupVar(name, st).value;
+  const r = lookupVar(name, st), val = r.value;
+  if (!mod) return val;
+  let m;
+  if ((m = /^(:?)([-=+?])([\s\S]*)$/.exec(mod))) {
+    const colon = m[1] === ':', op = m[2];
+    const state = !r.known ? 'unset' : unknownText(val) ? 'unknown' : (val === '' && colon ? 'unset' : 'set');
+    if (state === 'unknown') return SENT;
+    if (op === '-' || op === '=') {
+      if (state === 'set') return val;
+      const cs = wordChunks(m[3], st, !!p.q);
+      if (cs === null) return SENT;
+      if (op === '=' && VARNAME.test(name)) st.vars.set(name, chunkText(cs));
+      return cs;
+    }
+    if (op === '+') return state === 'set' ? (wordChunks(m[3], st, !!p.q) ?? SENT) : '';
+    return state === 'set' ? val : SENT;
+  }
+  if (!r.known || unknownText(val)) return SENT;
+  const chars = [...val];
+  if ((m = /^:\s*(-?\d+)\s*(?::\s*(-?\d+)\s*)?$/.exec(mod))) { // ${V:offset:length}
+    const off = Number(m[1]), len = m[2] === undefined ? undefined : Number(m[2]);
+    const o = off < 0 ? chars.length + off : off;
+    if (o < 0 || o > chars.length) return '';
+    const e = len === undefined ? chars.length : len < 0 ? chars.length + len : Math.min(o + len, chars.length);
+    if (e < o) return SENT;
+    return chars.slice(o, e).join('');
+  }
+  if (mod === '^^') return val.toUpperCase();
+  if (mod === ',,') return val.toLowerCase();
+  if (mod === '^') return chars.length ? chars[0].toUpperCase() + chars.slice(1).join('') : val;
+  if (mod === ',') return chars.length ? chars[0].toLowerCase() + chars.slice(1).join('') : val;
+  if ((m = /^@([ULu])$/.exec(mod))) return m[1] === 'U' ? val.toUpperCase() : m[1] === 'L' ? val.toLowerCase() : (chars.length ? chars[0].toUpperCase() + chars.slice(1).join('') : val);
+  if ((m = /^(##?|%%?)([\s\S]*)$/.exec(mod))) { // ${V#pattern} ${V##pattern} ${V%pattern} ${V%%pattern}
+    if (m[2] === '') return val;
+    const re = globToRegex(m[2]);
+    if (!re) return SENT;
+    const n = val.length, longest = m[1].length === 2;
+    if (m[1][0] === '#') {
+      for (let k = longest ? n : 0; longest ? k >= 0 : k <= n; k += longest ? -1 : 1) if (re.test(val.slice(0, k))) return val.slice(k);
+    } else {
+      for (let k = longest ? 0 : n; longest ? k <= n : k >= 0; k += longest ? 1 : -1) if (re.test(val.slice(k))) return val.slice(0, k);
+    }
+    return val;
+  }
+  if ((m = /^\/([\/#%]?)([\s\S]*)$/.exec(mod))) { // ${V/pattern/replacement} and the // /# /% forms
+    const mode = m[1], at = m[2].indexOf('/');
+    const pat = at < 0 ? m[2] : m[2].slice(0, at), repText = at < 0 ? '' : m[2].slice(at + 1);
+    if (pat === '') return val;
+    const re = globToRegex(pat);
+    const rep = chunkText(wordChunks(repText, st, true));
+    if (!re || unknownText(rep) || rep.includes('&')) return SENT;
+    const n = val.length;
+    // the longest match that starts at i (and, for the % form, ends at the end of the value); -1 when there is none
+    const matchAt = (i) => { for (let e = n; e > i; e--) { if (mode === '%' && e !== n) continue; if (re.test(val.slice(i, e))) return e; } return -1; };
+    let out = '', i = 0;
+    while (i < n) {
+      const j = mode === '#' && i !== 0 ? -1 : matchAt(i);
+      if (j > i) { out += rep; i = j; if (mode !== '/') return out + val.slice(i); } else { out += val[i]; i++; }
+    }
+    return out;
+  }
+  return SENT;
+}
+/** what one part of a word comes to: chunks of text, each quoted or not (unquoted expansions are split at blanks) */
+function partChunks(p, st) {
+  switch (p.k) {
+    case 'lit': return [{ text: p.s, quoted: !!p.q, expansion: false }];
+    case 'var': { const r = paramExpand(p, st); return Array.isArray(r) ? r : [{ text: r, quoted: !!p.q, expansion: true }]; }
+    case 'sub': { const out = walk(p.body, fork(st)); return [{ text: out ? out.replace(/\n+$/, '') : SENT, quoted: !!p.q, expansion: true }]; }
+    case 'psub': { const out = walk(p.body, fork(st)); return [{ text: SENT, quoted: false, expansion: true, psub: out ?? null }]; }
+    case 'tilde': return [{ text: p.user === '' ? (st.o.home ?? SENT) : SENT, quoted: true, expansion: false }];
+    default: return [{ text: SENT, quoted: !!p.q, expansion: true }];
   }
 }
 
-/** one word to the words it becomes: brace expansion makes several; unknown pieces stay as SENT */
-function expandWord(w, st) {
-  let words = [{ s: '', glob: false }];
-  for (const p of w.parts) {
-    let alts;
-    switch (p.k) {
-      case 'lit': alts = p.q ? [{ s: p.s, glob: false }] : braceAlts(p.s).map((s) => ({ s, glob: /[*?[]/.test(s) })); break;
-      case 'var': alts = [{ s: varValue(p, st), glob: false }]; break;
-      case 'sub': {
-        const out = walk(p.body, fork(st));
-        alts = [{ s: out ? out.replace(/\n+$/, '') : SENT, glob: false }]; break;
-      }
-      case 'psub': walk(p.body, fork(st)); alts = [{ s: SENT, glob: false }]; break;
-      case 'tilde': alts = [{ s: p.user === '' ? (st.o.home ?? SENT) : SENT, glob: false }]; break;
-      default: alts = [{ s: SENT, glob: false }];
+/**
+ * One word to the words it becomes, the way a shell does it: brace expansion first (the parser made `alts` from the
+ * text), then the values of variables and substitutions, then splitting what was not quoted at blanks, so a word can
+ * become several or none. Unknown pieces stay as SENT. `plain`: an assignment value or a redirection target, where
+ * nothing is split or brace-expanded and the result is exactly one string.
+ */
+function expandWord(w, st, plain = false) {
+  if (!plain && w.alts) {
+    const all = [];
+    for (const a of w.alts) { all.push(...expandWord(a, st, false)); if (all.length > 512) throw new Unreadable('too many words'); }
+    return all.map((x) => ({ ...x, raw: w.raw }));
+  }
+  const chunks = [];
+  for (const p of w.parts) chunks.push(...partChunks(p, st));
+  const GLOB = /[*?[]/;
+  const out = [];
+  let cur = null, glob = false, psub, n = 0;
+  const push = () => { out.push({ s: cur, glob, psub: n === 1 ? psub : undefined }); cur = null; glob = false; psub = undefined; n = 0; };
+  for (const c of chunks) {
+    const t = c.text;
+    if (plain || c.quoted || !c.expansion || t.includes(SENT)) {
+      if (cur === null) cur = '';
+      cur += t; n++;
+      if (!plain && !c.quoted && GLOB.test(t)) glob = true;
+      if (c.psub !== undefined) psub = c.psub;
+      continue;
     }
-    const next = [];
-    for (const a of words) for (const b of alts) { next.push({ s: a.s + b.s, glob: a.glob || b.glob }); if (next.length > 256) throw new Unreadable('too many words'); }
-    words = next;
+    if (t === '') continue; // an unquoted empty expansion is nothing at all
+    const lead = /^[ \t\n]/.test(t), trail = /[ \t\n]$/.test(t);
+    const toks = t.split(/[ \t\n]+/).filter(Boolean);
+    if (!toks.length) { if (cur !== null) push(); continue; }
+    if (lead && cur !== null) push();
+    toks.forEach((tok, k) => {
+      if (cur === null) cur = '';
+      cur += tok; n++;
+      if (GLOB.test(tok)) glob = true;
+      if (k < toks.length - 1) push();
+    });
+    if (trail) push();
   }
-  // an unquoted variable with a known value that holds blanks is several words
-  if (w.parts.length === 1 && w.parts[0].k === 'var' && !w.parts[0].q && words.length === 1 && /\s/.test(words[0].s.trim()) && !words[0].s.includes(SENT)) {
-    words = words[0].s.trim().split(/\s+/).map((s) => ({ s, glob: /[*?[]/.test(s) }));
-  }
-  return words.map((x) => ({ s: x.s, lit: !x.s.includes(SENT), glob: x.glob, raw: w.raw }));
+  if (cur !== null) push();
+  if (plain && !out.length) out.push({ s: '', glob: false });
+  if (out.length > 512) throw new Unreadable('too many words');
+  return out.map((x) => ({ s: x.s, lit: !x.s.includes(SENT), glob: x.glob, raw: w.raw, ...(x.psub != null ? { psub: x.psub } : {}) }));
 }
-const one = (w, st) => expandWord(w, st)[0] ?? { s: '', lit: true, glob: false, raw: '' };
+const one = (w, st) => expandWord(w, st, true)[0];
 
 // ---- the program name
 const progName = (s) => lc(String(s).replace(/\/+$/, '').split('/').pop()).replace(/\.(exe|cmd|bat|ps1)$/, '');
@@ -866,10 +1065,13 @@ function doRedirs(redirs, st) {
   for (const r of redirs || []) {
     if (r.heredoc) {
       let hasSubs = false;
+      let text = r.body;
       if (!r.quoted && r.body) {
-        for (const body of heredocSubs(r.body, st)) { hasSubs = true; walk(body, fork(st)); }
+        const x = heredocText(r.body, st);
+        if (x !== null) text = x;
+        else for (const body of heredocSubs(r.body, st)) { hasSubs = true; walk(body, fork(st)); }
       }
-      stdin = { kind: 'heredoc', text: r.body, hasSubs };
+      stdin = { kind: 'heredoc', text, hasSubs };
       continue;
     }
     const t = r.target ? one(r.target, st) : null;
@@ -881,6 +1083,28 @@ function doRedirs(redirs, st) {
     }
   }
   return { stdin };
+}
+// An unquoted here-document is expanded by the shell that reads it, before any program sees it: $var, ${..}, $(..)
+// and `..` are replaced (what is unknown becomes SENT), quotes mean nothing, and \ only escapes $ ` \ and newline.
+// Null when the text cannot be read (the caller then falls back to looking for the substitutions only).
+function heredocText(body, st) {
+  if (!/[$`\\]/.test(body)) return body;
+  let esc = '';
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === '\\') {
+      const n = body[i + 1];
+      if (n !== undefined && '$`\\\n'.includes(n)) { esc += c + n; i++; } else if (n === '"') { esc += '\\\\\\"'; i++; } else esc += c;
+    } else if (c === '"') esc += '\\"';
+    else esc += c;
+  }
+  try {
+    const p = new Parser(esc + '"', st.depth + 1, st.b);
+    const parts = [];
+    p.dquote(parts);
+    if (!p.eof()) return null;
+    return parts.map((x) => partChunks(x, st).map((c) => c.text).join('')).join('');
+  } catch (e) { if (e instanceof Unreadable) return null; throw e; }
 }
 // command substitutions inside an unquoted here-document are run by the shell
 function heredocSubs(body, st) {
@@ -909,6 +1133,7 @@ function evalCmd(n, st, pipe, wantInfo = false) {
   const assigns = n.assigns.map((a) => ({ a, v: one(a.word, st) }));
   const argv = [];
   for (const w of n.words) argv.push(...expandWord(w, st));
+  if (globalThis.__SHELLMAP_TRACE && argv.length) globalThis.__SHELLMAP_TRACE.push(argv.map((w) => w.s.split(SENT).join('<?>'))); // tests only: what each command's words came to
   const red = doRedirs(n.redirs, st);
   if (!argv.length) {
     for (const { a, v } of assigns) setVar(st, a.name, a.add, v.s);
@@ -1215,7 +1440,8 @@ function decodeCheck(args, st) {
 }
 
 // shells: sh -c 'script', bash -lc, and scripts read from the pipe
-const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'fish', 'csh', 'tcsh', 'rbash', 'posh', 'yash']);
+const STDIN_PATH = /^\/(dev\/stdin|dev\/fd\/0|proc\/self\/fd\/0)$/;
+const SHELLS =new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'mksh', 'fish', 'csh', 'tcsh', 'rbash', 'posh', 'yash']);
 const SHELL_VAL = OPT_SET('-o -O +o +O --rcfile --init-file');
 for (const sh of SHELLS) {
   UNWRAP[sh] = (a, cx, st) => {
@@ -1234,8 +1460,9 @@ for (const sh of SHELLS) {
       if (!s.lit) decodeCheck([s], st);
       return { script: s.s };
     }
-    // no -c: a script file (not read) or the script comes on standard input
-    if (i < a.length && a[i].s !== '-' && a[i].s !== 's') return null;
+    // no -c: a script file (not read), a process substitution whose text is known (bash <(echo ...)), or the script comes on standard input
+    if (i < a.length && a[i].psub != null) return { script: a[i].psub };
+    if (i < a.length && a[i].s !== '-' && a[i].s !== 's' && !STDIN_PATH.test(a[i].s)) return null;
     const sin = cx.stdin;
     if (sin?.text != null) return { script: sin.text };
     if (sin?.kind === 'pipe' && (sin.names || []).some((n) => DECODERS.has(n))) {
@@ -1250,7 +1477,8 @@ UNWRAP.python = UNWRAP.python3 = UNWRAP.node = UNWRAP.ruby = UNWRAP.perl = UNWRA
   if (sin?.kind === 'pipe' && (sin.names || []).some((n) => DECODERS.has(n)) && !a.length) hit(st, 'sh.decode-exec', 'Decoded text is piped into an interpreter, so the guard cannot read what it runs. Held without being read.', (cx.argv || []).map((w) => w.raw ?? w.s).join(' '));
   return null;
 };
-UNWRAP.source = UNWRAP['.'] = () => null;
+// source <(echo ...) and . <(...): the text of the process substitution is the script, when it is known
+UNWRAP.source = UNWRAP['.'] = (a, cx) => (a[0]?.psub != null ? { script: a[0].psub } : (STDIN_PATH.test(a[0]?.s ?? '') && cx.stdin?.text != null ? { script: cx.stdin.text } : null));
 
 UNWRAP.xargs = (a, cx, st) => {
   const val = OPT_SET('-I -L -l -n -P -s -E -e -d -a --arg-file --delimiter --max-args --max-procs --max-lines --max-chars --eof');

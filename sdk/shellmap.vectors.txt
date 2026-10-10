@@ -823,7 +823,7 @@ GAP | curl -X DELETE "$(cat url.txt)"
 HOLD sh.dynamic-program | $CMD destroy
 HOLD sh.dynamic-program | $(which terraform) destroy
 HOLD sh.dynamic-program | "$TF" destroy -auto-approve
-HOLD sh.dynamic-program | ${TF:-terraform} destroy
+HOLD sh.terraform-destroy | ${TF:-terraform} destroy
 HOLD sh.dynamic-program | $RM -rf /
 HOLD sh.dynamic-program | $K delete ns prod
 HOLD sh.dynamic-program | terraform${IFS}destroy
