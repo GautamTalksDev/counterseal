@@ -3,7 +3,7 @@
   "private": true,
   "description": "Property-based fuzzing of the shell map, the MCP policy and the strict JSON and form readers (CI only; nothing here ships)",
   "type": "module",
-  "scripts": { "test": "node --test *.fuzz.mjs" },
+  "scripts": { "test": "node --test *.fuzz.js" },
   "devDependencies": { "fast-check": "4.10.2" },
   "engines": { "node": ">=22" }
 }
