@@ -269,3 +269,56 @@ a.ul{text-decoration:underline;text-underline-offset:3px}
 .chk{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-family:var(--mono)}
 .chk input{width:auto;height:auto;margin:0}
 .snippet{white-space:pre-wrap;user-select:text}
+/* the installable app, the first run and the privacy center (feat/app-trust) */
+.install-nav{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border:1px dashed var(--line2);border-radius:10px;color:var(--dim);font-size:13.5px;background:none}
+.install-nav:hover{color:var(--ink);border-color:var(--acc)}
+.install-nav svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.firstrun{padding-bottom:14px}
+.firstrun .panel-head{gap:12px}
+.firstrun .panel-head h3{margin-right:auto}
+.checklist{list-style:none;display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.checklist li{display:grid;grid-template-columns:22px 1fr auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.checklist li div{display:flex;flex-direction:column;gap:2px;font-size:14px;min-width:0}
+.checklist li div .dim{font-size:13px}
+.checklist .tick{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line2)}
+.checklist li.done .tick{background:var(--acc);border-color:var(--acc);box-shadow:inset 0 0 0 4px var(--bg2)}
+.checklist li.done b{color:var(--dim);text-decoration:line-through;text-decoration-color:var(--mute)}
+.checklist li.done .btn{opacity:.7}
+.demo-result{margin-top:12px;border:1px solid rgba(79,211,154,.35);background:rgba(79,211,154,.08);border-radius:10px;padding:12px 14px;font-size:13.5px}
+.hold-demo{border-style:dashed}
+.badge.kind.demo{background:var(--acc-soft);color:var(--acc);border-color:rgba(200,245,96,.35)}
+.install{padding-bottom:16px}
+.in-way{margin-top:12px;font-size:14px;display:flex;flex-direction:column;gap:10px}
+.in-way .steps{padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.ill{max-width:340px}
+.ill svg{width:100%;height:auto;display:block}
+.ill .ill-win{fill:var(--card);stroke:var(--line2)}
+.ill .ill-bar{fill:var(--bg);stroke:var(--line2)}
+.ill .ill-menu{fill:var(--card2);stroke:var(--line2)}
+.ill .ill-t{fill:var(--dim);font:11px var(--sans)}
+.ill .ill-t.b{fill:var(--ink);font-weight:600}
+.ill .ill-t.hi{fill:var(--acc-ink);font-weight:600}
+.ill .ill-hi-bg{fill:var(--acc)}
+.ill .ill-hi rect{fill:none;stroke:var(--acc);stroke-width:1.6}
+.ill .ill-hi path{fill:none;stroke:var(--acc);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ill .ill-arrow{stroke:var(--acc);stroke-width:1.4;stroke-dasharray:3 3;fill:none}
+.platforms{margin-top:16px;font-size:13.5px}
+.platforms summary{cursor:pointer;color:var(--ink);font-weight:550}
+.platforms table,.mapping table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px}
+.platforms th,.platforms td{text-align:left;padding:7px 8px;border-top:1px solid var(--line);vertical-align:top}
+.platforms th{color:var(--dim);font-weight:550}
+.platforms .dim{margin-top:10px}
+.ev-out{margin-top:14px;white-space:pre-wrap;word-break:break-word;font-size:12.5px;background:#050607;border:1px solid var(--line2);border-radius:10px;padding:12px}
+.mapping{margin:14px 0 6px;font-size:13.5px}
+.mapping summary{cursor:pointer;font-weight:550}
+.facts.retention{grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);font-size:13px;margin-bottom:12px}
+.facts.retention dt,.facts.retention dd{padding:6px 0;border-top:1px solid var(--line)}
+ul.plain{list-style:none;display:flex;flex-direction:column;gap:8px;margin:8px 0 12px}
+@media (max-width:860px){
+  .checklist li{grid-template-columns:22px 1fr}
+  .checklist li .btn{grid-column:2;justify-self:start}
+  .install-nav{width:auto;flex:none}
+  .platforms{overflow-x:auto}
+  .facts.retention{grid-template-columns:1fr}
+  .facts.retention dd{border-top:0;padding-top:0}
+}

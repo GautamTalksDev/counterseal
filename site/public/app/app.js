@@ -2,6 +2,8 @@
 // The one exception is an agent key made here: it is generated in this browser, downloaded at once, and dropped.
 import { BRAND } from '/brand.js';
 const $ = (id) => document.getElementById(id);
+// the CLI package the install lines name (server/src/brand.js cliInstall; scripts/cli-name.mjs switches it)
+const CLI_PKG = BRAND.cliInstall || BRAND.cli || 'leashcli';
 // a "Move to Counterseal" link carries its one-time token in the fragment: read it, then take it out of the address bar
 // and the history at once, so it is never shown, bookmarked, logged or sent as a Referer
 let moveToken = null;
@@ -15,17 +17,47 @@ const b64u = { enc: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).r
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), 4200); }
 
-async function api(method, path, body) {
-  const r = await fetch(path, { method, credentials: 'same-origin', headers: { 'x-leash': '1', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
+// A web session ends after an hour without an action of yours (server/src/auth.js). Everything you do sends
+// x-leash-active: 1; the 5-second background refresh is sent with {quiet: true} and does not keep the session alive.
+let signedInNow = false, quietUntil = 0;
+async function api(method, path, body, { quiet = method === 'GET' && Date.now() < quietUntil } = {}) {
+  let r;
+  try {
+    r = await fetch(path, { method, credentials: 'same-origin', headers: { 'x-leash': '1', ...(quiet ? {} : { 'x-leash-active': '1' }), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
+  } catch {
+    const e = new Error(navigator.onLine === false ? 'You are offline. Counterseal needs a connection for this; try again when you are back online.' : 'Could not reach Counterseal. Check your connection and try again.');
+    e.code = 'offline'; throw e;
+  }
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { const e = new Error(j.message || j.error || 'Request failed'); e.code = j.error; throw e; }
+  if (!r.ok) {
+    const e = new Error(j.message || j.error || 'Request failed'); e.code = j.error; e.status = r.status;
+    if (r.status === 401 && signedInNow) signedOutNow(j);
+    throw e;
+  }
   return j;
 }
 
-// ---- WebAuthn
+// ---- WebAuthn. Safari (macOS and iOS) only shows a passkey prompt that a tap started: a network request between the tap
+// and navigator.credentials can make it refuse with NotAllowedError. So the sign-in and sign-up options are fetched
+// before you tap (and kept for 4 minutes of their 5), and the passkey prompt is the first thing a tap does.
+const hasWebAuthn = () => !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+/** what a passkey error means, in words (the DOMException names the WebAuthn spec uses) */
+function passkeyError(e) {
+  switch (e && e.name) {
+    case 'NotAllowedError': return 'The passkey prompt was closed or timed out. Tap again and choose your passkey when your device asks.';
+    case 'InvalidStateError': return 'This device already has a passkey for this Counterseal account. Sign in instead.';
+    case 'SecurityError': return `Passkeys only work on ${location.host} over https. Check the address bar.`;
+    case 'NotSupportedError': return 'This browser or device cannot make a passkey here. Use a current Safari, Chrome, Edge or Firefox, your phone, or a security key.';
+    case 'AbortError': return 'The passkey prompt was cancelled. Tap again.';
+    case 'ConstraintError': return 'Your device needs a screen lock (Face ID, Touch ID, Windows Hello or a PIN) to make a passkey. Turn one on and try again.';
+    default: return (e && e.message) || 'Something went wrong.';
+  }
+}
+const assertion = (cred) => ({ id: cred.id, authenticatorData: b64u.enc(cred.response.authenticatorData), clientDataJSON: b64u.enc(cred.response.clientDataJSON), signature: b64u.enc(cred.response.signature) });
+const getOptions = (o) => ({ publicKey: { ...o, challenge: b64u.dec(o.challenge), ...(o.allowCredentials ? { allowCredentials: o.allowCredentials.map((c) => ({ ...c, id: b64u.dec(c.id) })) } : {}) } });
+const createOptions = (o) => ({ publicKey: { ...o, challenge: b64u.dec(o.challenge), user: { ...o.user, id: b64u.dec(o.user.id) }, ...(o.excludeCredentials ? { excludeCredentials: o.excludeCredentials.map((c) => ({ type: c.type, id: b64u.dec(c.id) })) } : {}) } });
 async function getAssertion(options) {
-  const cred = await navigator.credentials.get({ publicKey: { ...options, challenge: b64u.dec(options.challenge) } });
-  return { id: cred.id, authenticatorData: b64u.enc(cred.response.authenticatorData), clientDataJSON: b64u.enc(cred.response.clientDataJSON), signature: b64u.enc(cred.response.signature) };
+  try { return assertion(await navigator.credentials.get(getOptions(options))); } catch (e) { throw new Error(passkeyError(e)); }
 }
 /** begin -> passkey -> finish, for any ceremony that takes {challengeId, credential} */
 async function ceremony(beginPath, finishPath, extra = {}) {
@@ -34,17 +66,62 @@ async function ceremony(beginPath, finishPath, extra = {}) {
   return api('POST', finishPath, { ...extra, challengeId: b.challengeId, credential });
 }
 
+function authErr(msg) { const n = $('authErr'); n.textContent = msg || ''; n.hidden = !msg; if (msg) n.scrollIntoView({ block: 'nearest' }); }
+const FRESH = 4 * 60_000;
+const ready = { login: null, reg: null };
+async function prepareLogin() {
+  if (!hasWebAuthn() || (ready.login && Date.now() - ready.login.at < FRESH)) return;
+  try { ready.login = { b: await api('POST', '/v1/auth/login/begin', {}), at: Date.now() }; } catch { ready.login = null; }
+}
+let regTimer = 0;
+const NAME_OK = /^[\p{L}\p{N} ._'-]{1,60}$/u;
+function prepareRegister() {
+  clearTimeout(regTimer);
+  const name = $('name').value.trim();
+  if (!hasWebAuthn() || !NAME_OK.test(name)) return;
+  regTimer = setTimeout(async () => {
+    try { const b = await api('POST', '/v1/auth/register/begin', { name }); if ($('name').value.trim() === name) ready.reg = { name, b, at: Date.now() }; } catch { ready.reg = null; }
+  }, 500);
+}
+$('name').oninput = prepareRegister;
+
 $('register').onclick = async () => {
+  authErr('');
+  if (!hasWebAuthn()) return authErr('This browser cannot use passkeys. Open Counterseal in a current Safari, Chrome, Edge or Firefox.');
+  const name = $('name').value.trim();
+  if (!name) { $('name').focus(); return authErr('Type your name first. It can be anything; only you and your team see it.'); }
+  if (!NAME_OK.test(name)) return authErr('Use letters, digits, spaces, dots, hyphens or apostrophes in your name (60 at most).');
+  const pre = ready.reg && ready.reg.name === name && Date.now() - ready.reg.at < FRESH ? ready.reg.b : null;
+  ready.reg = null;
+  $('register').disabled = true;
   try {
-    const name = $('name').value.trim(); if (!name) return toast('Type your name first.');
-    const b = await api('POST', '/v1/auth/register/begin', { name });
-    const o = b.options;
-    const cred = await navigator.credentials.create({ publicKey: { ...o, challenge: b64u.dec(o.challenge), user: { ...o.user, id: b64u.dec(o.user.id) } } });
+    let b = pre, credP;
+    // with the options already here, the passkey prompt is the first thing this tap does (Safari needs that)
+    if (b) credP = navigator.credentials.create(createOptions(b.options));
+    else { b = await api('POST', '/v1/auth/register/begin', { name }); credP = navigator.credentials.create(createOptions(b.options)); }
+    let cred;
+    try { cred = await credP; } catch (e) { throw new Error(passkeyError(e)); }
     await api('POST', '/v1/auth/register/finish', { challengeId: b.challengeId, credential: { id: cred.id, attestationObject: b64u.enc(cred.response.attestationObject), clientDataJSON: b64u.enc(cred.response.clientDataJSON) } });
+    firstRunFresh = true;
     boot();
-  } catch (e) { toast(e.message); }
+  } catch (e) { authErr(e.message); prepareRegister(); } finally { $('register').disabled = false; }
 };
-$('login').onclick = async () => { try { await ceremony('/v1/auth/login/begin', '/v1/auth/login/finish'); boot(); } catch (e) { toast(e.message); } };
+$('name').onkeydown = (e) => { if (e.key === 'Enter') $('register').click(); };
+$('login').onclick = async () => {
+  authErr('');
+  if (!hasWebAuthn()) return authErr('This browser cannot use passkeys. Open Counterseal in a current Safari, Chrome, Edge or Firefox.');
+  const pre = ready.login && Date.now() - ready.login.at < FRESH ? ready.login.b : null;
+  ready.login = null;
+  try {
+    let b = pre, credP;
+    if (b) credP = navigator.credentials.get(getOptions(b.options));
+    else { b = await api('POST', '/v1/auth/login/begin', {}); credP = navigator.credentials.get(getOptions(b.options)); }
+    let cred;
+    try { cred = await credP; } catch (e) { throw new Error(passkeyError(e)); }
+    await api('POST', '/v1/auth/login/finish', { challengeId: b.challengeId, credential: assertion(cred) });
+    boot();
+  } catch (e) { authErr(e.message); prepareLogin(); }
+};
 $('logout').onclick = async () => { await api('POST', '/v1/auth/logout', {}); location.reload(); };
 
 // ---- Brakes: amounts with the currency's own decimals (the same table as the server's, server/src/money.js), Freeze
@@ -99,6 +176,7 @@ const can = (need) => (LEVEL[ME.role] ?? -1) >= LEVEL[need];
 const mayRevoke = (maker) => !maker || maker === ME.id || can('owner');
 function applyRole() {
   for (const n of document.querySelectorAll('[data-need]')) n.hidden = !can(n.dataset.need);
+  for (const n of document.querySelectorAll('[data-need-not]')) n.hidden = can(n.dataset.needNot);
   $('whoRole').textContent = ROLE_TEXT[ME.role] || '';
 }
 const when = (t) => new Date(t).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
@@ -160,6 +238,10 @@ async function load() {
   const typing = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.hold : null;
   H.replaceChildren();
   $('holdCount').textContent = String(h.holds.length); $('holdCount').classList.toggle('hot', h.holds.length > 0);
+  setBadge(h.holds.length);
+  lastMe = me;
+  firstRun(me, c, t, h);
+  if (current === 'privacy') privacyView().catch(() => {});
   for (const x of h.holds) H.append(holdCard(x));
   for (const id of [...drafts.keys()]) if (!h.holds.some((x) => x.id === id)) drafts.delete(id);
   if (typing && /^[0-9a-f]{24}$/.test(typing)) { const i = H.querySelector(`input[data-hold="${typing}"]`); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
@@ -224,7 +306,7 @@ async function load() {
 // command or a tool call) or by a deploy gate. For those, the card's headline is what the agent wants, and the exact
 // command or call is shown in full underneath (the server makes invisible and control characters visible); the short
 // summary comes from the guard and is labelled as such.
-const KIND = { proxy: 'API call', shell: 'Shell command', tool: 'Tool call', deploy: 'Deploy' };
+const KIND = { proxy: 'API call', shell: 'Shell command', tool: 'Tool call', deploy: 'Deploy', demo: 'Demo' };
 const drafts = new Map(); // hold id -> a deny reason being typed
 const WANTS = { shell: 'wants to run this command', tool: 'wants to make this tool call', deploy: 'wants to deploy' };
 // The seals on a card (two-person seal): one wax disc per seal needed, filled for each seal given, who gave it, when and
@@ -279,7 +361,9 @@ function deployFacts(g) {
 
 function holdCard(x) {
   const kind = KIND[x.kind] ? x.kind : 'proxy';
-  const guard = kind !== 'proxy';
+  // the built-in demo ("Try a held call"): an API-call card, marked Demo, whose approval the app then "uses" once
+  const demo = kind === 'demo';
+  const guard = kind !== 'proxy' && !demo;
   const two = (x.needs || 1) > 1;
   const ok = el('button', { className: 'btn pri', type: 'button', textContent: two ? 'Add your seal with passkey' : 'Approve with passkey' });
   const no = el('button', { className: 'btn dan', type: 'button', textContent: 'Deny' });
@@ -289,11 +373,12 @@ function holdCard(x) {
   ok.onclick = async () => {
     try {
       const r = await ceremony(`/v1/holds/${x.id}/approve/begin`, `/v1/holds/${x.id}/approve/finish`);
+      if (demo && r.approved) { await demoRetry(x.id); return; }
       toast(!r.approved ? r.note : kind === 'deploy' ? 'Approved. The job can go on, once, within 10 minutes.' : guard ? 'Approved. The agent can run that exact command once, within 10 minutes.' : 'Approved. The agent can retry that exact request once.');
       load();
     } catch (e) { toast(e.message); }
   };
-  const deny = async (reason) => { try { await api('POST', `/v1/holds/${x.id}/deny`, reason ? { reason } : {}); drafts.delete(x.id); toast(reason ? (kind === 'deploy' ? 'Denied. The job log shows your reason.' : 'Denied. The agent gets your reason.') : 'Denied.'); load(); } catch (e) { toast(e.message); } };
+  const deny = async (reason) => { try { await api('POST', `/v1/holds/${x.id}/deny`, reason ? { reason } : {}); drafts.delete(x.id); if (demo) { demoSay('Denied. The demo agent was told no (HTTP 403) and stops, as a real agent would. Nothing was called.'); load(); return; } toast(reason ? (kind === 'deploy' ? 'Denied. The job log shows your reason.' : 'Denied. The agent gets your reason.') : 'Denied.'); load(); } catch (e) { toast(e.message); } };
   no.onclick = () => deny(null);
   // deny with a reason: the guard hands it back to the agent (as data), so "not today, use staging" reaches it. The list
   // refreshes every few seconds, so a reason being typed is kept as a draft and the card is rebuilt with it.
@@ -314,18 +399,19 @@ function holdCard(x) {
       if (reasonRow.hidden) drafts.delete(x.id); else { drafts.set(x.id, input.value); input.focus(); }
     };
   }
-  const who = x.token_label || x.agent || 'agent';
+  const who = demo ? 'demo agent' : x.token_label || x.agent || 'agent';
   const facts = kind === 'deploy' && x.context && x.context.gate ? deployFacts(x.context.gate) : null;
   const where = x.context && (x.context.cwd || x.context.session)
     ? [x.context.cwd ? `in folder ${x.context.cwd}` : null, x.context.session ? `agent session ${x.context.session}` : null].filter(Boolean).join(', ')
     : null;
-  return el('div', { className: 'hold' + (guard ? ' hold-guard' : ''), id: 'hold-' + x.id },
+  return el('div', { className: 'hold' + (guard ? ' hold-guard' : '') + (demo ? ' hold-demo' : ''), id: 'hold-' + x.id },
     el('div', { className: 'hold-top' },
-      el('span', { className: 'badges' }, el('span', { className: 'badge warn', textContent: HOLD_BADGE[x.rule] || 'Held' }), el('span', { className: 'badge kind', textContent: KIND[kind] })),
+      el('span', { className: 'badges' }, el('span', { className: 'badge warn', textContent: HOLD_BADGE[x.rule] || 'Held' }), el('span', { className: 'badge kind' + (demo ? ' demo' : ''), textContent: KIND[kind] })),
       el('span', { className: 'dim mono', textContent: `${who}${guard && !facts && x.agent && x.agent !== who ? ' (' + x.agent + ')' : ''}  ${new Date(x.created_at).toLocaleTimeString()}` })),
     x.headline ? el('div', { className: 'amount', textContent: x.headline }) : null, // a held Stripe refund or payout: its amount first, in large type
     guard
       ? el('div', { className: 'what' }, el('span', { className: 'agent', textContent: x.agent || 'agent' }), ` ${WANTS[kind]}${where ? ', ' + where : ''}:`)
+      : demo ? el('div', { className: 'what', textContent: `The demo agent wants to ${x.method} ${x.path}` })
       : el('div', { className: 'what', textContent: `${x.method} ${x.host}${x.path}` }),
     // a deploy: the facts GitHub signed (and apart from them the workflow's own text), not a block of text
     facts || (x.preview ? el('pre', { className: 'preview mono' + (guard ? ' exact' : ''), textContent: x.preview }) : null),
@@ -372,7 +458,7 @@ async function mint(pre) {
     const r = pre ? await ceremony('/v1/tokens/passkey/begin', '/v1/tokens/passkey/finish', body) : await api('POST', '/v1/tokens', body);
     $('newToken').hidden = false;
     $('newTokenVal').textContent = r.token;
-    $('newTokenMcp').textContent = JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli', 'mcp'], env: { LEASH_URL: location.origin, LEASH_TOKENS: `${r.provider}=${r.token}`, ...(r.agentKey ? { LEASH_AGENT_KEY: '<path to the agent key file>' } : {}) } } } }, null, 2);
+    $('newTokenMcp').textContent = JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', CLI_PKG, 'mcp'], env: { LEASH_URL: location.origin, LEASH_TOKENS: `${r.provider}=${r.token}`, ...(r.agentKey ? { LEASH_AGENT_KEY: '<path to the agent key file>' } : {}) } } } }, null, 2);
     load();
   } catch (e) { toast(e instanceof SyntaxError ? 'The policy is not valid JSON.' : e.message); }
 }
@@ -384,8 +470,12 @@ const showHost = () => { const h = PROV[$('prov').value]?.perCredentialHost; $('
 $('prov').onchange = showHost;
 $('addCred').onclick = async () => {
   try {
-    await api('POST', '/v1/credentials', { provider: $('prov').value, label: $('credLabel').value.trim() || undefined, secret: $('secret').value.trim(), ...(PROV[$('prov').value]?.perCredentialHost ? { host: $('credHost').value.trim() } : {}) });
-    $('secret').value = ''; toast('Stored in the vault.'); load();
+    const r = await api('POST', '/v1/credentials', { provider: $('prov').value, label: $('credLabel').value.trim() || undefined, secret: $('secret').value.trim(), ...(PROV[$('prov').value]?.perCredentialHost ? { host: $('credHost').value.trim() } : {}) });
+    $('secret').value = '';
+    await load();
+    // the next step is a token for an agent: open it with this key chosen
+    show('tokens'); $('tokCred').value = r.id; $('tokLabel').focus();
+    toast('Stored in the vault. Now make a token for your agent: it uses this key without ever seeing it.');
   } catch (e) { toast(e.message); }
 };
 $('delConfirm').oninput = () => { $('delAccount').disabled = $('delConfirm').value.trim() !== 'delete'; };
@@ -403,6 +493,7 @@ function show(view) {
   if (changed && view === 'gates') gatesView().catch(() => {});
   if (changed && view === 'account') { passkeysView().catch(() => {}); cliSessionsView().catch(() => {}); guardKeysView().catch(() => {}); }
   if (changed && view === 'team') teamView().catch((e) => toast(e.message));
+  if (changed && view === 'privacy') privacyView().catch((e) => toast(e.message));
   for (const s of document.querySelectorAll('.view')) s.hidden = s.dataset.view !== view;
   for (const a of document.querySelectorAll('#snav a')) a.classList.toggle('on', a.dataset.view === view);
 }
@@ -426,6 +517,10 @@ function route() {
   // protection will be lowered) opens the team
   if (location.hash === '#account') { show('account'); history.replaceState(null, '', '/app'); }
   if (location.hash === '#team') { show('team'); history.replaceState(null, '', '/app'); }
+  // the app's shortcuts (manifest.webmanifest) and the privacy center
+  if (location.hash === '#held') { show('holds'); history.replaceState(null, '', '/app'); }
+  if (location.hash === '#install') { history.replaceState(null, '', '/app'); openInstall(); }
+  if (location.hash === '#privacy') { show('privacy'); history.replaceState(null, '', '/app'); }
   if (hm) setTimeout(() => { const n = $('hold-' + hm[1]); if (n) n.scrollIntoView({ behavior: 'smooth' }); }, 300);
   const dm = /^#device(=.*)?$/.exec(location.hash);
   if (dm && $('devicePanel').hidden) deviceOpen(!!dm[1]);
@@ -436,7 +531,7 @@ function route() {
 }
 window.addEventListener('hashchange', route);
 
-// ---- command line sign-in (#device). Device-code phishing: someone starts leashcli login on their own machine and
+// ---- command line sign-in (#device). Device-code phishing: someone starts counterseal login on their own machine and
 // sends you the code. So this page never takes a code from a link (a link that carries one is shown as a warning), you
 // type the code from your own terminal, you see when and where the sign-in started next to where you are, and "No,
 // deny it" comes first. Approving needs your passkey.
@@ -500,7 +595,7 @@ async function cliAlert(id) {
 }
 const revokedText = (r) => `Revoked, with ${r.tokens} token(s), ${r.agentKeys} agent key(s), ${r.receiptsKeys} receipts key(s) and ${r.guardKeys ?? 0} guard key(s) it made.`;
 
-// ---- guard keys: what a coding agent's hook (leashcli guard) holds. It asks for your approval; it can never give one.
+// ---- guard keys: what a coding agent's hook (counterseal guard) holds. It asks for your approval; it can never give one.
 async function guardKeysView() {
   const { keys } = await api('GET', '/v1/guard/keys');
   const live = keys.filter((k) => !k.revoked && (k.expires_at === null || k.expires_at > Date.now()));
@@ -779,7 +874,7 @@ async function pushState() {
   if (!k.enabled) { panel.hidden = true; return; }
   panel.hidden = false;
   if (!pushOk()) {
-    $('pushHint').textContent = `This browser cannot show alerts here. On iPhone: open ${BRAND.name} in Safari, tap Share, then Add to Home Screen, and open it from your home screen.`;
+    $('pushHint').textContent = platform().kind === 'ios' ? `On iPhone and iPad, alerts work only in the installed app (iOS or iPadOS 16.4 or later): in Safari tap Share, then Add to Home Screen, then open ${BRAND.name} from your Home Screen.` : 'This browser cannot show alerts here. Try a current Chrome, Edge, Firefox or Safari.';
     for (const b of ['pushOn', 'pushTest', 'pushOff']) $(b).hidden = true;
     return;
   }
@@ -795,7 +890,7 @@ $('pushOn').onclick = async () => {
     await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u.dec(k.key) });
     await api('POST', '/v1/push/subscribe', { endpoint: sub.endpoint });
-    toast('Alerts are on for this device.'); pushState();
+    pushOnHere = true; toast('Alerts are on for this device.'); pushState(); load().catch(() => {});
   } catch (e) { toast(e.message); }
 };
 $('pushTest').onclick = async () => { try { const r = await api('POST', '/v1/push/test', {}); toast(r.sent ? 'Test sent. The alert should arrive in a few seconds.' : `No device answered (${r.devices} registered): ${(r.results || []).map((x) => x.service + ' ' + (x.status || '') + ' ' + (x.reason || x.error || '')).join('; ') || 'none'}`); } catch (e) { toast(e.message); } };
@@ -841,8 +936,8 @@ async function passkeysView() {
 }
 
 // ---- receipts (Record)
-const download = (name, text) => {
-  const a = el('a', { href: URL.createObjectURL(new Blob([text], { type: 'application/json' })), download: name });
+const download = (name, text, type = 'application/json') => {
+  const a = el('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
 async function receiptsView(r) {
@@ -900,12 +995,237 @@ $('akNew').onclick = async () => {
     download(`agent-key-${label.replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 40)}.json`, JSON.stringify(jwk, null, 2));
     toast(`Agent key registered. Keep the downloaded file on the agent's machine only.`);
     $('akLabel').value = ''; load(); void r;
-  } catch (e) { toast(e.name === 'NotSupportedError' ? 'This browser cannot make Ed25519 keys. Use npx leashcli agent-key instead.' : e.message); }
+  } catch (e) { toast(e.name === 'NotSupportedError' ? 'This browser cannot make Ed25519 keys. Use npx counterseal agent-key instead.' : e.message); }
 };
+
+// ---- signed out while the app is open: an hour without an action of yours, a session revoked, or a removed member
+function signedOutNow(j) {
+  signedInNow = false; clearInterval(boot.poll); setBadge(0);
+  $('signedIn').hidden = true; $('signedOut').hidden = false;
+  authErr(j && j.reason === 'idle' ? 'You were signed out after an hour without activity. Sign in again with your passkey.' : 'You were signed out. Sign in again with your passkey.');
+  prepareLogin();
+}
+
+// ---- the app icon badge: how many held requests wait. The Badging API is feature-detected (Chromium installed apps on
+// Windows, macOS and ChromeOS; Safari web apps on macOS 14+; iOS and iPadOS 16.4+ Home Screen apps with notification
+// permission; https://developer.mozilla.org/en-US/docs/Web/API/Badging_API). The service worker sets it after an alert too.
+let lastBadge = -1;
+function setBadge(n) {
+  if (n === lastBadge) return;
+  lastBadge = n;
+  try { if (navigator.setAppBadge) (n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {}); } catch { /* not supported here */ }
+}
+
+// ---- small per-browser memory (localStorage): only conveniences, never data; everything works without it
+const remember = { get: (k) => { try { return window.localStorage.getItem('cs.' + k); } catch { return null; } }, set: (k, v) => { try { window.localStorage.setItem('cs.' + k, v); } catch { /* private mode */ } } };
+
+// ---- the first-run checklist: from what the server already says (no extra request)
+let lastMe = null, firstRunFresh = false, pushOnHere = false;
+function firstRun(me, c, t) {
+  const p = me.progress || {};
+  const done = {
+    passkey: true,
+    demo: !!p.demo,
+    device: !!(p.installed || p.alerts || pushOnHere || standalone()),
+    key: c.credentials.length > 0,
+    token: !!p.token || t.tokens.length > 0,
+    call: !!p.call,
+  };
+  const n = Object.values(done).filter(Boolean).length, all = n === 6;
+  for (const li of $('frList').children || []) if (li.dataset && li.dataset.step) li.classList.toggle('done', !!done[li.dataset.step]);
+  $('frCount').textContent = `${n} of 6 done`;
+  $('demoBtn').textContent = done.demo ? 'Try it again' : 'Try a held call';
+  $('firstRun').hidden = all || (remember.get('firstrun') === 'hidden' && !firstRunFresh);
+}
+$('frHide').onclick = () => { remember.set('firstrun', 'hidden'); firstRunFresh = false; $('firstRun').hidden = true; toast('Hidden. The demo and the install steps stay under Held and in the sidebar.'); };
+for (const b of document.querySelectorAll('[data-go]')) b.onclick = () => show(b.dataset.go);
+
+// ---- "Try a held call": a demo hold the server makes against its built-in demo provider; you approve it with your real
+// passkey, then the app plays the agent and retries once. Nothing real is called; no public receipt is written.
+function demoSay(text) { const d = $('demoResult'); d.textContent = text; d.hidden = !text; }
+$('demoBtn').onclick = async () => {
+  try {
+    demoSay('');
+    const r = await api('POST', '/v1/demo/call', {});
+    await load();
+    const card = $('hold-' + r.hold_id);
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    toast(SEALS.quorum > 1 ? 'The demo agent was held. Your team needs two seals, so a second approver must add theirs too.' : 'The demo agent was held. Approve it below with your passkey.');
+  } catch (e) { toast(e.message); }
+};
+async function demoRetry(id) {
+  try {
+    const r = await api('POST', '/v1/demo/call', { hold: id });
+    demoSay(`Approved with your passkey. The demo agent then retried the exact same request, once: the demo provider answered ${r.response.status}. ${r.response.note}`);
+    await load();
+    $('firstRun').hidden = false;
+  } catch (e) { toast(e.message); }
+}
+
+// ---- install the app (dock, taskbar, Start menu, Home Screen). Support, as documented on 9 Oct 2026:
+//  Chromium (Chrome, Edge, Samsung Internet): beforeinstallprompt, https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeinstallprompt_event
+//  Safari on macOS Sonoma 14+: File > Add to Dock, https://support.apple.com/en-us/104996
+//  Safari on iOS and iPadOS: Share > Add to Home Screen; Web Push and the Badging API for Home Screen web apps from 16.4,
+//    permission asked from a tap, https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/
+//  Firefox 143+ on Windows: "Add tab to taskbar" (not the Microsoft Store build), https://www.firefox.com/en-US/firefox/143.0/releasenotes/
+let installPrompt = null;
+const standalone = () => !!((window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true);
+function platform() {
+  const ua = navigator.userAgent || '';
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  if (ios) { const m = /OS (\d+)_(\d+)/.exec(ua); return { kind: 'ios', version: m ? Number(m[1]) + Number(m[2]) / 100 : null, safari: !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua) }; }
+  if (/Android/.test(ua)) return { kind: /Firefox\//.test(ua) ? 'firefox-android' : 'android' };
+  if (/Firefox\//.test(ua)) return { kind: /Windows/.test(ua) ? 'firefox-win' : 'firefox' };
+  if (/Macintosh/.test(ua) && /Safari\//.test(ua) && !/Chrome|Chromium|Edg\//.test(ua)) return { kind: 'mac-safari' };
+  if (/Chrome|Chromium|Edg\//.test(ua)) return { kind: 'chromium' };
+  return { kind: 'other' };
+}
+function installUi() {
+  const p = platform(), inst = standalone();
+  $('installNav').hidden = inst;
+  const show1 = (id) => { for (const x of ['inChromium', 'inMacSafari', 'inIos', 'inAndroid', 'inFirefox', 'inDone']) $(x).hidden = x !== id; };
+  if (inst) return show1('inDone');
+  if (p.kind === 'ios') {
+    show1('inIos');
+    if (p.version && p.version < 16.04) $('inIosVer').textContent = `This device runs iOS ${Math.floor(p.version)}. Installing works, but alerts and the icon badge need iOS or iPadOS 16.4 or later: update it in Settings, General, Software Update.`;
+    else if (!p.safari) $('inIosVer').textContent = 'You are not in Safari. Some browsers on iPhone also offer Add to Home Screen in their Share menu; if yours does not, open this page in Safari. Alerts and the badge need iOS or iPadOS 16.4 or later.';
+  } else if (p.kind === 'mac-safari') show1('inMacSafari');
+  else if (p.kind === 'firefox-win' || p.kind === 'firefox') { show1('inFirefox'); $('inFirefoxWin').hidden = p.kind !== 'firefox-win'; }
+  else if (p.kind === 'android' || p.kind === 'firefox-android') show1('inAndroid');
+  else show1('inChromium');
+  $('inPrompt').hidden = !installPrompt;
+  if (p.kind === 'android' && installPrompt) { $('inAndroid').append($('inPrompt')); $('inPrompt').hidden = false; }
+}
+function openInstall() { installUi(); $('installPanel').hidden = false; show('holds'); $('installPanel').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+$('installNav').onclick = openInstall;
+$('frInstall').onclick = openInstall;
+$('inClose').onclick = () => { $('installPanel').hidden = true; };
+$('inPrompt').onclick = async () => {
+  if (!installPrompt) return;
+  const e = installPrompt; installPrompt = null;
+  try { await e.prompt(); const c = await e.userChoice; if (c && c.outcome === 'accepted') toast('Installing. Open Counterseal from your dock, taskbar or Start menu.'); } catch (x) { toast(x.message); }
+  installUi();
+};
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; installUi(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; reportInstalled(true); installUi(); });
+/** the launch funnel's "installed": said once per browser, when the app runs installed (one row on the server at most) */
+async function reportInstalled(now = false) {
+  if (!signedInNow || (!now && !standalone()) || remember.get('installed') === '1') return;
+  try { await api('POST', '/v1/me/installed', {}); remember.set('installed', '1'); } catch { /* next time */ }
+}
+
+// ---- the service worker: alerts, the badge, and an offline copy of the app's own files (never your data; see sw.js)
+async function registerWorker() {
+  if (!navigator.serviceWorker) return null;
+  try { return await navigator.serviceWorker.register(swPolicy ? swPolicy.createScriptURL('/sw.js') : '/sw.js', { scope: '/' }); } catch { return null; }
+}
+
+// ---- the privacy center: what is kept, for how long, download it all, and who processes it
+async function privacyView() {
+  const me = lastMe || (await api('GET', '/v1/me'));
+  const r = me.retention || { holdDays: 365, choices: [30, 90, 365], rules: [] };
+  const sel = $('retDays');
+  if (document.activeElement !== sel) {
+    sel.replaceChildren(...r.choices.map((d) => el('option', { value: String(d), textContent: `${d} days${d === 365 ? ' (default)' : ''}`, selected: d === r.holdDays })));
+    sel.value = String(r.holdDays);
+  }
+  const L = $('retRules'); L.replaceChildren();
+  for (const x of r.rules) L.append(el('dt', { textContent: x.what }), el('dd', { textContent: x.rule }));
+}
+$('retSave').onclick = async () => {
+  try { const r = await api('POST', '/v1/me/retention', { holdDays: Number($('retDays').value) }); toast(`Saved. Closed held requests are deleted ${r.holdDays} days after they close.`); lastMe = null; privacyView(); } catch (e) { toast(e.message); }
+};
+const today = () => new Date().toISOString().slice(0, 10);
+/** every page of a paged export endpoint */
+async function pages(path) {
+  const out = [];
+  let after = null;
+  for (let i = 0; i < 10_000; i++) {
+    const p = await api('GET', path + (path.includes('?') ? '&' : '?') + (after ? `after=${after}` : 'after=0'));
+    out.push(...p.entries);
+    if (p.done) return { entries: out, first: i === 0 ? p : null };
+    after = p.next_after;
+    $('dlState').textContent = `Collecting: ${out.length} so far...`;
+  }
+  throw new Error('Too many pages.');
+}
+$('dlAll').onclick = async () => {
+  try {
+    $('dlState').textContent = 'Confirm with your passkey...';
+    const x = await ceremony('/v1/me/export/begin', '/v1/me/export/finish');
+    $('dlState').textContent = 'Collecting held requests...';
+    const holds = await pages('/v1/export/holds');
+    $('dlState').textContent = 'Collecting the audit log...';
+    const audit = await pages('/v1/export/evidence');
+    x.holds = { entries: holds.entries, complete: true, oldest_first: true };
+    x.audit = { entries: audit.entries, complete: true, oldest_first: true, note: 'Exactly as stored: detail is the JSON text each entry\'s hash covers.' };
+    download(`counterseal-data-${today()}.json`, JSON.stringify(x, null, 2));
+    $('dlState').textContent = `Downloaded: ${holds.entries.length} held requests and ${audit.entries.length} audit entries, with everything else. Keep it somewhere safe.`;
+  } catch (e) { $('dlState').textContent = ''; toast(e.message); }
+};
+
+// ---- the evidence pack (Audit log view): pages of the audit chain, checked here with WebCrypto, never on the server
+let lastPack = null;
+const dayStart = (v) => (v ? Date.parse(v + 'T00:00:00Z') : null), dayEnd = (v) => (v ? Date.parse(v + 'T23:59:59.999Z') : null);
+$('evBuild').onclick = async () => {
+  const out = $('evOut');
+  try {
+    const { verifyChain, decisionsCsv, MAPPING } = await import('/app/evidence.js');
+    const from = dayStart($('evFrom').value), to = dayEnd($('evTo').value);
+    if (from && to && to < from) return toast('"To" is before "From".');
+    out.hidden = false; out.textContent = 'Fetching the audit log...';
+    $('evJson').hidden = true; $('evCsv').hidden = true;
+    const q = [from ? `from=${from}` : null, to ? `to=${to}` : null].filter(Boolean).join('&');
+    let after = null, first = null, entries = [];
+    for (let i = 0; i < 10_000; i++) {
+      const p = await api('GET', '/v1/export/evidence?' + [q, after ? `after=${after}` : null].filter(Boolean).join('&'));
+      if (!first) first = p;
+      entries = entries.concat(p.entries);
+      out.textContent = `Fetching the audit log... ${entries.length} entries`;
+      if (p.done) break;
+      after = p.next_after;
+    }
+    out.textContent = `Checking ${entries.length} entries in this browser...`;
+    const chain = await verifyChain(entries, first.account_id, { fromStart: !!first.from_start && !from });
+    let cp = null;
+    if (first.log && first.log.checkpoint) {
+      try { const sdk = await import('/receipts-sdk.js'); cp = !!(await sdk.verifyCheckpoint(first.log.checkpoint, first.log.verifier_key)); } catch { cp = false; }
+    }
+    const receipts = entries.filter((e) => e.receipt !== null && e.receipt !== undefined).map((e) => ({ seq: e.seq, receipt: e.receipt }));
+    const lines = [
+      chain.ok ? `CHAIN INTACT: ${chain.entries} entries${chain.entries ? `, #${chain.first} to #${chain.last}` : ''}${chain.fromStart ? ', from your account\'s first entry' : ' (the range is complete and unedited between its ends)'}.` : `CHAIN BROKEN at entry #${chain.brokenAt}: ${chain.reason}.`,
+      `Head hash: ${chain.ok ? chain.head : 'n/a'}`,
+      `Public receipts in this range: ${receipts.length}.`,
+      cp === null ? 'Public log checkpoint: not available.' : cp ? `Public log checkpoint: signature valid (log size ${first.log.tree_size}, key ${first.log.verifier_key.split('+')[0]}).` : 'Public log checkpoint: the signature did NOT verify.',
+      'Every hash was recomputed in this browser.',
+    ];
+    out.textContent = lines.join('\n');
+    lastPack = {
+      json: { format: 'counterseal-evidence-pack/1', generated_at: new Date().toISOString(), account_id: first.account_id, range: { from: from ? new Date(from).toISOString() : null, to: to ? new Date(to).toISOString() : null }, map_version: first.map_version,
+        verification: { chain, checkpoint_signature_valid: cp, checked_in: 'browser (WebCrypto)', how: 'hash = SHA-256(prev_hash|account_id|at|actor|action|detail); the first entry of an account follows 64 zeros' },
+        log: first.log, receipts, entries, mapping: MAPPING },
+      csv: decisionsCsv(entries),
+    };
+    $('evJson').hidden = false; $('evCsv').hidden = false;
+  } catch (e) { out.hidden = false; out.textContent = e.message; }
+};
+$('evJson').onclick = () => { if (lastPack) download(`counterseal-evidence-${today()}.json`, JSON.stringify(lastPack.json, null, 2)); };
+$('evCsv').onclick = () => { if (lastPack) download(`counterseal-decisions-${today()}.csv`, lastPack.csv, 'text/csv'); };
+(async () => {
+  try {
+    const { MAPPING } = await import('/app/evidence.js');
+    $('mapNote').textContent = MAPPING.note;
+    $('mapList').replaceChildren(...MAPPING.items.flatMap((i) => [el('dt', { textContent: `${i.framework} ${i.ref}` }), el('dd', { textContent: i.text })]));
+  } catch { /* shown when the pack is built */ }
+})();
+
+// ---- back online after the app opened offline
+window.addEventListener('online', () => { if (!signedInNow) { $('offlineNote').hidden = true; boot(); } });
 
 async function boot() {
   try {
     const me = await api('GET', '/v1/me');
+    signedInNow = true; authErr(''); $('offlineNote').hidden = true;
     $('signedOut').hidden = true; $('signedIn').hidden = false; $('logout').hidden = false;
     ME = me.member || ME; SEALS = me.team || SEALS; applyRole();
     // on a team, your own name (the account's name is the team's)
@@ -918,9 +1238,14 @@ async function boot() {
     const p = $('prov'); p.replaceChildren(...meta.providers.map((x) => el('option', { value: x.id, textContent: x.name })));
     PROV = Object.fromEntries(meta.providers.map((x) => [x.id, x])); showHost();
     route(); await load(); pushState().catch(() => {});
-    clearInterval(boot.poll); boot.poll = setInterval(() => load().catch(() => {}), 5000);
-  } catch {
+    installUi(); reportInstalled();
+    // the background refresh: quiet, so it never keeps an idle session alive
+    clearInterval(boot.poll); boot.poll = setInterval(() => { quietUntil = Date.now() + 1500; load().catch(() => {}); }, 5000);
+  } catch (e) {
+    signedInNow = false;
     $('signedOut').hidden = false; $('signedIn').hidden = true;
+    if (e && e.code === 'offline') { $('offlineNote').hidden = false; return; }
+    prepareLogin();
     // a command line sign-in waits for you here; the code is typed after you sign in, never taken from the link
     $('devSignedOut').hidden = !/^#device/.test(location.hash);
     // on the old host, sign-in stays and sign-up moves to the product's host
@@ -933,4 +1258,5 @@ async function boot() {
     } catch { /* offline: the form still works or explains itself */ }
   }
 }
+registerWorker();
 if (moveToken) { $('signedOut').hidden = false; $('signedIn').hidden = true; moveIn(); } else if (inviteToken) inviteIn(); else boot();

@@ -8,8 +8,12 @@
 <link rel="stylesheet" href="/styles.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Counterseal">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="application-name" content="Counterseal">
 </head>
 <body>
 
@@ -19,6 +23,8 @@
     <div class="auth-box">
       <h1>Hold the keys.<br><em>Let agents work.</em></h1>
       <p class="dim" id="authIntro">Sign in with a passkey. Your phone, laptop or security key is your login, and the same tap approves held calls.</p>
+      <p id="offlineNote" class="alert" role="status" hidden>You are offline. Counterseal needs a connection to sign in, show held requests and approve them; nothing is kept on this device.</p>
+      <p id="authErr" class="alert" role="alert" hidden></p>
       <p id="devSignedOut" class="alert" hidden>Sign in to approve or deny a command line sign-in. You will type the code from your terminal next.<span id="devOtherHost" hidden> If your account and passkey are on <a id="devOtherLink" class="ul" href="/app"></a>, sign in there instead; the code works on both.</span></p>
       <button id="login" class="btn pri wide" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="8" r="3.2"/><path d="M9.8 10.2 16 16.4M13.5 13.9l1.6-1.6M15 15.4l1.4-1.4"/></svg>Sign in with a passkey</button>
       <section id="moveIn" class="banner" hidden><div><h3>Finish moving to Counterseal</h3><p class="dim">Create a passkey on this host for <b id="moveName"></b>. It joins your existing account; your old passkey keeps working on the old host until you remove it.</p></div><div class="row"><button id="moveCreate" class="btn pri" type="button">Create a passkey here</button></div></section>
@@ -45,7 +51,7 @@
       <div id="signupBox">
       <label for="name" class="lbl">Your name</label>
       <div class="row"><input id="name" maxlength="60" autocomplete="name" placeholder="Ada Lovelace"><button id="register" class="btn" type="button">Create account</button></div>
-      <p class="fine">No password, no email. Your passkey never leaves your device. New accounts start with public receipts on: each decision on a write is sealed in the public log as the method, the provider host, the decision and hashes, never a path, body, key, name or IP. You can turn it off in Receipts. <a class="ul" href="/privacy/#public">What is public</a></p>
+      <p class="fine steps-note">Two steps: type your name, then confirm with Face ID, Touch ID, Windows Hello, your phone or a security key. No password, no email. Your passkey never leaves your device. New accounts start with public receipts on: each decision on a write is sealed in the public log as the method, the provider host, the decision and hashes, never a path, body, key, name or IP. You can turn it off in Receipts. <a class="ul" href="/privacy/#public">What is public</a></p>
       </div>
       </div>
     </div>
@@ -81,7 +87,9 @@
       <a href="#" data-view="audit"><span class="ico i-log"></span>Audit log</a>
       <a href="#" data-view="team"><span class="ico i-team"></span>Team<b id="sealCount" class="cnt seal-cnt" title="Seals a held action needs">1</b></a>
       <a href="#" data-view="account"><span class="ico i-acct"></span>Account</a>
+      <a href="#" data-view="privacy"><span class="ico i-log"></span>Privacy</a>
     </nav>
+    <button id="installNav" class="install-nav" type="button" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="14" height="11" rx="2"/><path d="M10 6v5M7.5 8.8 10 11.3l2.5-2.5M7 17h6"/></svg>Install the app</button>
     <div class="me"><span class="av" id="avatar">?</span><span class="who-box"><span id="who" class="who"></span><span id="whoRole" class="who-role"></span></span><button id="logout" class="icon-btn" type="button" title="Sign out" aria-label="Sign out"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 4H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M12 6l4 4-4 4M16 10H8"/></svg></button></div>
   </aside>
 
@@ -105,7 +113,7 @@
     <section class="banner stack" id="devicePanel" hidden>
       <div id="devEnter">
         <h3>Sign in a command line</h3>
-        <p class="dim">Type the code shown in the terminal where you ran <span class="mono">leashcli login</span>.</p>
+        <p class="dim">Type the code shown in the terminal where you ran <span class="mono">counterseal login</span>.</p>
         <p class="alert" id="devLinkWarn" hidden>This link tried to fill in a sign-in code for you. Counterseal never puts sign-in codes in links, emails or chats. If someone sent you this link or a code, stop here.</p>
         <div class="row code-row"><input id="devCode" class="mono" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD-2345" aria-label="The code from your terminal"><button id="devNext" class="btn pri" type="button">Continue</button><button id="devCancel" class="btn" type="button">Cancel</button></div>
       </div>
@@ -120,7 +128,7 @@
         <p class="alert" id="devMismatch" hidden></p>
         <p>For <b id="devDays">7 days</b> it can see your vault's key names, held requests and audit log; create agent tokens that use your vaulted keys for any call that is not held; add keys to your vault; make agent keys and receipts keys; make guard keys that ask you to approve commands; deny held calls; and revoke tokens, receipts keys and guard keys.</p>
         <p class="dim">It can never approve a held call, pre-approve irreversible calls, read a key, delete a vaulted key, revoke an agent key, turn receipts off or delete your account. On a team it signs in as you, with your role: a viewer's command line can only read and deny.</p>
-        <p><b>Did you just run <span class="mono">leashcli login</span> yourself, on a computer you control?</b> If someone sent you this code or a link to this page, deny it: approving gives them your account.</p>
+        <p><b>Did you just run <span class="mono">counterseal login</span> yourself, on a computer you control?</b> If someone sent you this code or a link to this page, deny it: approving gives them your account.</p>
         <label class="lbl"><input type="checkbox" id="devMine"> Yes. I ran it myself just now, and this code is in my own terminal.</label>
         <div class="row"><button id="devDeny" class="btn dan" type="button">No, deny it</button><button id="devApprove" class="btn pri" type="button" disabled>Approve with passkey</button></div>
       </div>
@@ -133,6 +141,65 @@
 
     <section class="view" data-view="holds">
       <header class="vh"><div><h1>Held</h1><p class="dim">Irreversible calls and commands your agents tried. Nothing happens until you decide.</p></div></header>
+
+      <section class="panel firstrun" id="firstRun" aria-labelledby="frTitle" hidden>
+        <div class="panel-head"><h3 id="frTitle">Get started</h3><span class="dim small" id="frCount"></span><button id="frHide" class="linkbtn" type="button">Hide this list</button></div>
+        <ol class="checklist" id="frList">
+          <li data-step="passkey"><span class="tick" aria-hidden="true"></span><div><b>Make your passkey</b><span class="dim">Done: it signs you in and approves held calls.</span></div></li>
+          <li data-step="demo"><span class="tick" aria-hidden="true"></span><div><b>Try a held call</b><span class="dim">A pretend agent asks to delete a pretend repository. You approve it with your passkey, like a real one. Nothing real is called, nothing is made public.</span></div><button id="demoBtn" class="btn pri sm" type="button">Try a held call</button></li>
+          <li data-step="device"><span class="tick" aria-hidden="true"></span><div><b>Install the app and turn on alerts</b><span class="dim">So a held call reaches you on your phone or computer, with no website to open.</span></div><button id="frInstall" class="btn sm" type="button">Show me how</button></li>
+          <li data-step="key"><span class="tick" aria-hidden="true"></span><div><b>Put a real API key in the vault</b><span class="dim">GitHub, Cloudflare, Stripe and 7 more. Encrypted; no agent ever sees it.</span></div><button class="btn sm" type="button" data-go="vault">Open the vault</button></li>
+          <li data-step="token"><span class="tick" aria-hidden="true"></span><div><b>Give your agent a token instead</b><span class="dim">It works only through Counterseal, so irreversible calls wait for you.</span></div><button class="btn sm" type="button" data-go="tokens">Make a token</button></li>
+          <li data-step="call"><span class="tick" aria-hidden="true"></span><div><b>Your agent's first protected call</b><span class="dim">Paste the token into your agent (the app shows the config). The first call that goes through Counterseal ticks this.</span></div></li>
+        </ol>
+        <div id="demoResult" class="demo-result" role="status" hidden></div>
+      </section>
+
+      <section class="panel install" id="installPanel" aria-labelledby="inTitle" hidden>
+        <div class="panel-head"><h3 id="inTitle">Install Counterseal</h3><button id="inClose" class="linkbtn" type="button">Close</button></div>
+        <p class="dim small" id="inWhy">An installed Counterseal opens from your dock, taskbar, Start menu or Home Screen like any app, shows how many requests are waiting on its icon where your system supports it, and alerts you when an agent is stopped. It is the same app as this page: nothing else is downloaded.</p>
+        <div id="inChromium" class="in-way" hidden>
+          <div class="ill" aria-hidden="true"><svg viewBox="0 0 220 64"><rect class="ill-win" x="2" y="6" width="216" height="52" rx="8"/><rect class="ill-bar" x="12" y="16" width="160" height="16" rx="8"/><text class="ill-t" x="22" y="28">counterseal...</text><g class="ill-hi"><rect x="150" y="18" width="18" height="12" rx="2"/><path d="M159 21v5M156.5 24l2.5 2.5 2.5-2.5"/></g></svg></div>
+          <p>Your browser can install Counterseal in one step.</p>
+          <div class="row"><button id="inPrompt" class="btn pri" type="button" hidden>Install Counterseal</button></div>
+          <p class="dim small" id="inChromiumManual">If no button appears: in Chrome, click the install icon at the right of the address bar (or the menu, then Cast, save and share, then Install page as app). In Edge, open the menu, then Apps, then Install this site as an app.</p>
+        </div>
+        <div id="inMacSafari" class="in-way" hidden>
+          <div class="ill" aria-hidden="true"><svg viewBox="0 0 220 86"><rect class="ill-win" x="2" y="2" width="216" height="82" rx="8"/><text class="ill-t b" x="14" y="20">File</text><rect class="ill-menu" x="10" y="26" width="120" height="52" rx="6"/><text class="ill-t" x="20" y="44">New Window</text><rect class="ill-hi-bg" x="14" y="52" width="112" height="18" rx="4"/><text class="ill-t hi" x="20" y="65">Add to Dock...</text></svg></div>
+          <ol class="steps"><li>In Safari's menu bar, choose <b>File</b>, then <b>Add to Dock</b>. (Or click the Share button in the toolbar, then <b>Add to Dock</b>.)</li><li>Keep the name Counterseal and click <b>Add</b>. It opens from the Dock and Launchpad like an app.</li><li>Open it from the Dock, sign in, and turn on alerts <b>inside the app</b>: the Dock icon then shows how many requests are waiting.</li></ol>
+          <p class="dim small">Needs macOS Sonoma 14 or later. Your passkey from Safari works in the app.</p>
+        </div>
+        <div id="inIos" class="in-way" hidden>
+          <div class="ill" aria-hidden="true"><svg viewBox="0 0 250 96"><rect class="ill-win" x="66" y="2" width="92" height="92" rx="14"/><g class="ill-hi"><rect x="100" y="66" width="24" height="20" rx="4"/><path d="M112 70v9M108 73l4-4 4 4"/></g><text class="ill-t" x="4" y="40">1. Share</text><path class="ill-arrow" d="M46 44 L96 70"/><text class="ill-t" x="166" y="22">2. Add to</text><text class="ill-t" x="166" y="36">Home Screen</text><rect class="ill-hi-bg" x="166" y="46" width="58" height="20" rx="4"/><text class="ill-t hi" x="174" y="60">3. Add</text></svg></div>
+          <ol class="steps"><li>Open this page in <b>Safari</b>. Tap the <b>Share</b> button (the square with an arrow).</li><li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open Counterseal <b>from your Home Screen</b>, sign in with your passkey, and tap <b>Turn on alerts</b>. Only the Home Screen app can get alerts and show a badge on its icon.</li></ol>
+          <p class="dim small" id="inIosVer">Alerts and the icon badge need iOS or iPadOS 16.4 or later. Some other browsers on iPhone also offer Add to Home Screen in their Share menu; if yours does not, use Safari.</p>
+        </div>
+        <div id="inAndroid" class="in-way" hidden>
+          <ol class="steps"><li>Tap <b>Install</b> below, or open your browser's menu and tap <b>Install app</b> (or <b>Add to Home screen</b>).</li><li>Open Counterseal from your Home Screen, sign in, and tap <b>Turn on alerts</b>.</li></ol>
+        </div>
+        <div id="inFirefox" class="in-way" hidden>
+          <div class="ill" aria-hidden="true"><svg viewBox="0 0 220 64"><rect class="ill-win" x="2" y="6" width="216" height="52" rx="8"/><rect class="ill-bar" x="12" y="16" width="170" height="16" rx="8"/><text class="ill-t" x="22" y="28">counterseal...</text><g class="ill-hi"><rect x="160" y="18" width="18" height="12" rx="2"/><path d="M163 27h12M165 21h8v4h-8z"/></g></svg></div>
+          <p id="inFirefoxWin">On Windows, Firefox 143 or later can pin Counterseal to your taskbar: click <b>Add tab to taskbar</b> at the right of the address bar. (Not in Firefox installed from the Microsoft Store.)</p>
+          <p>Alerts work in Firefox without installing anything: turn them on below, and they arrive while Firefox is running, even with this tab closed.</p>
+          <p class="dim small">Firefox on macOS and Linux does not install web apps. If you want a dock icon there, use Safari (macOS) or a Chromium browser.</p>
+        </div>
+        <div id="inDone" class="in-way" hidden><p><b>Counterseal is installed</b> and running as an app. Turn on alerts on this device if you have not yet.</p></div>
+        <details class="platforms"><summary>Where the app works</summary>
+          <table>
+            <thead><tr><th>Where</th><th>Install</th><th>Alerts</th><th>Badge on the icon</th></tr></thead>
+            <tbody>
+              <tr><td>Chrome, Edge (Windows, macOS, ChromeOS, Linux)</td><td>Yes, one click</td><td>Yes</td><td>Windows, macOS and ChromeOS</td></tr>
+              <tr><td>Chrome, Edge, Samsung Internet (Android)</td><td>Yes, Install app</td><td>Yes</td><td>No number; your launcher may show a notification dot</td></tr>
+              <tr><td>Safari (macOS Sonoma 14 or later)</td><td>File, Add to Dock</td><td>Yes</td><td>Yes, when alerts are allowed in the app</td></tr>
+              <tr><td>Safari (iPhone, iPad)</td><td>Share, Add to Home Screen</td><td>iOS and iPadOS 16.4 or later, from the Home Screen app only</td><td>16.4 or later, with alerts allowed</td></tr>
+              <tr><td>Firefox (Windows)</td><td>143 or later: Add tab to taskbar</td><td>Yes, in the browser</td><td>No</td></tr>
+              <tr><td>Firefox (macOS, Linux)</td><td>No</td><td>Yes, in the browser</td><td>No</td></tr>
+            </tbody>
+          </table>
+          <p class="dim small">Approving always needs your passkey inside the app. An alert only opens the request; it never approves it.</p>
+        </details>
+      </section>
+
       <div class="banner" id="pushPanel" hidden><div><h3>Get alerted on this device</h3><p class="dim" id="pushHint">When an agent is stopped, this phone or computer buzzes and the notification opens the request. The alert itself carries nothing: details load from Counterseal only after you tap.</p></div><div class="row"><button id="pushOn" class="btn pri" type="button">Turn on alerts</button><button id="pushTest" class="btn" type="button" hidden>Send a test</button><button id="pushOff" class="btn" type="button" hidden>Turn off</button></div></div>
       <div id="holds" class="holds"></div>
       <div id="noHolds" class="empty"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg><h3>All clear</h3><p class="dim">When an agent tries something it can't take back, it waits here. Turn on alerts to hear about it on your phone.</p></div>
@@ -241,7 +308,7 @@
       </div>
       <div class="panel form" data-need="member">
         <h3>New agent key</h3>
-        <p class="dim small">Made in this browser. The private key is downloaded to you as a file and never sent anywhere; only the public key and a proof that you hold it reach the server. Put the file on the agent's machine and set <span class="mono">LEASH_AGENT_KEY</span> to its path. From the agent's machine, <span class="mono">npx leashcli agent-key</span> (0.2.1) does the same.</p>
+        <p class="dim small">Made in this browser. The private key is downloaded to you as a file and never sent anywhere; only the public key and a proof that you hold it reach the server. Put the file on the agent's machine and set <span class="mono">LEASH_AGENT_KEY</span> to its path. From the agent's machine, <span class="mono">npx counterseal agent-key</span> (0.3.0) does the same.</p>
         <label for="akLabel" class="lbl">Label</label>
         <input id="akLabel" maxlength="60" placeholder="laptop agent">
         <div class="actions"><button id="akNew" class="btn pri" type="button">Generate, download and register</button></div>
@@ -276,6 +343,17 @@
     <section class="view" data-view="audit" hidden>
       <header class="vh"><div><h1>Audit log</h1><p class="dim">Append-only. Each entry commits to the one before it.</p></div><button id="verify" class="btn" type="button">Verify chain</button></header>
       <div class="panel"><div id="audit" class="list audit"></div></div>
+      <div class="panel form" id="evidencePanel">
+        <h3>Evidence pack</h3>
+        <p class="dim small">Every decision in a date range with the audit chain, the public receipts' numbers, and the public log's latest signed checkpoint and key, checked here in your browser: it recomputes every hash itself, so you do not have to take our word for it. Download it as JSON, and the decisions as CSV for a spreadsheet.</p>
+        <div class="grid">
+          <div><label for="evFrom" class="lbl">From <span class="dim">(optional)</span></label><input id="evFrom" type="date"></div>
+          <div><label for="evTo" class="lbl">To <span class="dim">(optional)</span></label><input id="evTo" type="date"></div>
+        </div>
+        <div class="actions"><button id="evBuild" class="btn pri" type="button">Build and verify</button><button id="evJson" class="btn" type="button" hidden>Download JSON</button><button id="evCsv" class="btn" type="button" hidden>Download CSV</button></div>
+        <pre id="evOut" class="ev-out mono" role="status" hidden></pre>
+        <details class="mapping"><summary>How this lines up with the EU AI Act and SOC 2 (our interpretation)</summary><p class="dim small" id="mapNote"></p><dl class="facts" id="mapList"></dl></details>
+      </div>
     </section>
     <section class="view" data-view="team" hidden>
       <header class="vh"><div><h1>Team</h1><p class="dim">Everyone signs in with their own passkey. With two seals, an irreversible action needs two different people.</p></div></header>
@@ -357,7 +435,7 @@
       <header class="vh"><div><h1>Account</h1><p class="dim">Your data, and how to take it all away.</p></div></header>
       <div class="panel form">
         <h3>What Counterseal keeps about you</h3>
-        <p class="dim small">Your name, your passkey's public key, your encrypted vault, token, receipts key and guard key hashes, agent public keys, holds (for a coding agent's command: the command, its folder name and your deny reason), your audit log, the limits and money caps you set on a token, what each token's money caps have let through today (kept 35 days), its breaker's counts for the current hour and 5 minutes, whether your account is frozen, your receipts counters and openings, the country and network name each command line sign-in started from and, if you turn on alerts, each device's push address. On a team, also each person's name, role and the label the owner gave them, who invited whom, open invites (as hashes), and who sealed each held action, with which passkey (a short fingerprint) and when. Never your face, fingerprint, readable keys or private keys. <a class="ul" href="/privacy/">Privacy policy</a></p>
+        <p class="dim small">Your name, your passkey's public key, your encrypted vault, token, receipts key and guard key hashes, agent public keys, holds (for a coding agent's command: the command, its folder name and your deny reason), your audit log, the limits and money caps you set on a token, what each token's money caps have let through today (kept 35 days), its breaker's counts for the current hour and 5 minutes, whether your account is frozen, your receipts counters and openings, the country and network name each command line sign-in started from and, if you turn on alerts, each device's push address. On a team, also each person's name, role and the label the owner gave them, who invited whom, open invites (as hashes), and who sealed each held action, with which passkey (a short fingerprint) and when. Also five first-time dates (your first token, first protected call, first demo, first installed use, first alerts) for the Get started list and our totals, and any demo held calls you try. Never your face, fingerprint, readable keys or private keys. <a class="ul" href="/privacy/">Privacy policy</a>. Download all of it or choose how long held requests are kept under <a class="ul" href="/app#privacy">Privacy</a>.</p>
       </div>
       <div class="panel form" id="movePanel" hidden>
         <h3>Move to Counterseal</h3>
@@ -370,13 +448,13 @@
       </div>
       <div class="panel form">
         <h3>Command line sign-ins</h3>
-        <p class="dim small">Each <span class="mono">leashcli login</span> of the last 7 days, where it started, and whether it is still signed in (7 days at most). Revoking one signs that command line out and revokes every token, agent key, receipts key and guard key it made, even after it signed out.</p>
+        <p class="dim small">Each <span class="mono">counterseal login</span> of the last 7 days, where it started, and whether it is still signed in (7 days at most). Revoking one signs that command line out and revokes every token, agent key, receipts key and guard key it made, even after it signed out.</p>
         <div id="cliSessions" class="list"></div>
         <p class="empty-row dim" id="noCliSessions">No command line sign-ins in the last 7 days.</p>
       </div>
       <div class="panel form">
         <h3>Guard keys</h3>
-        <p class="dim small">For the guard on a coding agent's machine (<span class="mono">leashcli guard</span>): it holds commands such as <span class="mono">terraform destroy</span> until you approve them here with your passkey. A guard key can ask for an approval and read your answer; it can never approve. A key made by <span class="mono">leashcli</span> ends with that command line sign-in; a key made here lasts until you revoke it.</p>
+        <p class="dim small">For the guard on a coding agent's machine (<span class="mono">counterseal guard</span>): it holds commands such as <span class="mono">terraform destroy</span> until you approve them here with your passkey. A guard key can ask for an approval and read your answer; it can never approve. A key made by the CLI ends with that command line sign-in; a key made here lasts until you revoke it.</p>
         <div id="guardKeys" class="list"></div>
         <p class="empty-row dim" id="noGuardKeys">No guard keys yet.</p>
         <div data-need="member"><label for="gkLabel" class="lbl">Label</label>
@@ -388,6 +466,40 @@
         <p class="dim small">Erases your account, passkeys, vault, tokens, agent keys, receipts keys, guard keys, holds, sessions and audit log immediately, and unlinks your public receipts (they stay in the log, but nothing on our side says they were yours). On a team, everyone's access, passkeys and seals go with it. Agents using your tokens stop working. This cannot be undone.</p>
         <label for="delConfirm" class="lbl">Type <span class="mono">delete</span> to confirm</label>
         <div class="row"><input id="delConfirm" autocomplete="off" spellcheck="false"><button id="delAccount" class="btn dan" type="button" disabled>Delete everything with passkey</button></div>
+      </div>
+    </section>
+
+    <section class="view" data-view="privacy" hidden>
+      <header class="vh"><div><h1>Privacy</h1><p class="dim">What Counterseal keeps, for how long, who processes it, and how to take all of it with you.</p></div></header>
+      <div class="panel form">
+        <h3>Download all my data</h3>
+        <p class="dim small">One JSON file with everything Counterseal keeps about this account: settings, people and roles, passkeys (as fingerprints), sessions, vault entries (names and dates, never a key or any part of one), tokens and their policies, keys (labels and dates, never the key), every held request and command still kept, seals, invites, which push services your devices use (never the push address), counters and the whole audit log. Your passkey confirms it; 3 times an hour; it is written to the audit log.</p>
+        <div class="actions" data-need="owner"><button id="dlAll" class="btn pri" type="button">Download with passkey</button></div>
+        <p class="dim small" id="dlOwner" data-need-not="owner">Only an owner of this account can download all of it. Ask an owner, or write to privacy@gautamkhosla.com.</p>
+        <p class="dim small" id="dlState" role="status"></p>
+      </div>
+      <div class="panel form">
+        <h3>How long it is kept</h3>
+        <div data-need="owner">
+          <label for="retDays" class="lbl">Delete closed held requests and commands after</label>
+          <div class="row"><select id="retDays"></select><button id="retSave" class="btn" type="button">Save</button></div>
+          <p class="dim small">Closed means approved and used, denied or expired. Waiting ones are never deleted early. The audit log keeps a fingerprint of each one.</p>
+        </div>
+        <dl class="facts retention" id="retRules"></dl>
+      </div>
+      <div class="panel form">
+        <h3>Who processes it</h3>
+        <p class="dim small">Counterseal runs on Cloudflare (Workers, D1 and a Durable Object), our only processor. If you turn on alerts, your browser's push service (Apple, Google, Mozilla or Microsoft) carries an empty wake-up and nothing else. No analytics, no ads, no third-party scripts. <a class="ul" href="/privacy/subprocessors/">Subprocessors</a></p>
+      </div>
+      <div class="panel form">
+        <h3>For your data protection officer</h3>
+        <ul class="plain small">
+          <li><a class="ul" href="/privacy/#records">Records of processing (summary)</a>: purposes, data, legal bases and retention.</li>
+          <li><a class="ul" href="/privacy/dpa/">Data processing agreement</a>: a template covering GDPR Art. 28 and PIPEDA; not legal advice, have your lawyer review it.</li>
+          <li><a class="ul" href="/security/standards/">Security standards self-assessment</a>: OWASP ASVS 5.0 and four OWASP Top 10 lists. Self-assessed, not certified.</li>
+          <li>Evidence of every decision: Audit log, Evidence pack (verified in your browser).</li>
+          <li>Erasure: Account, Delete account (an owner, with a passkey). Public log entries stay, unlinked from you.</li>
+        </ul>
       </div>
     </section>
   </main>
