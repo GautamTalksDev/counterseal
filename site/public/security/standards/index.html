@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Security standards: Counterseal</title>
+<meta name="description" content="A self-assessment of Counterseal against OWASP ASVS 5.0, the OWASP Top 10 2025, the API Security Top 10 2023, the Top 10 for LLM Applications 2025 and the Top 10 for Agentic Applications 2026. Self-assessed, not certified.">
+<meta name="theme-color" content="#08090b">
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body class="page">
+<a class="skip" href="#main">Skip to content</a>
+<canvas id="wax" class="wax" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
+<header class="nav">
+  <div class="nav-in">
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="links" aria-label="Main"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify</a><a href="/tools/web-bot-auth/">Checker</a><a href="/security/">Security</a><a href="/#pricing">Pricing</a></nav>
+    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Start free</a></div>
+  </div>
+</header>
+<main id="main" class="doc">
+<nav class="toc" aria-label="On this page">
+  <b>Security standards</b>
+  <a href="#read">How to read this</a>
+  <a href="#asvs">OWASP ASVS 5.0</a>
+  <a href="#top10">OWASP Top 10 2025</a>
+  <a href="#api">API Security Top 10 2023</a>
+  <a href="#llm">Top 10 for LLM Apps 2025</a>
+  <a href="#agentic">Top 10 for Agentic Apps 2026</a>
+  <a href="#open">What is not met yet</a>
+  <a href="#sources">Sources</a>
+</nav>
+<article class="prose">
+<p class="kicker">Security</p>
+  <h1>Security standards: a self-assessment</h1>
+  <p class="lead">How Counterseal's controls line up with five OWASP standards and lists, with what is met, what is partly met and what is not, in our own words.</p>
+  <p class="callout" id="read"><strong>Self-assessed.</strong> We read our own code and tests against each standard. Nobody else has audited this, Counterseal is not certified against any of these, and OWASP does not certify anyone against them. Where a row says "met", it names the test that checks it, in the <a href="https://github.com/GautamTalksDev/leash" rel="noopener noreferrer">source repository</a>. The <a href="/security/">security page</a> describes each control, and the threat model in the repository explains why.</p>
+  <p class="meta">Assessed 9 October 2026, against the code on branch feat/app-trust</p>
+
+  <h2 id="asvs">OWASP ASVS 5.0.0 (May 2025): Level 2, and Level 3 where we meet it</h2>
+  <p>ASVS has 17 chapters. We target Level 2 for the whole service and name the Level 3 requirements we also meet. Chapters that do not apply say why.</p>
+  <table>
+    <tr><th>Chapter</th><th>Status</th><th>How</th></tr>
+    <tr><td>V1 Encoding and Sanitization</td><td>Met (L2)</td><td>Every SQL statement is parameterised; no page writes HTML from text (no <code>innerHTML</code>, enforced by Trusted Types and a CI check); text from agents shown to people has control, invisible and direction characters made visible. Tests: <code>bypass.test.js</code>, <code>approvals.test.js</code>.</td></tr>
+    <tr><td>V2 Validation and Business Logic</td><td>Met (L2)</td><td>Strict JSON bodies with size caps read while streaming, unknown fields refused, fixed vocabularies; per-account ceilings on everything an account can create; limits on held requests per token and per account against approval fatigue. Tests: <code>second-pass.test.js</code>, <code>hardening.test.js</code>.</td></tr>
+    <tr><td>V3 Web Frontend Security</td><td>Met (L2); L3 items on headers met</td><td>A strict Content Security Policy with <code>require-trusted-types-for 'script'</code>, no third-party code, HSTS with preload, COOP, CORP, <code>frame-ancestors 'none'</code>, <code>__Host-</code> cookies with <code>SameSite=Strict</code>. The service worker caches only the app's own files and never the API. Tests: <code>second-pass.test.js</code>, <code>app-shell.test.js</code>.</td></tr>
+    <tr><td>V4 API and Web Service</td><td>Met (L2)</td><td>JSON only, with the content type checked; methods per route; CORS only on the public log's read endpoints; CSRF: an allow-listed <code>Origin</code> equal to the host plus a custom header on every browser write, on both hosts. Tests: <code>domain.test.js</code>, <code>app-trust.test.js</code>.</td></tr>
+    <tr><td>V5 File Handling</td><td>Not applicable</td><td>Nothing is uploaded. Downloads (receipts, agent keys, the data export, the evidence pack) are made in your browser.</td></tr>
+    <tr><td>V6 Authentication</td><td>Met (L2). L3 6.3.3 met with a device-bound passkey or a security key</td><td>Passkeys only (WebAuthn, user verification required, origin and RP ID checked, single-use challenges); no passwords exist, so there is no weaker path. Synced passkeys meet L2; L3 asks for a hardware-based factor. Sign-in and approval limits; new command line sign-ins and new passkeys alert your devices. Tests: <code>leash.test.js</code>, <code>cli-signin.test.js</code>.</td></tr>
+    <tr><td>V7 Session Management</td><td>Met (L2), except 7.5.2 partly. L3 7.5.3 met</td><td>Reference tokens of 256 random bits, stored as hashes; 12 hours at most on the web and 7 days for a command line; a web session also ends after an hour without an action of yours (added on this branch); logout deletes the session. Every sensitive action asks for your passkey again (7.5.3). Command line sessions are listed and can be revoked with everything they made; other browser sessions are not listed yet, but removing a passkey signs them all out. Tests: <code>app-trust.test.js</code>, <code>cli-signin.test.js</code>.</td></tr>
+    <tr><td>V8 Authorization</td><td>Met (L2)</td><td>Every query is scoped to the account; team roles are checked on the server for every request; a passkey proves presence, not authority. Tests: <code>team.test.js</code>, <code>leash.test.js</code>.</td></tr>
+    <tr><td>V9 Self-contained Tokens</td><td>Met where used</td><td>Sessions and agent tokens are reference tokens, not JWTs. Agent request signatures (RFC 9421) cover the method, URL, body digest and content type, within 5 minutes, each nonce once. Tests: <code>leash.test.js</code>, <code>joints.test.js</code>.</td></tr>
+    <tr><td>V10 OAuth and OIDC</td><td>Not applicable</td><td>Counterseal is not an OAuth client, server or identity provider.</td></tr>
+    <tr><td>V11 Cryptography</td><td>Partly met (L2)</td><td>AES-256-GCM per vaulted key with its own data key, wrapped by a master key and bound to its row; Ed25519 checkpoints; SHA-256; the platform's random generator. Not met yet: a tested procedure to rotate the vault's master key.</td></tr>
+    <tr><td>V12 Secure Communication</td><td>Met (L2)</td><td>HTTPS only, with HSTS preload; calls to providers go only to their fixed HTTPS hosts (Shopify: to a strictly checked store address); redirects are never followed.</td></tr>
+    <tr><td>V13 Configuration</td><td>Met (L2)</td><td>Secrets live in the platform's secret store, never in the repository; zero runtime dependencies; request logs off; a generic error to clients.</td></tr>
+    <tr><td>V14 Data Protection</td><td>Met (L2)</td><td>No secret in a URL (one-time links carry their token in the fragment and POST bodies); <code>Cache-Control: no-store</code> on every API answer; data minimised and listed in the privacy policy; an owner can download all of it and choose how long closed holds are kept; account deletion leaves no row that names the account (tested). Tests: <code>app-trust.test.js</code>.</td></tr>
+    <tr><td>V15 Secure Coding and Architecture</td><td>Met (L2)</td><td>A threat model; zero runtime dependencies; GitHub Actions pinned by commit; on this branch, an SBOM and npm provenance in the publish workflow.</td></tr>
+    <tr><td>V16 Security Logging and Error Handling</td><td>Partly met</td><td>Every decision and every security change is in your hash-chained audit log, which you can export and verify. Security events (bad tokens, CSRF, replays, limits) go to a live log stream with no personal data, but are not stored, by choice (request logs are off for privacy); that falls short of keeping security logs for later investigation.</td></tr>
+    <tr><td>V17 WebRTC</td><td>Not applicable</td><td>No WebRTC.</td></tr>
+  </table>
+
+  <h2 id="top10">OWASP Top 10:2025</h2>
+  <table>
+    <tr><th>Risk</th><th>What Counterseal does</th></tr>
+    <tr><td>A01 Broken Access Control</td><td>Account-scoped queries, server-side roles, CSRF checks on both hosts, the two-person seal for held actions.</td></tr>
+    <tr><td>A02 Security Misconfiguration</td><td>The same security headers on every page, checked by a test against the Worker's own list; request logs off; secrets only in the platform's store.</td></tr>
+    <tr><td>A03 Software Supply Chain Failures</td><td>Zero runtime dependencies in the Worker, CLI and SDK; actions pinned by commit; an SBOM and provenance for the published CLI (this branch).</td></tr>
+    <tr><td>A04 Cryptographic Failures</td><td>Per-secret AES-256-GCM with additional data, Ed25519, SHA-256, WebCrypto only. Master key rotation is not yet a tested procedure.</td></tr>
+    <tr><td>A05 Injection</td><td>Parameterised SQL; Trusted Types; strict parsers for the bodies the irreversible map reads.</td></tr>
+    <tr><td>A06 Insecure Design</td><td>A threat model; irreversible actions are held outside the model; dangerous switches need a passkey, never a command line session.</td></tr>
+    <tr><td>A07 Authentication Failures</td><td>Passkeys only; device-code phishing defences for command line sign-in; idle and absolute session limits.</td></tr>
+    <tr><td>A08 Software or Data Integrity Failures</td><td>The hash-chained audit log, the public Merkle log with signed checkpoints, approvals bound to one exact request and used once.</td></tr>
+    <tr><td>A09 Security Logging and Alerting Failures</td><td>Alerts on your devices for held calls, new sign-ins, new passkeys and team changes; the audit log. Security events are not stored (see V16).</td></tr>
+    <tr><td>A10 Mishandling of Exceptional Conditions</td><td>Fails closed: an unreadable request is held, an unreachable server makes the guard deny, and a full or broken public log never blocks a decision, which is still written to your audit log.</td></tr>
+  </table>
+
+  <h2 id="api">OWASP API Security Top 10 2023</h2>
+  <table>
+    <tr><th>Risk</th><th>What Counterseal does</th></tr>
+    <tr><td>API1 Broken Object Level Authorization</td><td>Every object is looked up with its account; another account's id gets 404 (tested).</td></tr>
+    <tr><td>API2 Broken Authentication</td><td>Passkeys, hashed bearer tokens, short device codes with limits.</td></tr>
+    <tr><td>API3 Broken Object Property Level Authorization</td><td>Answers name their fields; no secret column is ever returned (the data export test checks every secret is absent).</td></tr>
+    <tr><td>API4 Unrestricted Resource Consumption</td><td>Rate limits on every route, size caps, per-account ceilings, a breaker per token, Workers Free budgets tested (D1 queries and CPU).</td></tr>
+    <tr><td>API5 Broken Function Level Authorization</td><td>Roles per route; passkey-only routes refuse a command line session.</td></tr>
+    <tr><td>API6 Unrestricted Access to Sensitive Business Flows</td><td>The irreversible map, money caps, the two-person seal, limits on how many holds can wait.</td></tr>
+    <tr><td>API7 Server Side Request Forgery</td><td>Fixed upstream hosts, push services from an allow list, no redirects, a strictly checked store address.</td></tr>
+    <tr><td>API8 Security Misconfiguration</td><td>As A02.</td></tr>
+    <tr><td>API9 Improper Inventory Management</td><td>Every route is in one table in <code>server/src/index.js</code>; the protocol is documented; the map is versioned.</td></tr>
+    <tr><td>API10 Unsafe Consumption of APIs</td><td>Upstream answers cannot act on a browser at our origin (their CORS, cookies and policies are dropped); upstream data read for money caps is parsed strictly.</td></tr>
+  </table>
+
+  <h2 id="llm">OWASP Top 10 for LLM Applications 2025</h2>
+  <p>Counterseal runs no model. It sits between AI agents and the APIs they call, so the risks that apply are the ones about what an agent can do.</p>
+  <table>
+    <tr><th>Risk</th><th>What Counterseal does</th></tr>
+    <tr><td>LLM01 Prompt Injection</td><td>A hold does not depend on what the model was told: an irreversible call waits for a person whatever the prompt said. Your deny reason goes back to the agent as data.</td></tr>
+    <tr><td>LLM02 Sensitive Information Disclosure</td><td>The agent never holds the real key, so a model that leaks its context leaks only a revocable, scoped token.</td></tr>
+    <tr><td>LLM03 Supply Chain</td><td>As A03, for the CLI and MCP server the agent runs.</td></tr>
+    <tr><td>LLM05 Improper Output Handling</td><td>What the agent sends is parsed strictly before it is allowed; anything ambiguous is held; hidden characters are made visible to the approver.</td></tr>
+    <tr><td>LLM06 Excessive Agency</td><td>The reason Counterseal exists: scoped tokens, irreversible calls held for a passkey, money caps, a breaker and Freeze.</td></tr>
+    <tr><td>LLM10 Unbounded Consumption</td><td>Rate limits and the breaker cap calls through Counterseal. They do not cap the model's own token spend.</td></tr>
+    <tr><td>LLM04, LLM07, LLM08, LLM09</td><td>Not applicable: Counterseal trains no model, has no system prompt, stores no embeddings and generates no text.</td></tr>
+  </table>
+
+  <h2 id="agentic">OWASP Top 10 for Agentic Applications 2026</h2>
+  <p>Published by the OWASP GenAI Security Project on 9 December 2025.</p>
+  <table>
+    <tr><th>Risk</th><th>What Counterseal does</th></tr>
+    <tr><td>ASI01 Agent Goal Hijack</td><td>A hijacked agent still cannot take an irreversible action through Counterseal without a person's passkey.</td></tr>
+    <tr><td>ASI02 Tool Misuse and Exploitation</td><td>The irreversible map (10 APIs) and the coding-agent guard's shell map hold the dangerous calls of each tool.</td></tr>
+    <tr><td>ASI03 Identity and Privilege Abuse</td><td>Scoped, expiring tokens instead of real keys; agent keys so a stolen token alone is useless; command line sessions cannot approve.</td></tr>
+    <tr><td>ASI04 Agentic Supply Chain Vulnerabilities</td><td>Zero dependencies and provenance for our own CLI. The guard can ask for approval of MCP tool calls; checking third-party tool definitions is not in this branch.</td></tr>
+    <tr><td>ASI05 Unexpected Code Execution</td><td>The guard holds destructive shell commands until approved. It runs on the agent's machine: a seatbelt, not a sandbox.</td></tr>
+    <tr><td>ASI06 Memory and Context Poisoning</td><td>Out of scope: Counterseal keeps no agent memory. A poisoned agent is still held at the irreversible step.</td></tr>
+    <tr><td>ASI07 Insecure Inter-Agent Communication</td><td>Agent-to-broker requests can be signed (RFC 9421) and replays are refused. Agent-to-agent traffic does not pass through Counterseal.</td></tr>
+    <tr><td>ASI08 Cascading Failures</td><td>A breaker per token, Freeze for every token at once, rate limits, and fail-closed defaults.</td></tr>
+    <tr><td>ASI09 Human-Agent Trust Exploitation</td><td>The approver sees the exact request or command with hidden characters made visible; limits on waiting holds and alerts against approval fatigue; device-code phishing defences; the two-person seal.</td></tr>
+    <tr><td>ASI10 Rogue Agents</td><td>Freeze, revocation of tokens and keys, the audit log, and public receipts anyone can verify.</td></tr>
+  </table>
+
+  <h2 id="open">What is not met yet</h2>
+  <ul>
+    <li>Rotating the vault's master key has no tested procedure (V11).</li>
+    <li>Security events are streamed, not stored (V16, A09). This is a privacy choice; turning on stored logs would keep IP addresses at Cloudflare.</li>
+    <li>Browser sessions are not listed for you to end one by one (V7 7.5.2); removing a passkey ends all of them.</li>
+    <li>Level 3 authentication needs a hardware-based factor; a synced passkey is not one (V6 6.3.3).</li>
+    <li>No external audit or penetration test has been done.</li>
+  </ul>
+  <p>Fixed while writing this: a web session now ends after an hour without an action (V7 7.3.1); deleting an account now also removes rate limit counters that name it (V14); the app's offline copy is tested never to hold API data (V3, V14).</p>
+
+  <h2 id="sources">Sources (read 9 October 2026)</h2>
+  <ul>
+    <li>OWASP Application Security Verification Standard 5.0.0, released May 2025: <a href="https://github.com/OWASP/ASVS/tree/v5.0.0" rel="noopener noreferrer">github.com/OWASP/ASVS</a></li>
+    <li>OWASP Top 10:2025: <a href="https://top10.owasp.org/2025" rel="noopener noreferrer">top10.owasp.org/2025</a></li>
+    <li>OWASP API Security Top 10 2023: <a href="https://owasp.org/API-Security/editions/2023/en/0x11-t10/" rel="noopener noreferrer">owasp.org/API-Security</a></li>
+    <li>OWASP Top 10 for LLM Applications 2025: <a href="https://genai.owasp.org/llm-top-10/" rel="noopener noreferrer">genai.owasp.org/llm-top-10</a></li>
+    <li>OWASP Top 10 for Agentic Applications for 2026: <a href="https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/" rel="noopener noreferrer">genai.owasp.org</a></li>
+  </ul>
+</article>
+</main>
+<footer class="foot">
+  <div class="foot-in">
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/leash" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
+    <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend or Shopify.</span>
+  </div>
+</footer>
+<script src="/doc.js" type="module"></script>
+</body>
+</html>

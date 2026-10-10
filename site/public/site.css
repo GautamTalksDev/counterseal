@@ -466,3 +466,5 @@ h1 em,.h1 em{font-size:1.08em;letter-spacing:-.02em;padding-right:.04em}
 @media (prefers-reduced-motion:reduce){.seal.idle{animation:none}.seal-turn{transition:none}.pulse{animation:none}.toast{transition:none}}
 .nf .cta{justify-content:flex-start}.nf .sub{margin-bottom:6px}
 .prose .kicker{color:var(--acc)}
+/* a boxed note in a document page (the DPA template, the standards self-assessment) */
+.prose .callout{border:1px solid rgba(245,183,72,.4);background:rgba(245,183,72,.08);border-radius:12px;padding:14px 16px;margin:18px 0}

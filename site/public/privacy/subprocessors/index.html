@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Subprocessors: Counterseal</title>
+<meta name="description" content="Who processes Counterseal data on our behalf: Cloudflare only. What it does, where, and who is not a subprocessor.">
+<meta name="theme-color" content="#08090b">
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body class="page">
+<a class="skip" href="#main">Skip to content</a>
+<canvas id="wax" class="wax" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
+<header class="nav">
+  <div class="nav-in">
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="links" aria-label="Main"><a href="/#how">How it works</a><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify</a><a href="/tools/web-bot-auth/">Checker</a><a href="/security/">Security</a><a href="/#pricing">Pricing</a></nav>
+    <div class="nav-r"><a class="lnk" href="/app">Sign in</a><a class="btn btn-pri sm" href="/app">Start free</a></div>
+  </div>
+</header>
+<main id="main" class="doc">
+<nav class="toc" aria-label="On this page">
+  <b>Subprocessors</b>
+  <a href="#list">The list</a>
+  <a href="#not">Who is not one</a>
+  <a href="#changes">Changes</a>
+  <a href="/privacy/">Privacy policy</a>
+  <a href="/privacy/dpa/">DPA template</a>
+</nav>
+<article class="prose">
+<p class="kicker">Privacy</p>
+  <h1>Subprocessors</h1>
+  <p class="lead">When a business uses Counterseal, we process its data on its behalf. One company helps us do that: Cloudflare.</p>
+  <p class="meta">Last updated 9 October 2026</p>
+
+  <h2 id="list">The list</h2>
+  <table>
+    <tr><th>Subprocessor</th><th>What it does for Counterseal</th><th>Data</th><th>Where</th></tr>
+    <tr><td>Cloudflare, Inc. (San Francisco, United States)</td><td>Runs the service: Cloudflare Workers (the code), D1 (the database: accounts, the encrypted vault, holds, the audit log), a Durable Object (the public log), static hosting for this site, and its network in front of all of it</td><td>Everything the <a href="/privacy/#store">privacy policy</a> lists. Vaulted API keys are encrypted before they are stored; Cloudflare's database never holds one readable</td><td>Requests are handled at the Cloudflare location nearest to the person or agent making them; the database lives in one Cloudflare region</td></tr>
+  </table>
+  <p>Cloudflare's <a href="https://www.cloudflare.com/cloudflare-customer-dpa/" rel="noopener noreferrer">Customer Data Processing Addendum</a> is part of its subscription agreement. It names Cloudflare as a processor (or subprocessor) and covers transfers out of the EU, the UK and Switzerland with the EU Standard Contractual Clauses, the UK Addendum, and Cloudflare's EU-U.S. Data Privacy Framework certification (as that page said on 9 October 2026).</p>
+  <p>Workers Logs are off for this service, so Cloudflare does not keep our request logs or our log lines. Cloudflare may still process request metadata, such as IP addresses, to run and protect its network, under its own terms.</p>
+
+  <h2 id="not">Who is not a subprocessor, and why</h2>
+  <ul>
+    <li><strong>Your browser's push service</strong> (Apple, Google, Mozilla or Microsoft, depending on your browser), only if you turn on alerts. Your browser picks it, not us. We send it an empty wake-up for your device and nothing else: no text, no request, no name. Your device then asks Counterseal for the details over your own session.</li>
+    <li><strong>The APIs you connect</strong> (GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend, Shopify). Your agent's requests go to them because you told us to send them there, with your own key; they are your providers, under your agreements with them.</li>
+    <li><strong>Nobody else.</strong> No analytics, no advertising, no error tracking, no email sender, no payment processor (there is no billing yet), no fonts or scripts from other sites.</li>
+  </ul>
+
+  <h2 id="changes">Changes</h2>
+  <p>Before we add a subprocessor, we update this page first and give the date. Businesses with a data processing agreement with us get the notice that agreement sets (the <a href="/privacy/dpa/">template</a> says 30 days), and can object. Questions: <a href="mailto:privacy@gautamkhosla.com">privacy@gautamkhosla.com</a>.</p>
+</article>
+</main>
+<footer class="foot">
+  <div class="foot-in">
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
+    <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/leash" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
+    <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend or Shopify.</span>
+  </div>
+</footer>
+<script src="/doc.js" type="module"></script>
+</body>
+</html>
