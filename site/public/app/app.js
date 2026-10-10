@@ -450,12 +450,13 @@ async function guardKeysView() {
   const live = keys.filter((k) => !k.revoked && (k.expires_at === null || k.expires_at > Date.now()));
   const L = $('guardKeys'); L.replaceChildren();
   for (const k of live) {
-    const rv = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Revoke' });
+    const rv = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Revoke', hidden: !can('member') });
     rv.onclick = async () => {
       if (!confirm(`Revoke ${k.label}? Its guard stops asking for approvals, and every command it guards is refused until you install a new key.`)) return;
       try { const r = await api('DELETE', `/v1/guard/keys/${k.id}`); toast(`Revoked.${r.closed ? ` ${r.closed} open approval(s) closed.` : ''}`); guardKeysView(); load(); } catch (e) { toast(e.message); }
     };
-    const facts = [`made ${new Date(k.created_at).toLocaleDateString()}${k.made_by === 'cli' ? ' by a command line' : ''}`, k.last_used ? `last used ${new Date(k.last_used).toLocaleString()}` : 'never used', k.expires_at ? `ends ${new Date(k.expires_at).toLocaleDateString()}` : null].filter(Boolean).join(', ');
+    const maker = k.member_id && k.member_id !== ME.id && NAMES.has(k.member_id) ? ` by ${NAMES.get(k.member_id)}` : '';
+    const facts = [`made ${new Date(k.created_at).toLocaleDateString()}${maker}${k.made_by === 'cli' ? ' from a command line' : ''}`, k.last_used ? `last used ${new Date(k.last_used).toLocaleString()}` : 'never used', k.expires_at ? `ends ${new Date(k.expires_at).toLocaleDateString()}` : null].filter(Boolean).join(', ');
     L.append(el('div', {}, el('span', {}, el('b', { textContent: k.label }), el('span', { className: 'dim', textContent: `  ${facts}` })), rv));
   }
   $('noGuardKeys').hidden = live.length > 0;
@@ -471,13 +472,16 @@ async function cliSessionsView() {
   const { sessions } = await api('GET', '/v1/sessions');
   const L = $('cliSessions'); L.replaceChildren();
   for (const s of sessions) {
-    const rv = s.status === 'revoked' ? null : el('button', { className: 'btn sm dan', textContent: s.status === 'ended' ? 'Revoke what it made' : 'Revoke' });
+    // on a team: your own command lines, or anyone's for an owner (the server checks it too)
+    const mine = !s.member || s.member === ME.id;
+    const rv = s.status === 'revoked' || (!mine && !can('owner')) ? null : el('button', { className: 'btn sm dan', textContent: s.status === 'ended' ? 'Revoke what it made' : 'Revoke' });
     if (rv) rv.onclick = async () => {
       if (!confirm('Revoke this command line sign-in? It is signed out, and every token, agent key, receipts key and guard key it made is revoked.')) return;
       try { const r = await api('DELETE', `/v1/sessions/${s.id}`); toast(revokedText(r.revoked)); cliSessionsView(); guardKeysView(); load(); } catch (e) { toast(e.message); }
     };
     const state = s.status === 'live' ? `ends ${new Date(s.expires_at).toLocaleDateString()}${s.current ? ' (this one)' : ''}` : s.status === 'ended' ? 'signed out or expired' : 'revoked';
-    L.append(el('div', {}, el('span', {}, el('b', { textContent: new Date(s.created_at).toLocaleString() }), el('span', { className: 'dim', textContent: `  from ${place(s)}, ${state}` })), rv));
+    const whose = !mine && NAMES.has(s.member) ? `${NAMES.get(s.member)}, ` : '';
+    L.append(el('div', {}, el('span', {}, el('b', { textContent: new Date(s.created_at).toLocaleString() }), el('span', { className: 'dim', textContent: `  ${whose}from ${place(s)}, ${state}` })), rv));
   }
 }
 
