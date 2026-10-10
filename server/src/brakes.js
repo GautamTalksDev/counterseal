@@ -18,6 +18,7 @@
 import { HttpError, now, sha256hex, readCapped } from './util.js';
 import { allow } from './ratelimit.js';
 import { newChallenge, takeChallenge, checkAssertion, rp } from './auth.js';
+import { seasoned } from './team.js';
 import { audit } from './audit.js';
 import { notify } from './push.js';
 import { afterMap } from './policy.js';
@@ -75,6 +76,7 @@ export async function freeze(env, sess) {
 export async function unfreezeBegin(env, sess) {
   const a = await env.DB.prepare('SELECT frozen_at FROM accounts WHERE id = ?').bind(sess.accountId).first();
   if (!a || !a.frozen_at) throw new HttpError(409, 'not_frozen', 'This account is not frozen.');
+  await seasoned(env, sess); // on a team: not by an approver whose seal does not count yet (src/team.js)
   const { id, challenge } = await newChallenge(env, 'unfreeze', sess.accountId);
   return { challengeId: id, options: { challenge, rpId: rp(env).rpId, userVerification: 'required', timeout: 300000 } };
 }
@@ -83,9 +85,10 @@ export async function unfreezeFinish(env, sess, body) {
   const ch = await takeChallenge(env, body.challengeId, 'unfreeze');
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
   await checkAssertion(env, body.credential, ch.challenge, sess); // the signed-in person's own passkey (on a team too)
+  await seasoned(env, sess);
   const r = await env.DB.prepare('UPDATE accounts SET frozen_at = NULL WHERE id = ? AND frozen_at IS NOT NULL RETURNING id').bind(sess.accountId).first();
   if (!r) throw new HttpError(409, 'not_frozen', 'This account is not frozen.');
-  await audit(env, sess.accountId, 'web', 'unfreeze', { passkey: (await sha256hex(String(body.credential.id))).slice(0, 16) });
+  await audit(env, sess.accountId, 'web', 'unfreeze', { passkey: (await sha256hex(String(body.credential.id))).slice(0, 16), ...(sess.memberId && sess.memberId !== sess.accountId ? { member: sess.memberId } : {}) });
   return { ok: true, frozen: false };
 }
 
@@ -94,6 +97,7 @@ export async function resetBegin(env, sess, tokenId) {
   const t = await env.DB.prepare('SELECT tripped_at FROM tokens WHERE id = ? AND account_id = ?').bind(tokenId, sess.accountId).first();
   if (!t) throw new HttpError(404, 'not_found');
   if (!t.tripped_at) throw new HttpError(409, 'not_tripped', 'This token has not tripped.');
+  await seasoned(env, sess);
   const { id, challenge } = await newChallenge(env, 'brake_reset:' + tokenId, sess.accountId);
   return { challengeId: id, options: { challenge, rpId: rp(env).rpId, userVerification: 'required', timeout: 300000 } };
 }
@@ -102,6 +106,7 @@ export async function resetFinish(env, sess, tokenId, body) {
   const ch = await takeChallenge(env, body.challengeId, 'brake_reset:' + tokenId);
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
   await checkAssertion(env, body.credential, ch.challenge, sess); // the signed-in person's own passkey (on a team too)
+  await seasoned(env, sess);
   const r = await env.DB.prepare('UPDATE tokens SET tripped_at = NULL, tripped_why = NULL WHERE id = ? AND account_id = ? AND tripped_at IS NOT NULL RETURNING id').bind(tokenId, sess.accountId).first();
   if (!r) throw new HttpError(409, 'not_tripped', 'This token has not tripped.');
   // a fresh start: the old windows go (or the next write would trip it again at once), and the writes that waited because
@@ -110,7 +115,7 @@ export async function resetFinish(env, sess, tokenId, body) {
     env.DB.prepare('DELETE FROM counters WHERE k = ?1 OR (k >= ?2 AND k < ?3)').bind('w:' + tokenId, `r:${tokenId}:`, `r:${tokenId};`),
     env.DB.prepare("UPDATE holds SET status = 'expired' WHERE token_id = ? AND account_id = ? AND rule = 'brake.tripped' AND status = 'pending'").bind(tokenId, sess.accountId),
   ]);
-  await audit(env, sess.accountId, 'web', 'brake_reset', { token: tokenId, passkey: (await sha256hex(String(body.credential.id))).slice(0, 16) });
+  await audit(env, sess.accountId, 'web', 'brake_reset', { token: tokenId, passkey: (await sha256hex(String(body.credential.id))).slice(0, 16), ...(sess.memberId && sess.memberId !== sess.accountId ? { member: sess.memberId } : {}) });
   return { ok: true };
 }
 

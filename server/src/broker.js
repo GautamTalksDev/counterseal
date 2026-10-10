@@ -111,8 +111,9 @@ export async function listTokens(env, sess) {
 }
 
 export async function revokeToken(env, sess, id) {
-  const r = await env.DB.prepare('UPDATE tokens SET revoked = 1 WHERE id = ? AND account_id = ?').bind(id, sess.accountId).run();
-  if (!r.meta.changes) throw new HttpError(404, 'not_found');
+  // its maker or an owner (src/team.js)
+  const r = await env.DB.prepare(`UPDATE tokens SET revoked = 1 WHERE id = ? AND account_id = ? ${Team.MAKER_OR_OWNER}`).bind(id, sess.accountId, ...Team.makerOrOwner(sess)).run();
+  if (!r.meta.changes) throw await Team.notRevoked(env, sess, 'tokens', id);
   await audit(env, sess.accountId, sess.kind, 'revoke', { id });
   return { ok: true };
 }
@@ -263,7 +264,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   if (!m) throw new HttpError(401, 'leash_token_required', `Send your ${BRAND.name} token as: Authorization: Bearer lsh_...`);
   // one query: the token, whether its account has public receipts on and is frozen, its quorum settings (two-person
   // seal), and the agent key it is bound to (if any)
-  const tok = await env.DB.prepare('SELECT t.*, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM passkeys p WHERE p.account_id = t.account_id AND p.rp_id = ?) AS has_new_passkey FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?').bind(hosts(env)[0].rpId, await sha256hex(m[1])).first();
+  const tok = await env.DB.prepare(`SELECT t.*, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at, ${Team.ROLE_OF('COALESCE(t.member_id, t.account_id)', 't.account_id')} AS maker_role, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM passkeys p WHERE p.account_id = t.account_id AND p.rp_id = ?) AS has_new_passkey FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?`).bind(hosts(env)[0].rpId, await sha256hex(m[1])).first();
   if (!tok || tok.revoked || tok.expires_at < now()) throw new HttpError(401, 'token_invalid');
   // a token bound to an agent key whose key is gone or revoked never works again (fails closed)
   if (tok.agent_key_id && (!tok.agent_keyid || tok.agent_revoked)) throw new HttpError(401, 'agent_key_revoked', 'The agent key this token is bound to was revoked.');
@@ -314,9 +315,10 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
 
   let d = decide(policy, provider, method, path, bodyText, url.search);
   // A pre-approval, or a money cap, is one person approving in advance. While the team requires two seals (or someone
-  // other than the token's maker), both are paused: the call is held like any other irreversible call.
+  // other than the token's maker), both are paused: the call is held like any other irreversible call. So they are
+  // once the token's maker can no longer approve (made a member or a viewer, or removed).
   const team = Team.effective(tok);
-  const solo = Team.oneSealEnough(team);
+  const solo = Team.oneSealEnough(team) && (tok.maker_role === 'owner' || tok.maker_role === 'approver');
   if (!solo && d.decision === 'allow' && d.rule.endsWith(':preapproved')) d = { decision: 'hold', rule: d.rule.slice(0, -':preapproved'.length), why: d.why };
   // An approval binds the exact bytes sent upstream, and the content-type that tells the upstream how to read them.
   const bodyHash = body ? b64u(new Uint8Array(await crypto.subtle.digest('SHA-256', body))) : '';

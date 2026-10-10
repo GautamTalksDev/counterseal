@@ -78,13 +78,14 @@ export async function listKeys(env, sess) {
   return { keys: r.results.map(({ session_id, ...k }) => ({ ...k, made_by: session_id ? 'cli' : 'web' })) };
 }
 
-/** revoking only tightens, so any signed-in session may; the key's open holds are closed in the same batch */
+/** revoking only tightens: its maker or an owner may (src/team.js; anyone else freezes the account); the key's open
+ *  holds are closed in the same batch, only once the key is revoked */
 export async function revokeKey(env, sess, id) {
   const [k, h] = await env.DB.batch([
-    env.DB.prepare('UPDATE guard_keys SET revoked = 1 WHERE id = ? AND account_id = ? AND revoked = 0').bind(id, sess.accountId),
-    env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND token_id = ? AND status IN ('pending','approved')").bind(sess.accountId, guardTokenId(id)),
+    env.DB.prepare(`UPDATE guard_keys SET revoked = 1 WHERE id = ? AND account_id = ? AND revoked = 0 ${Team.MAKER_OR_OWNER}`).bind(id, sess.accountId, ...Team.makerOrOwner(sess)),
+    env.DB.prepare("UPDATE holds SET status = 'expired' WHERE account_id = ? AND token_id = ? AND status IN ('pending','approved') AND EXISTS (SELECT 1 FROM guard_keys WHERE id = ? AND account_id = ? AND revoked = 1)").bind(sess.accountId, guardTokenId(id), id, sess.accountId),
   ]);
-  if (!k.meta.changes) throw new HttpError(404, 'not_found');
+  if (!k.meta.changes) throw await Team.notRevoked(env, sess, 'guard_keys', id);
   await audit(env, sess.accountId, sess.kind, 'guard_key_revoked', { id, closed: h.meta.changes });
   return { ok: true, closed: h.meta.changes };
 }

@@ -95,6 +95,8 @@ const LEVEL = { viewer: 0, member: 1, approver: 2, owner: 3 };
 const ROLE_TEXT = { owner: 'Owner', approver: 'Approver', member: 'Member', viewer: 'Viewer' };
 let ME = { id: null, role: 'owner', name: '' }, SEALS = { quorum: 1, selfApprove: true, pending: null }, NAMES = new Map();
 const can = (need) => (LEVEL[ME.role] ?? -1) >= LEVEL[need];
+// revoking a token or key: its maker or an owner (anyone else who sees trouble freezes the account)
+const mayRevoke = (maker) => !maker || maker === ME.id || can('owner');
 function applyRole() {
   for (const n of document.querySelectorAll('[data-need]')) n.hidden = !can(n.dataset.need);
   $('whoRole').textContent = ROLE_TEXT[ME.role] || '';
@@ -160,7 +162,7 @@ async function load() {
   // tokens
   const T = $('tokens'); T.replaceChildren();
   for (const x of t.tokens.filter((y) => !y.revoked)) {
-    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke', hidden: !can('member') });
+    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke', hidden: !can('member') || !mayRevoke(x.member_id) });
     rv.onclick = async () => { try { await api('DELETE', `/v1/tokens/${x.id}`); load(); } catch (e) { toast(e.message); } };
     const bound = x.agent_key ? `, signed by ${x.agent_key_label}${x.agent_key_revoked ? ' (key revoked: token stopped)' : ''}` : '';
     const maker = x.member_id && x.member_id !== ME.id && NAMES.has(x.member_id) ? `, made by ${NAMES.get(x.member_id)}` : '';
@@ -173,7 +175,7 @@ async function load() {
     }
     T.append(el('div', {},
       el('span', {}, el('b', { textContent: x.label }), x.tripped_at ? el('span', { className: 'badge dan', textContent: 'Tripped' }) : null,
-        el('span', { className: 'dim', textContent: `  ${x.provider}, expires ${new Date(x.expires_at).toLocaleDateString()}${x.policy.unattendedIrreversible.length ? `, has pre-approvals${SEALS.quorum > 1 || !SEALS.selfApprove ? ' (paused while two seals are required)' : ''}` : ''}${bound}${maker}` }),
+        el('span', { className: 'dim', textContent: `  ${x.provider}, expires ${new Date(x.expires_at).toLocaleDateString()}${x.policy.unattendedIrreversible.length ? `, has pre-approvals${SEALS.quorum > 1 || !SEALS.selfApprove ? ' (paused: one person cannot approve alone on this team)' : ''}` : ''}${bound}${maker}` }),
         x.tripped_at ? el('span', { className: 'dim brk tripped', textContent: `Tripped at ${new Date(x.tripped_at).toLocaleTimeString()} (${TRIP_WHY[x.tripped_why] || 'a limit'}). Its writes wait for you; reads still pass.` }) : null,
         ...brakes.map((t) => el('span', { className: 'dim brk', textContent: t }))),
       el('span', { className: 'acts' }, rs, rv)));
@@ -183,7 +185,7 @@ async function load() {
   const K = $('agentKeys'); K.replaceChildren();
   const active = ak.agentKeys.filter((k) => !k.revoked_at);
   for (const x of active) {
-    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke' });
+    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke', hidden: !can('member') || !mayRevoke(x.member_id) });
     rv.onclick = async () => { if (!confirm(`Revoke ${x.label}? ${x.tokens} token(s) bound to it stop working at once.`)) return; try { await api('DELETE', `/v1/agent-keys/${x.id}`); load(); } catch (e) { toast(e.message); } };
     K.append(el('div', {}, el('span', {}, el('b', { textContent: x.label }), el('span', { className: 'dim mono', textContent: `  ${x.keyid.slice(0, 16)}...  ${x.tokens} token(s)${x.last_used ? ', last used ' + new Date(x.last_used).toLocaleString() : ''}` })), rv));
   }
@@ -450,7 +452,7 @@ async function guardKeysView() {
   const live = keys.filter((k) => !k.revoked && (k.expires_at === null || k.expires_at > Date.now()));
   const L = $('guardKeys'); L.replaceChildren();
   for (const k of live) {
-    const rv = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Revoke', hidden: !can('member') });
+    const rv = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Revoke', hidden: !can('member') || !mayRevoke(k.member_id) });
     rv.onclick = async () => {
       if (!confirm(`Revoke ${k.label}? Its guard stops asking for approvals, and every command it guards is refused until you install a new key.`)) return;
       try { const r = await api('DELETE', `/v1/guard/keys/${k.id}`); toast(`Revoked.${r.closed ? ` ${r.closed} open approval(s) closed.` : ''}`); guardKeysView(); load(); } catch (e) { toast(e.message); }
@@ -694,7 +696,7 @@ async function receiptsView(r) {
   const K = $('apiKeys'); K.replaceChildren();
   const live = keys.keys.filter((k) => !k.revoked);
   for (const k of live) {
-    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke' });
+    const rv = el('button', { className: 'btn sm dan', textContent: 'Revoke', hidden: !can('member') || !mayRevoke(k.member_id) });
     rv.onclick = async () => { try { await api('DELETE', `/v1/keys/${k.id}`); load(); } catch (e) { toast(e.message); } };
     K.append(el('div', {}, el('span', {}, el('b', { textContent: k.label }), el('span', { className: 'dim', textContent: `  ${k.signer_pub ? 'signed receipts only' : 'unsigned'}${k.last_used ? ', last used ' + new Date(k.last_used).toLocaleString() : ''}` })), rv));
   }

@@ -30,6 +30,7 @@ ALTER TABLE move_links ADD COLUMN member_id TEXT;     -- the member whose passke
 ALTER TABLE tokens ADD COLUMN member_id TEXT;
 ALTER TABLE guard_keys ADD COLUMN member_id TEXT;
 ALTER TABLE api_keys ADD COLUMN member_id TEXT;
+ALTER TABLE agent_keys ADD COLUMN member_id TEXT;
 
 -- one-time invites: only the SHA-256 of the token is stored; single use, 2 hours by default and 24 at most, bound to the
 -- account and to the owner who made it. The token travels in the URL fragment and POST bodies only.

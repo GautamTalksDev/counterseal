@@ -11,6 +11,7 @@ import { _resetMemoryBuckets } from '../src/ratelimit.js';
 import { _resetSeen } from '../src/admin.js';
 import { b64u, sha256hex } from '../src/util.js';
 import { MAX_MEMBERS, INVITES_PER_HOUR, plan, effective } from '../src/team.js';
+import { generateAgentKey, importAgentKey, proveAgentKey } from '../../cli/sign.mjs';
 
 beforeEach(() => { _resetMemoryBuckets(); _resetSeen(); });
 const anon = { origin: null, xleash: false };
@@ -101,6 +102,15 @@ async function login(w, auth) {
   const b = await w.req('POST', '/v1/auth/login/begin', { body: {} });
   const f = await w.req('POST', '/v1/auth/login/finish', { body: { challengeId: b.body.challengeId, credential: await auth.get(b.body.options) } });
   return f.status === 200 ? { cookie: f.headers.get('set-cookie').split(';')[0], auth } : f;
+}
+/** an agent key registered by u (with proof of possession) */
+async function agentKey(w, u, label = 'agent key') {
+  const jwk = await generateAgentKey();
+  const b = await w.req('POST', '/v1/agent-keys/begin', { cookie: u.cookie, body: { publicKey: jwk.x } });
+  assert.equal(b.status, 200, JSON.stringify(b.body));
+  const r = await w.req('POST', '/v1/agent-keys', { cookie: u.cookie, body: { label, publicKey: jwk.x, challengeId: b.body.challengeId, proof: await proveAgentKey(await importAgentKey(jwk), b.body.sign) } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return r.body;
 }
 /** the same person signed in again (web sessions last 12 hours; tests that move the clock a day sign in again) */
 const relog = async (w, x) => ({ ...x, cookie: (await login(w, x.auth)).cookie });
@@ -433,13 +443,25 @@ test('removing a member revokes their sessions, passkeys, devices, tokens, guard
   const other = await heldCall(w, u, cred, '/repos/acme/other');
   assert.equal((await seal(w, asha, other.hold)).body.seals, 1);
   w.env.DB.raw.prepare('INSERT INTO move_links (hash, account_id, created_at, expires_at, member_id) VALUES (?, ?, ?, ?, ?)').run('h'.repeat(64), u.id, Date.now(), Date.now() + 600_000, asha.member);
+  // an agent key she registered, and an approval her seal completed that nobody has used yet
+  const ak = await agentKey(w, asha);
+  const done = await heldCall(w, u, cred, '/repos/acme/done');
+  assert.equal((await seal(w, asha, done.hold)).body.approved, false);
+  assert.equal((await seal(w, ben, done.hold)).body.approved, true);
+  w.pushes = [];
   // the rules: never the last owner, never the founder by someone else, never fewer approvers than the quorum
   assert.equal((await remove(w, u, u)).body.error, 'last_owner');
   assert.equal((await remove(w, asha, ben)).body.error, 'role_required', 'only an owner removes someone else');
   // quorum 2 with three approvers: removing Asha leaves two, which is enough
   const r = await remove(w, u, asha);
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  assert.deepEqual(r.body.revoked, { sessions: 2, passkeys: 1, devices: 1, seals: 1, holds: 1, tokens: 1, guardKeys: 1, receiptsKeys: 1, invites: 0 });
+  assert.deepEqual(r.body.revoked, { sessions: 2, passkeys: 1, devices: 1, seals: 1, holds: 2, tokens: 1, guardKeys: 1, receiptsKeys: 1, agentKeys: 1, invites: 0 });
+  // her devices got one last alert (they read "signed out"), and the rest of the team was told
+  assert.ok(w.pushes.some((p) => p.endsWith('/asha-phone')), JSON.stringify(w.pushes));
+  // a yes from someone removed no longer stands: the approval she completed is void, and the agent is held again
+  assert.equal(w.env.DB.raw.prepare('SELECT status FROM holds WHERE id = ?').get(done.hold).status, 'expired');
+  assert.equal((await w.req('DELETE', '/p/github/repos/acme/done', { bearer: done.token, ...anon })).status, 428);
+  assert.ok(w.env.DB.raw.prepare('SELECT revoked_at FROM agent_keys WHERE id = ?').get(ak.id).revoked_at, 'her agent key is revoked');
   // signed out everywhere, and cannot sign in again
   assert.equal((await w.req('GET', '/v1/me', { cookie: asha.cookie })).status, 401);
   assert.equal((await w.req('GET', '/v1/holds', { bearer: cli, ...anon })).status, 401);
@@ -518,6 +540,139 @@ test('roles: changed by an owner with a passkey; a demoted approver\'s seals are
   assert.equal((await w.req('POST', '/v1/team/invites/begin', { cookie: u.cookie, body: { role: 'viewer', label: 'x' } })).body.error, 'role_required');
   const changes = w.env.DB.raw.prepare("SELECT detail FROM audit WHERE action = 'member_role_changed'").all().map((r) => JSON.parse(r.detail));
   assert.deepEqual(changes.map((c) => `${c.from}>${c.to}`), ['member>approver', 'approver>viewer', 'approver>member', 'approver>owner', 'owner>approver']);
+});
+
+test('self-approval off at quorum 1: a new approver\'s seal waits 24 hours too, so the maker\'s second identity cannot seal at once', async () => {
+  const w = new World();
+  const u = await founder(w);
+  const ben = await add(w, u, 'Ben');
+  const cred = await vault(w, u);
+  assert.equal((await setQuorum(w, u, 1, false)).status, 200);
+  // the owner invites "someone" and joins as them with a second authenticator
+  const sock = await add(w, u, 'Sock');
+  const h = await heldCall(w, u, cred);
+  assert.equal((await seal(w, u, h.hold)).body.error, 'own_request');
+  const early = await seal(w, sock, h.hold);
+  assert.equal(early.status, 403); assert.equal(early.body.error, 'seal_not_yet');
+  assert.equal((await w.req('DELETE', '/p/github/repos/acme/app', { bearer: h.token, ...anon })).status, 428);
+  assert.ok((await w.req('GET', '/v1/team', { cookie: ben.cookie })).body.members.find((m) => m.name === 'Sock').votes_from > Date.now());
+  // an approver who was there before seals at once; a promotion waits too
+  assert.equal((await seal(w, ben, h.hold)).body.approved, true);
+  const mel = await add(w, u, 'Mel', 'member');
+  assert.ok((await setRole(w, u, mel, 'approver')).body.votesFrom > Date.now() + DAY - 60_000);
+  await timeShift(DAY + 60_000, async () => {
+    const [u2, sock2] = [await relog(w, u), await relog(w, sock)];
+    const h2 = await heldCall(w, u2, cred, '/repos/acme/later');
+    assert.equal((await seal(w, sock2, h2.hold)).body.approved, true);
+  });
+});
+
+test('an approver made a member or a viewer: their pre-approvals pause, an approval their seal completed is void; as a viewer, what they made is revoked', async () => {
+  const w = new World();
+  const u = await founder(w);
+  const asha = await add(w, u, 'Asha');
+  const cred = await vault(w, u);
+  const pre = await ceremony(w, asha, '/v1/tokens/passkey', { credentialId: cred, label: 'asha pre', policy: { unattendedIrreversible: [{ method: 'DELETE', path: '/repos/acme/*' }] } });
+  assert.equal(pre.status, 200, JSON.stringify(pre.body));
+  assert.equal((await w.req('DELETE', '/p/github/repos/acme/one', { bearer: pre.body.token, ...anon })).status, 200);
+  // an approval of hers alone (quorum 1) that nobody has used yet
+  const h = await heldCall(w, u, cred, '/repos/acme/two');
+  assert.equal((await seal(w, asha, h.hold)).body.approved, true);
+  // made a member: she can no longer approve, so neither her pre-approval nor her unused yes stands
+  const r = await setRole(w, u, asha, 'member');
+  assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.voidedApprovals, 1);
+  assert.equal((await w.req('DELETE', '/p/github/repos/acme/two', { bearer: h.token, ...anon })).status, 428);
+  const held = await w.req('DELETE', '/p/github/repos/acme/three', { bearer: pre.body.token, ...anon });
+  assert.equal(held.status, 428, JSON.stringify(held.body)); assert.equal(held.body.rule, 'gh.delete');
+  // a member keeps what they made: ordinary calls still pass
+  assert.equal((await w.req('GET', '/p/github/repos/acme/app', { bearer: pre.body.token, ...anon })).status, 200);
+  const gk = (await w.req('POST', '/v1/guard/keys', { cookie: asha.cookie, body: { label: 'asha laptop' } })).body;
+  const rk = (await w.req('POST', '/v1/keys', { cookie: asha.cookie, body: { label: 'asha receipts' } })).body;
+  const ak = await agentKey(w, asha);
+  // made a viewer: a viewer runs no agents, so everything she made is revoked and what it asked for is closed
+  const v = await setRole(w, u, asha, 'viewer');
+  assert.equal(v.status, 200, JSON.stringify(v.body));
+  assert.deepEqual(v.body.revoked, { tokens: 1, guardKeys: 1, receiptsKeys: 1, agentKeys: 1, holds: 1 });
+  assert.equal((await w.req('GET', '/p/github/repos/acme/app', { bearer: pre.body.token, ...anon })).body.error, 'token_invalid');
+  assert.equal((await w.req('POST', '/v1/approvals', { bearer: gk.key, ...anon, body: {} })).body.error, 'guard_key_invalid');
+  assert.equal(w.env.DB.raw.prepare('SELECT revoked FROM api_keys WHERE id = ?').get(rk.id).revoked, 1);
+  assert.ok(w.env.DB.raw.prepare('SELECT revoked_at FROM agent_keys WHERE id = ?').get(ak.id).revoked_at);
+  assert.equal(w.env.DB.raw.prepare('SELECT status FROM holds WHERE id = ?').get(held.body.hold_id).status, 'expired');
+  const ch = JSON.parse(w.env.DB.raw.prepare("SELECT detail FROM audit WHERE action = 'member_role_changed' ORDER BY seq DESC").get().detail);
+  assert.deepEqual(ch.revoked, { tokens: 1, guardKeys: 1, receiptsKeys: 1, agentKeys: 1, holds: 1 });
+});
+
+test('revoking a token or key is for its maker or an owner; a refused revoke closes nothing (anyone else freezes instead)', async () => {
+  const w = new World();
+  const u = await founder(w);
+  const mel = await add(w, u, 'Mel', 'member');
+  const ann = await add(w, u, 'Ann', 'member');
+  const asha = await add(w, u, 'Asha');
+  const cred = await vault(w, u);
+  const tok = (await w.req('POST', '/v1/tokens', { cookie: mel.cookie, body: { credentialId: cred, label: 'mel agent' } })).body;
+  const gk = (await w.req('POST', '/v1/guard/keys', { cookie: mel.cookie, body: { label: 'mel laptop' } })).body;
+  const rk = (await w.req('POST', '/v1/keys', { cookie: mel.cookie, body: { label: 'mel receipts' } })).body;
+  const ak = await agentKey(w, mel);
+  const ask = await w.req('POST', '/v1/approvals', { bearer: gk.key, ...anon, body: { kind: 'shell', agent: 'codex', rule: 'sh.git-force', why: 'Rewrites history.', summary: 'git push --force', detail: 'git push --force origin main' } });
+  assert.equal(ask.status, 202, JSON.stringify(ask.body));
+  const paths = [`/v1/tokens/${tok.id}`, `/v1/guard/keys/${gk.id}`, `/v1/keys/${rk.id}`, `/v1/agent-keys/${ak.id}`];
+  for (const p of paths) {
+    for (const x of [ann, asha]) {
+      const r = await w.req('DELETE', p, { cookie: x.cookie });
+      assert.equal(r.status, 403, p + ' ' + JSON.stringify(r.body)); assert.equal(r.body.error, 'role_required');
+    }
+  }
+  assert.equal(w.env.DB.raw.prepare('SELECT status FROM holds WHERE id = ?').get(ask.body.id).status, 'pending', 'the refused revoke closed nothing');
+  assert.equal((await w.req('GET', '/p/github/repos/acme/app', { bearer: tok.token, ...anon })).status, 200);
+  // its maker may, and so may an owner
+  assert.equal((await w.req('DELETE', paths[0], { cookie: mel.cookie })).status, 200);
+  const g = await w.req('DELETE', paths[1], { cookie: mel.cookie });
+  assert.equal(g.status, 200); assert.equal(g.body.closed, 1);
+  assert.equal((await w.req('DELETE', paths[2], { cookie: u.cookie })).status, 200);
+  assert.equal((await w.req('DELETE', paths[3], { cookie: u.cookie })).status, 200);
+});
+
+test('every team change wakes every device, however close together; a removed person\'s devices get one last alert', async () => {
+  const w = new World();
+  await withVapid(w);
+  const u = await founder(w);
+  const asha = await add(w, u, 'Asha');
+  const vic = await add(w, u, 'Vic', 'viewer');
+  assert.equal((await device(w, vic, 'vic-phone')).status, 200);
+  w.pushes = [];
+  const vics = () => w.pushes.filter((p) => p.endsWith('/vic-phone')).length;
+  const ben = await add(w, u, 'Ben');
+  assert.equal((await device(w, ben, 'ben-phone')).status, 200);
+  assert.equal((await setRole(w, u, ben, 'member')).status, 200);
+  assert.equal(vics(), 2, 'a join and a role change seconds apart: both alerted');
+  assert.equal((await setQuorum(w, u, 2, true)).status, 200);
+  assert.equal((await setQuorum(w, u, 1, true)).body.pending.quorum, 1);
+  assert.equal((await ceremony(w, asha, '/v1/team/quorum/cancel')).status, 200);
+  assert.equal((await setQuorum(w, u, 1, true)).body.pending.quorum, 1);
+  assert.equal(vics(), 5, 'a lowering, its cancel and a second lowering a moment later: all alerted');
+  const bens = () => w.pushes.filter((p) => p.endsWith('/ben-phone')).length, before = bens();
+  assert.equal((await remove(w, u, ben)).status, 200);
+  assert.equal(vics(), 6);
+  assert.equal(bens() - before, 1, 'his own device is told once, then it is gone');
+  assert.equal(count(w, 'SELECT COUNT(*) n FROM push_subs WHERE endpoint LIKE ?', '%ben-phone'), 0);
+});
+
+test('an invite counts only while its maker is an owner of the same account (checked again when joining)', async () => {
+  const w = new World();
+  const u = await founder(w);
+  const olga = await founder(w, 'Olga');
+  // Olga is an owner of her own account (with a members row)
+  assert.equal((await invite(w, olga, { role: 'viewer', label: 'olga invite' })).status, 200);
+  const inv = await invite(w, u, { role: 'approver', label: 'for someone' });
+  const token = tokenOf(inv);
+  const auth = new Authenticator(ORIGIN, RP_ID);
+  const b = await w.req('POST', '/v1/invites/begin', { body: { token, name: 'Someone' } });
+  assert.equal(b.status, 200, JSON.stringify(b.body));
+  // between begin and finish, the invite's maker becomes someone who is an owner only of another account
+  w.env.DB.raw.prepare('UPDATE invites SET created_by = ? WHERE id = ?').run(olga.id, inv.body.id);
+  const f = await w.req('POST', '/v1/invites/finish', { body: { token, challengeId: b.body.challengeId, credential: await auth.create(b.body.options) } });
+  assert.equal(f.status, 400); assert.equal(f.body.error, 'invite_invalid');
+  assert.equal(count(w, 'SELECT COUNT(*) n FROM members WHERE name = ?', 'Someone'), 0);
 });
 
 test('the quorum: raising is immediate (waiting holds too), lowering waits 24 hours, alerts every member and can be cancelled by an approver', async () => {
@@ -699,6 +854,15 @@ test('Freeze: nothing is sealed while frozen, a freeze drops seals already cast,
   // sealing starts again from nothing
   assert.equal((await seal(w, u, h.body.hold_id)).body.seals, 1);
   assert.equal((await seal(w, asha, h.body.hold_id)).body.approved, true);
+  // while two seals are required, an approver whose seal does not count yet (a stolen invite) cannot start agents again:
+  // neither unfreeze nor reset a tripped breaker
+  const nu = await add(w, u, 'Nu');
+  assert.equal((await w.req('POST', '/v1/me/freeze', { cookie: vic.cookie, body: {} })).status, 200);
+  assert.equal((await ceremony(w, nu, '/v1/me/unfreeze')).body.error, 'seal_not_yet');
+  w.env.DB.raw.prepare('UPDATE tokens SET tripped_at = ?, tripped_why = ? WHERE id = ?').run(Date.now(), 'test', t.body.id);
+  assert.equal((await ceremony(w, nu, `/v1/tokens/${t.body.id}/reset`)).body.error, 'seal_not_yet');
+  assert.equal((await ceremony(w, asha, '/v1/me/unfreeze')).status, 200);
+  assert.equal(JSON.parse(w.env.DB.raw.prepare("SELECT detail FROM audit WHERE action = 'unfreeze' ORDER BY seq DESC").get().detail).member, asha.member);
 });
 
 test('receipts: the public log gets the quorum and the number of seals, never who, which passkey, a name, a label or a member id; a partial seal is private', async () => {

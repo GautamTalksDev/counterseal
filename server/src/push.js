@@ -62,13 +62,14 @@ export async function unsubscribe(env, sess, body) {
 }
 
 /** wake every device of the account (every member's), or every device but one member's (`exceptMember`: the person who
- *  just acted, on a team); dead subscriptions (404/410) are removed */
-export async function notify(env, accountId, fetcher = fetch, { exceptMember = null } = {}) {
+ *  just acted, on a team), plus `extra` devices no longer in the account (a removed person's, told once more); dead
+ *  subscriptions (404/410) are removed */
+export async function notify(env, accountId, fetcher = fetch, { exceptMember = null, extra = [] } = {}) {
   const k = await keys(env);
   if (!k) return { sent: 0 };
   const subs = (exceptMember
     ? await env.DB.prepare('SELECT id, endpoint FROM push_subs WHERE account_id = ? AND COALESCE(member_id, account_id) != ?').bind(accountId, exceptMember).all()
-    : await env.DB.prepare('SELECT id, endpoint FROM push_subs WHERE account_id = ?').bind(accountId).all()).results;
+    : await env.DB.prepare('SELECT id, endpoint FROM push_subs WHERE account_id = ?').bind(accountId).all()).results.concat(extra);
   let sent = 0;
   const results = [];
   for (const s of subs) {

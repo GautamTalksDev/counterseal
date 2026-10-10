@@ -17,6 +17,8 @@ self.addEventListener('push', (e) => {
       // held requests, command line sign-ins and passkeys added in the last 15 minutes, and whether everything is frozen;
       // the newest event is shown (a freeze, which stops holds from mattering, outranks the holds)
       const r = await fetch('/v1/alerts', { credentials: 'same-origin', cache: 'no-store' });
+      // signed out on this device: a session that ended, or a person removed from a team (their last alert)
+      if (r.status === 401) { title = 'Counterseal: this device is signed out'; body = 'Sign in to see what happened. If you were removed from a team, your passkey no longer works for it.'; actions = undefined; }
       if (r.ok) {
         const { holds, signins, passkeys, frozen_at: frozenAt, team } = await r.json();
         const at = (x) => (x && Number.isFinite(x.created_at) ? x.created_at : 0);

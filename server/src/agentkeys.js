@@ -17,6 +17,7 @@ import { HttpError, fromB64u, b64u, randomId, now, str, sha256 } from './util.js
 import { parseDictionary, signatureBase, jwkThumbprint } from '../../sdk/websig.mjs';
 import { signerKeyBytes } from './receipts.js';
 import { newChallenge, takeChallenge, rp, sessionId } from './auth.js';
+import { MAKER_OR_OWNER, makerOrOwner, notRevoked } from './team.js';
 import { audit } from './audit.js';
 
 export const POP_TAG = 'leash-pop';
@@ -77,7 +78,8 @@ export async function registerFinish(env, sess, body) {
   // registered by a CLI session: revoking that session revokes this key too
   const cli = sess.kind === 'cli' ? await sessionId(sess.hash) : null;
   try {
-    await env.DB.prepare('INSERT INTO agent_keys (id, account_id, label, keyid, x, created_at, session_id) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, sess.accountId, label, keyid, x, now(), cli).run();
+    // member_id: who registered it (on a team, removing them, or making them a viewer, revokes it)
+    await env.DB.prepare('INSERT INTO agent_keys (id, account_id, label, keyid, x, created_at, session_id, member_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id, sess.accountId, label, keyid, x, now(), cli, sess.memberId || null).run();
   } catch (e) {
     if (/UNIQUE|constraint/i.test(String(e && e.message))) throw new HttpError(409, 'key_exists', 'That key is already registered.');
     throw e;
@@ -88,13 +90,14 @@ export async function registerFinish(env, sess, body) {
 }
 
 export async function list(env, sess) {
-  const r = await env.DB.prepare('SELECT k.id, k.label, k.keyid, k.x, k.created_at, k.revoked_at, k.last_used, (SELECT COUNT(*) FROM tokens t WHERE t.agent_key_id = k.id AND t.revoked = 0) AS tokens FROM agent_keys k WHERE k.account_id = ? ORDER BY k.created_at DESC').bind(sess.accountId).all();
+  const r = await env.DB.prepare('SELECT k.id, k.label, k.keyid, k.x, k.created_at, k.revoked_at, k.last_used, COALESCE(k.member_id, k.account_id) AS member_id, (SELECT COUNT(*) FROM tokens t WHERE t.agent_key_id = k.id AND t.revoked = 0) AS tokens FROM agent_keys k WHERE k.account_id = ? ORDER BY k.created_at DESC').bind(sess.accountId).all();
   return { agentKeys: r.results };
 }
 
 export async function revoke(env, sess, id) {
-  const r = await env.DB.prepare('UPDATE agent_keys SET revoked_at = ? WHERE id = ? AND account_id = ? AND revoked_at IS NULL RETURNING keyid').bind(now(), id, sess.accountId).first();
-  if (!r) throw new HttpError(404, 'not_found');
+  // its maker or an owner (src/team.js)
+  const r = await env.DB.prepare(`UPDATE agent_keys SET revoked_at = ? WHERE id = ? AND account_id = ? AND revoked_at IS NULL ${MAKER_OR_OWNER} RETURNING keyid`).bind(now(), id, sess.accountId, ...makerOrOwner(sess)).first();
+  if (!r) throw await notRevoked(env, sess, 'agent_keys', id);
   await audit(env, sess.accountId, sess.kind, 'agent_key_revoked', { id, keyid: r.keyid });
   return { ok: true, note: 'Tokens bound to this key stop working at once.' };
 }

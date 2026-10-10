@@ -16,6 +16,7 @@ import { validate, canonical, checkSignature, checkSignerProof, signerProofText,
 import { logKey, b64std } from './note.js';
 import { publicHost } from './providers.js';
 import * as A from './auth.js';
+import * as Team from './team.js';
 import { audit } from './audit.js';
 
 // a non-negative integer from a default (number) or a query parameter (plain decimal only: no "", "0x1", "1e3", " 1", "01");
@@ -328,7 +329,7 @@ export const LEDGER_ROUTES = [
   }],
 
   // ---- receipts API keys (lsr_). Binding a signer needs proof of possession of the private key.
-  ['GET', /^\/v1\/keys$/, 'session', async (c) => ({ keys: (await c.env.DB.prepare('SELECT id, label, signer_pub, revoked, created_at, last_used, expires_at FROM api_keys WHERE account_id = ? ORDER BY created_at DESC LIMIT 200').bind(c.s.accountId).all()).results })],
+  ['GET', /^\/v1\/keys$/, 'session', async (c) => ({ keys: (await c.env.DB.prepare('SELECT id, label, signer_pub, revoked, created_at, last_used, expires_at, COALESCE(member_id, account_id) AS member_id FROM api_keys WHERE account_id = ? ORDER BY created_at DESC LIMIT 200').bind(c.s.accountId).all()).results })],
   ['POST', /^\/v1\/keys\/signer\/begin$/, 'write', async (c) => {
     const signer = await signerPub(c, c.body.signerPublicKey);
     const { id, challenge } = await A.newChallenge(c.env, 'signer', c.s.accountId, signer);
@@ -361,8 +362,9 @@ export const LEDGER_ROUTES = [
     return { id, key, label, ...(expiresAt ? { expiresAt } : {}), note: `Shown once. Only a hash is kept.${expiresAt ? ' It ends with this command line sign-in; make lasting keys in the app.' : ''}` };
   }],
   ['DELETE', /^\/v1\/keys\/([0-9a-f]{24})$/, 'write', async (c) => {
-    const r = await c.env.DB.prepare('UPDATE api_keys SET revoked = 1 WHERE id = ? AND account_id = ? AND revoked = 0').bind(c.m[1], c.s.accountId).run();
-    if (!r.meta.changes) throw new HttpError(404, 'not_found');
+    // its maker or an owner (src/team.js)
+    const r = await c.env.DB.prepare(`UPDATE api_keys SET revoked = 1 WHERE id = ? AND account_id = ? AND revoked = 0 ${Team.MAKER_OR_OWNER}`).bind(c.m[1], c.s.accountId, ...Team.makerOrOwner(c.s)).run();
+    if (!r.meta.changes) throw await Team.notRevoked(c.env, c.s, 'api_keys', c.m[1]);
     await audit(c.env, c.s.accountId, c.s.kind, 'receipts_key_revoked', { id: c.m[1] });
     return { ok: true };
   }],

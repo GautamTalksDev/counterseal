@@ -20,8 +20,10 @@
 //
 // Protection is never lowered at once: raising the quorum (or turning self-approval off) takes effect immediately;
 // lowering it (or turning self-approval on) takes effect 24 hours later, alerts every member's devices, and any approver
-// can cancel it in that time. While two seals are required, a new approver's seal counts only 24 hours after they joined
-// or were promoted, so neither an owner nor a stolen invite link can mint a second vote on the spot. There is no cron: a
+// can cancel it in that time. While one person cannot approve alone (two seals, or self-approval off), a new approver's
+// seal counts only 24 hours after they joined or were promoted, so neither an owner nor a stolen invite link can mint a
+// second vote on the spot. Someone who can no longer seal (demoted or removed) loses their unused approvals too, and the
+// pre-approvals of tokens they made pause. There is no cron: a
 // pending change is applied when it is read (effective() below, and the same CASE in SQL).
 //
 // Invites: an owner makes one with a fresh passkey ceremony. The token is 32 random bytes, stored only as SHA-256, single
@@ -86,6 +88,21 @@ export function effective(a, t = now()) {
 /** one person may approve alone (quorum 1, self-approval on): only then do pre-approvals and money caps apply, or can be
  *  made, since each is one person approving in advance */
 export const oneSealEnough = (e) => e.quorum <= 1 && e.selfApprove;
+/** SQL: one person cannot approve alone in account A at time T (two seals, or self-approval off). Then a new approver's
+ *  seal counts only 24 hours after they joined or were promoted. */
+const GUARDED = (A, T) => `(${Q_NOW(A, T)} >= 2 OR ${SA_NOW(A, T)} = 0)`;
+
+/** Revoking what someone made (a token, a guard key, a receipts key, an agent key) is for its maker or an owner; anyone
+ *  else who sees trouble freezes the account, which stops everything at once. SQL to AND into the revoking UPDATE, with
+ *  its two values. */
+export const MAKER_OR_OWNER = 'AND (COALESCE(member_id, account_id) = ? OR ? = \'owner\')';
+export const makerOrOwner = (sess) => [sess.memberId, sess.role];
+/** after a revoke that changed nothing: 403 when the row is someone else's (and you are not an owner), else 404 */
+export async function notRevoked(env, sess, table, id) {
+  const r = await env.DB.prepare(`SELECT COALESCE(member_id, account_id) AS m FROM ${table} WHERE id = ? AND account_id = ?`).bind(id, sess.accountId).first();
+  if (r && r.m !== sess.memberId && sess.role !== 'owner') return new HttpError(403, 'role_required', 'Only the person who made it or an owner can revoke it. To stop every agent at once, freeze the account.', { role: sess.role });
+  return new HttpError(404, 'not_found');
+}
 
 /** a role at least this level, or 403 (the route table in index.js calls this for every signed-in request) */
 export function requireLevel(sess, need) {
@@ -108,10 +125,12 @@ async function confirm(env, sess, body, kind) {
 }
 const founderRow = (db, accountId) => db.prepare("INSERT OR IGNORE INTO members (id, account_id, name, role, created_at, votes_from) SELECT id, id, name, 'owner', created_at, 0 FROM accounts WHERE id = ?").bind(accountId);
 
-/** wake every member's devices (the push carries nothing; the phone reads /v1/alerts), optionally not one member's;
- *  after the response on Workers (ctx.waitUntil), so nobody waits for the push services */
-function alertTeam(env, accountId, exceptMember, bucket = 'pushteam:') {
-  const p = (async () => { if (await allow(env.DB, bucket + accountId, 1, 60_000, now())) await notify(env, accountId, env.__pushFetch || fetch, { exceptMember }); })().catch(() => {});
+/** wake every member's devices (the push carries nothing; the phone reads /v1/alerts), optionally not one member's, and
+ *  optionally some devices already gone from the account (a removed person's); after the response on Workers
+ *  (ctx.waitUntil), so nobody waits for the push services. A change to the team or the quorum is never rate limited:
+ *  each one took a passkey, and none can be hidden behind another. Only the nudge after a partial seal is (`bucket`). */
+function alertTeam(env, accountId, exceptMember, { bucket = null, extra = [] } = {}) {
+  const p = (async () => { if (!bucket || await allow(env.DB, bucket + accountId, 1, 60_000, now())) await notify(env, accountId, env.__pushFetch || fetch, { exceptMember, extra }); })().catch(() => {});
   if (env.__ctx && env.__ctx.waitUntil) { env.__ctx.waitUntil(p); return undefined; }
   return p;
 }
@@ -272,12 +291,13 @@ export async function joinFinish(env, request, body) {
   try {
     res = await env.DB.batch([
       env.DB.prepare(`UPDATE invites SET used_at = ?1, used_by = ?2 WHERE hash = ?3 AND account_id = ?4 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?1
-        AND ${ROLE_OF('created_by', 'account_id')} = 'owner'
+        AND ${ROLE_OF('invites.created_by', 'invites.account_id')} = 'owner'
         AND (SELECT COUNT(*) FROM members WHERE account_id = ?4 AND removed_at IS NULL) < ?5
         AND NOT EXISTS (SELECT 1 FROM members WHERE account_id = ?4 AND removed_at IS NULL AND name = ?6 COLLATE NOCASE)`).bind(t, mid, hash, a, MAX_MEMBERS, p.name),
-      // while two seals are required, a new approver's seal counts only after 24 hours
+      // while one person cannot approve alone (two seals, or self-approval off), a new approver's seal counts only after
+      // 24 hours
       env.DB.prepare(`INSERT INTO members (id, account_id, name, label, role, created_at, invited_by, votes_from)
-        SELECT ?1, ?2, ?3, label, role, ?4, created_by, CASE WHEN ${Q_NOW('?2', '?4')} >= 2 THEN ?4 + ?5 ELSE ?4 END FROM invites WHERE hash = ?6 AND used_by = ?1`).bind(mid, a, p.name, t, VOTE_DELAY, hash),
+        SELECT ?1, ?2, ?3, label, role, ?4, created_by, CASE WHEN ${GUARDED('?2', '?4')} THEN ?4 + ?5 ELSE ?4 END FROM invites WHERE hash = ?6 AND used_by = ?1`).bind(mid, a, p.name, t, VOTE_DELAY, hash),
       env.DB.prepare('INSERT INTO passkeys (cred_id, account_id, alg, jwk, sign_count, created_at, rp_id, member_id) SELECT ?, ?, ?, ?, ?, ?, ?, ? FROM invites WHERE hash = ? AND used_by = ?')
         .bind(c.credId, a, c.alg, JSON.stringify(c.jwk), c.signCount, t, r.rpId, mid, hash, mid),
     ]);
@@ -326,29 +346,43 @@ export async function roleFinish(env, sess, id, body) {
   const role = ch.name;
   const tg = await target(env, sess, id);
   keepsRules(sess, tg, role);
-  const t = now(), a = sess.accountId;
+  const t = now(), a = sess.accountId, db = env.DB;
+  // done only if this request changed the role (the statements after the UPDATE check it)
+  const changed = `EXISTS (SELECT 1 FROM members WHERE id = ?2 AND account_id = ?1 AND role = ?3)`;
+  const made = (tbl, set, live) => db.prepare(`UPDATE ${tbl} SET ${set} WHERE account_id = ?1 AND COALESCE(member_id, account_id) = ?2 AND ${live} AND ?3 = 'viewer' AND ${changed}`).bind(a, id, role, ...(set.includes('?4') ? [t] : []));
   // the same rules again, in the statement itself, so two owners changing roles at once cannot break them
-  const [, up] = await env.DB.batch([
-    founderRow(env.DB, a),
-    env.DB.prepare(`UPDATE members SET role = ?1,
-        votes_from = CASE WHEN ?1 IN ('owner','approver') AND role NOT IN ('owner','approver') THEN (CASE WHEN ${Q_NOW('?3', '?4')} >= 2 THEN ?4 + ?5 ELSE ?4 END) ELSE votes_from END
+  const [, up, , , approved, ...gone] = await db.batch([
+    founderRow(db, a),
+    db.prepare(`UPDATE members SET role = ?1,
+        votes_from = CASE WHEN ?1 IN ('owner','approver') AND role NOT IN ('owner','approver') THEN (CASE WHEN ${GUARDED('?3', '?4')} THEN ?4 + ?5 ELSE ?4 END) ELSE votes_from END
       WHERE id = ?2 AND account_id = ?3 AND removed_at IS NULL AND role != ?1
         AND (role != 'owner' OR ?1 = 'owner' OR (SELECT COUNT(*) FROM members WHERE account_id = ?3 AND removed_at IS NULL AND role = 'owner' AND id != ?2) >= 1)
         AND (role NOT IN ('owner','approver') OR ?1 IN ('owner','approver') OR (SELECT COUNT(*) FROM members WHERE account_id = ?3 AND removed_at IS NULL AND role IN ('owner','approver') AND id != ?2) >= ${Q_NOW('?3', '?4')})`)
       .bind(role, id, a, t, VOTE_DELAY),
     // no longer able to seal: their seals on waiting holds are dropped
-    env.DB.prepare(`DELETE FROM hold_votes WHERE account_id = ?1 AND member_id = ?2 AND ?3 NOT IN ('owner','approver') AND hold_id IN (SELECT id FROM holds WHERE account_id = ?1 AND status = 'pending')
-      AND EXISTS (SELECT 1 FROM members WHERE id = ?2 AND account_id = ?1 AND role = ?3)`).bind(a, id, role),
+    db.prepare(`DELETE FROM hold_votes WHERE account_id = ?1 AND member_id = ?2 AND ?3 NOT IN ('owner','approver') AND hold_id IN (SELECT id FROM holds WHERE account_id = ?1 AND status = 'pending')
+      AND ${changed}`).bind(a, id, role),
     // no longer an owner: their open invites die
-    env.DB.prepare(`UPDATE invites SET revoked_at = ?1 WHERE account_id = ?2 AND created_by = ?3 AND used_at IS NULL AND revoked_at IS NULL AND ?4 != 'owner'
-      AND EXISTS (SELECT 1 FROM members WHERE id = ?3 AND account_id = ?2 AND role = ?4)`).bind(t, a, id, role),
+    db.prepare(`UPDATE invites SET revoked_at = ?4 WHERE account_id = ?1 AND created_by = ?2 AND used_at IS NULL AND revoked_at IS NULL AND ?3 != 'owner'
+      AND ${changed}`).bind(a, id, role, t),
+    // and an approval their seal helped complete, not yet used, no longer stands
+    db.prepare(`UPDATE holds SET status = 'expired' WHERE account_id = ?1 AND status = 'approved' AND ?3 NOT IN ('owner','approver')
+      AND id IN (SELECT hold_id FROM hold_votes WHERE account_id = ?1 AND member_id = ?2) AND ${changed}`).bind(a, id, role),
+    // a viewer runs no agents: what they made is revoked, and what it asked for is closed
+    made('tokens', 'revoked = 1', 'revoked = 0'),
+    made('guard_keys', 'revoked = 1', 'revoked = 0'),
+    made('api_keys', 'revoked = 1', 'revoked = 0'),
+    made('agent_keys', 'revoked_at = ?4', 'revoked_at IS NULL'),
+    db.prepare(`UPDATE holds SET status = 'expired' WHERE account_id = ?1 AND requested_by = ?2 AND status IN ('pending','approved') AND ?3 = 'viewer' AND ${changed}`).bind(a, id, role),
   ]);
   if (!up.meta.changes) throw new HttpError(409, 'try_again', 'The team changed while you confirmed. Look again and retry.');
-  const row = await env.DB.prepare('SELECT votes_from FROM members WHERE id = ?').bind(id).first();
-  await audit(env, a, 'web', 'member_role_changed', { member: id, name: tg.m.name, from: tg.m.role, to: role, by: sess.memberId, ...(row?.votes_from > t ? { votes_from: row.votes_from } : {}) });
+  const row = await db.prepare('SELECT votes_from FROM members WHERE id = ?').bind(id).first();
+  const [tokens, guardKeys, receiptsKeys, agentKeys, holds] = gone.map((x) => x.meta.changes);
+  const revoked = role === 'viewer' ? { revoked: { tokens, guardKeys, receiptsKeys, agentKeys, holds } } : {};
+  await audit(env, a, 'web', 'member_role_changed', { member: id, name: tg.m.name, from: tg.m.role, to: role, by: sess.memberId, ...(row?.votes_from > t ? { votes_from: row.votes_from } : {}), ...(approved.meta.changes ? { voided_approvals: approved.meta.changes } : {}), ...revoked });
   // who may seal or run the team is never changed quietly: every member's devices are told
   await alertTeam(env, a, sess.memberId);
-  return { ok: true, role, votesFrom: row?.votes_from > t ? row.votes_from : null };
+  return { ok: true, role, votesFrom: row?.votes_from > t ? row.votes_from : null, voidedApprovals: approved.meta.changes, ...revoked };
 }
 
 export async function removeBegin(env, sess, id) {
@@ -370,6 +404,8 @@ export async function removeFinish(env, sess, id, body) {
   const t = now(), a = sess.accountId, db = env.DB;
   const gone = `EXISTS (SELECT 1 FROM members WHERE id = ?2 AND account_id = ?1 AND removed_at = ?3)`;
   const mine = (tbl) => `account_id = ?1 AND COALESCE(${tbl}member_id, ${tbl}account_id) = ?2`;
+  // their devices are told too, although they are deleted below (the alert then says this device is signed out)
+  const theirs = (await db.prepare(`SELECT id, endpoint FROM push_subs WHERE ${mine('')}`).bind(a, id).all()).results;
   const out = await db.batch([
     founderRow(db, a),
     db.prepare(`UPDATE members SET removed_at = ?3 WHERE id = ?2 AND account_id = ?1 AND removed_at IS NULL
@@ -378,22 +414,26 @@ export async function removeFinish(env, sess, id, body) {
     db.prepare(`DELETE FROM sessions WHERE ${mine('')} AND ${gone}`).bind(a, id, t),
     db.prepare(`DELETE FROM passkeys WHERE ${mine('')} AND ${gone}`).bind(a, id, t),
     db.prepare(`DELETE FROM push_subs WHERE ${mine('')} AND ${gone}`).bind(a, id, t),
-    db.prepare(`DELETE FROM hold_votes WHERE account_id = ?1 AND member_id = ?2 AND hold_id IN (SELECT id FROM holds WHERE account_id = ?1 AND status IN ('pending','approved')) AND ${gone}`).bind(a, id, t),
-    // what they asked for is closed (a pending hold of theirs, or an approved one not yet used)
-    db.prepare(`UPDATE holds SET status = 'expired' WHERE account_id = ?1 AND requested_by = ?2 AND status IN ('pending','approved') AND ${gone}`).bind(a, id, t),
+    // their seals on waiting holds are dropped
+    db.prepare(`DELETE FROM hold_votes WHERE account_id = ?1 AND member_id = ?2 AND hold_id IN (SELECT id FROM holds WHERE account_id = ?1 AND status = 'pending') AND ${gone}`).bind(a, id, t),
+    // what they asked for is closed (a pending hold of theirs, or an approved one not yet used), and so is an approval
+    // their seal helped complete that is not yet used: a yes from someone removed no longer stands
+    db.prepare(`UPDATE holds SET status = 'expired' WHERE account_id = ?1 AND status IN ('pending','approved')
+      AND (requested_by = ?2 OR (status = 'approved' AND id IN (SELECT hold_id FROM hold_votes WHERE account_id = ?1 AND member_id = ?2))) AND ${gone}`).bind(a, id, t),
     db.prepare(`UPDATE tokens SET revoked = 1 WHERE ${mine('')} AND revoked = 0 AND ${gone}`).bind(a, id, t),
     db.prepare(`UPDATE guard_keys SET revoked = 1 WHERE ${mine('')} AND revoked = 0 AND ${gone}`).bind(a, id, t),
     db.prepare(`UPDATE api_keys SET revoked = 1 WHERE ${mine('')} AND revoked = 0 AND ${gone}`).bind(a, id, t),
+    db.prepare(`UPDATE agent_keys SET revoked_at = ?3 WHERE ${mine('')} AND revoked_at IS NULL AND ${gone}`).bind(a, id, t),
     db.prepare(`UPDATE invites SET revoked_at = ?3 WHERE account_id = ?1 AND created_by = ?2 AND used_at IS NULL AND revoked_at IS NULL AND ${gone}`).bind(a, id, t),
     // a move link they made can no longer add a passkey for them
     db.prepare(`UPDATE move_links SET used_at = ?3 WHERE ${mine('')} AND used_at IS NULL AND ${gone}`).bind(a, id, t),
   ]);
   if (!out[1].meta.changes) throw new HttpError(409, 'try_again', 'The team changed while you confirmed. Look again and retry.');
   const n = (i) => out[i].meta.changes;
-  const revoked = { sessions: n(2), passkeys: n(3), devices: n(4), seals: n(5), holds: n(6), tokens: n(7), guardKeys: n(8), receiptsKeys: n(9), invites: n(10) };
+  const revoked = { sessions: n(2), passkeys: n(3), devices: n(4), seals: n(5), holds: n(6), tokens: n(7), guardKeys: n(8), receiptsKeys: n(9), agentKeys: n(10), invites: n(11) };
   await audit(env, a, 'web', 'member_removed', { member: id, name: tg.m.name, role: tg.m.role, by: sess.memberId, ...revoked });
-  // the rest of the team is told (the removed person's own devices are gone already)
-  await alertTeam(env, a, sess.memberId);
+  // the rest of the team is told, and so are the removed person's own devices (deleted above, so this is their last push)
+  await alertTeam(env, a, sess.memberId, { extra: id === sess.memberId ? [] : theirs });
   const self = id === sess.memberId;
   return self
     ? { body: { ok: true, left: true, revoked }, cookie: '__Host-leash=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0' }
@@ -446,7 +486,7 @@ export async function quorumFinish(env, sess, body) {
   if (!r.meta.changes) throw new HttpError(409, 'try_again', 'The team changed while you confirmed. Look again and retry.');
   await audit(env, sess.accountId, 'web', 'quorum_changed', { from: { quorum: cur.quorum, selfApprove: cur.selfApprove }, now: pl.now, pending: pl.pending, cancelled: cur.pending && !pl.pending ? cur.pending : undefined, by: sess.memberId });
   // lowering protection is never quiet: every member's devices are woken, and the alert offers to cancel it
-  if (pl.pending) await alertTeam(env, sess.accountId, null, 'pushquorum:');
+  if (pl.pending) await alertTeam(env, sess.accountId, null);
   return { ok: true, quorum: pl.now.quorum, selfApprove: pl.now.selfApprove, pending: pl.pending };
 }
 
@@ -463,7 +503,7 @@ export async function cancelFinish(env, sess, body) {
   const r = await env.DB.prepare('UPDATE accounts SET quorum_pending = NULL, self_approve_pending = NULL, quorum_effective_at = NULL WHERE id = ? AND quorum_effective_at IS NOT NULL AND quorum_effective_at > ?').bind(sess.accountId, t).run();
   if (!r.meta.changes || !e.pending) throw new HttpError(409, 'no_pending', 'No change to the quorum is waiting (it may have taken effect already).');
   await audit(env, sess.accountId, 'web', 'quorum_change_cancelled', { pending: e.pending, by: sess.memberId });
-  await alertTeam(env, sess.accountId, sess.memberId, 'pushquorum:');
+  await alertTeam(env, sess.accountId, sess.memberId);
   return { ok: true, quorum: e.quorum, selfApprove: e.selfApprove };
 }
 
@@ -484,13 +524,23 @@ function cannotSeal(row, memberId, t) {
   if (!row || row.status !== 'pending' || row.expires_at <= t) return new HttpError(404, 'not_found');
   if (row.frozen_at) return frozen();
   if (!isVoter(row.role)) return new HttpError(403, 'approver_required', 'Only owners and approvers can seal a held action. You can deny it.');
-  if (row.votes_from > t) return new HttpError(403, 'seal_not_yet', `Two seals are required, so a new approver's seal counts 24 hours after they joined or were promoted: from ${new Date(row.votes_from).toISOString().slice(0, 16).replace('T', ' ')} UTC.`, { votes_from: row.votes_from });
+  if (row.votes_from > t) return notYet(row.votes_from);
   if (!effective(row, t).selfApprove && row.requested_by && row.requested_by === memberId) return new HttpError(403, 'own_request', 'This was asked for by a token or guard key you made, and your team requires someone else to seal it.');
   if (row.voted) return new HttpError(409, 'already_sealed', 'You have sealed this already. It needs another approver.');
   return null;
 }
+const notYet = (from) => new HttpError(403, 'seal_not_yet', `One person cannot approve alone on this team (two seals, or self-approval off), so a new approver's seal counts 24 hours after they joined or were promoted: from ${new Date(from).toISOString().slice(0, 16).replace('T', ' ')} UTC.`, { votes_from: from });
 /** the seals a hold needs now: what it was made with, or more if the quorum was raised since */
 const required = (row, t) => Math.max(row.needs || 1, effective(row, t).quorum);
+
+/** the approver-only switches that let agents go again (unfreeze, a breaker's reset): while one person cannot approve
+ *  alone, not by an approver whose seal does not count yet, so a stolen approver invite cannot use them on the spot */
+export async function seasoned(env, sess) {
+  const r = await env.DB.prepare(`SELECT quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at,
+      COALESCE((SELECT votes_from FROM members WHERE id = ?2 AND account_id = ?1), 0) AS votes_from FROM accounts WHERE id = ?1`).bind(sess.accountId, sess.memberId).first();
+  const t = now();
+  if (r && r.votes_from > t && !oneSealEnough(effective(r, t))) throw notYet(r.votes_from);
+}
 
 /** approve, step 1: the checks before anyone is asked for a passkey; the challenge carries the hold's request hash */
 export async function sealBegin(env, sess, holdId) {
@@ -544,7 +594,7 @@ export async function sealFinish(env, sess, holdId, body) {
 
 /** after a seal that did not complete the quorum: wake the other members' devices (at most once a minute per account,
  *  shared with hold alerts) so a second approver looks */
-export const nudge = (env, accountId, exceptMember) => alertTeam(env, accountId, exceptMember, 'pushhold:');
+export const nudge = (env, accountId, exceptMember) => alertTeam(env, accountId, exceptMember, { bucket: 'pushhold:' });
 
 /** the seals from a VOTES_JSON column, oldest first */
 export const sealsOf = (json) => JSON.parse(json || '[]').sort((a, b) => a.at - b.at || String(a.member).localeCompare(String(b.member)));
