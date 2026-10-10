@@ -10,16 +10,28 @@
 // expansion, simple variable assignments in the same command line, cd, and these wrappers: sudo, env, command,
 // exec, nohup, time, nice, timeout, xargs, find -exec, watch, sh/bash/zsh -c (also -lc), eval, ssh, docker exec,
 // kubectl exec, npx and its relatives, npm/pnpm/yarn/bun scripts (read from package.json), and a few more.
+// Windows paths (C:\x, C:/x, \\server\share, %TEMP%) are absolute paths, and /mnt/c/x and /c/x name C:\x.
+//
+// WHAT IT SKIMS (a scan for known calls, not a parser): inline code given to python -c, node -e/-p, ruby -e,
+// perl -e and php -r, or fed to them on standard input (python - <<EOF). It looks for calls that delete files
+// (shutil.rmtree, os.remove, fs.rmSync, rimraf, FileUtils.rm_rf, unlink...) and judges their literal targets like
+// rm -r does; a target that is not a literal is held. Commands passed to system, subprocess, child_process or
+// backticks are read as shell text when they are literals. PowerShell and cmd text (powershell -Command, pwsh -c,
+// cmd /c, or typed directly): Remove-Item and its aliases with -Recurse, /s or a wildcard, and
+// [IO.Directory]::Delete(path, $true); other statements go through the map as commands. -EncodedCommand is held
+// without being read.
 //
 // WHAT IT DOES NOT READ (documented limits, see docs): aliases and shell functions defined outside the command
-// line; the contents of script files (bash script.sh, ./deploy.sh, make, just), Makefiles; code in other languages
-// (python -c, node -e); PowerShell and cmd; values of variables set elsewhere; globs (they stay unexpanded);
-// encoded payloads (a decoder piped into a shell is held without being read); anything past depth 3 of nested
-// shells or 24 levels of nesting; symlinks. A program name that is not a literal is held only when some word of
-// the command is a keyword (destroy, delete, drop, truncate, reset, force, rm).
+// line; the contents of script files (bash script.sh, ./deploy.sh, python x.py, node x.js, pwsh -File x.ps1, make,
+// just), Makefiles; inline code beyond the calls above (eval of built strings, getattr tricks, other libraries, a
+// database driver dropping a table); PowerShell beyond the statements above (functions, other cmdlets that delete,
+// .NET calls other than Directory.Delete); values of variables set elsewhere; globs (they stay unexpanded); encoded
+// payloads (a decoder piped into a shell is held without being read); anything past depth 3 of nested shells or 24
+// levels of nesting; symlinks. A program name that is not a literal is held only when some word of the command is
+// a keyword (destroy, delete, drop, truncate, reset, force, rm).
 //
 // Every rule has positive, negative and evasion vectors in sdk/shellmap.test.mjs.
-export const SHELL_MAP_VERSION = '2026-10-10.1';
+export const SHELL_MAP_VERSION = '2026-10-10.2';
 
 const SENT = '\uE000'; // marks a piece of a word whose value is not known (a variable, a substitution, a glob)
 
@@ -145,7 +157,26 @@ export function normPath(p) {
   return '/' + out.join('/');
 }
 const isInside = (p, root) => p === root || p.startsWith(root === '/' ? '/' : root + '/');
-const base = (p) => noTrailingSlash(String(p)).split('/').pop();
+// Windows paths. C:\x and C:/x become /c/x, \\server\share\x becomes /unc:/server/share/x, %TEMP%\x (and $env:TEMP)
+// becomes /%temp%/x. /mnt/c/x (WSL) and /c/x (Git Bash) are the same folder as C:\x. Windows ignores case, so these
+// spellings are compared in lower case.
+const WIN_TEMP = '/%temp%';
+/** a Windows absolute path as a normalised POSIX one in lower case, or null when the text is not one */
+function winAbs(s) {
+  s = String(s);
+  let m = /^([A-Za-z]):([\\/]|$)/.exec(s);
+  if (m) return normPath('/' + m[1] + '/' + s.slice(2).replace(/\\/g, '/')).toLowerCase();
+  if (/^(\\\\|\/\/)[^\\/]/.test(s)) return normPath('/unc:/' + s.slice(2).replace(/\\/g, '/')).toLowerCase();
+  m = /^(%(temp|tmp)%|\$env:(temp|tmp))([\\/]|$)/i.exec(s);
+  if (m) return normPath(WIN_TEMP + '/' + s.slice(m[1].length).replace(/\\/g, '/')).toLowerCase();
+  return null;
+}
+/** one spelling for a path on a Windows drive (/mnt/c/x, /c/x: /c/x in lower case); other paths are unchanged */
+const driveCanon = (p) => {
+  const m = p && /^\/(?:mnt\/)?([A-Za-z])(\/|$)/.exec(p);
+  return m ? ('/' + m[1] + p.slice(m[0].length - (m[2] ? 1 : 0))).toLowerCase() : p;
+};
+const base =(p) => noTrailingSlash(String(p)).split('/').pop();
 const lc = (s) => String(s).toLowerCase();
 
 /** tiny glob as in the server map: * = one segment, ** = any depth, {a,b} alternatives */
@@ -1318,6 +1349,11 @@ function pipeItems(stdin, st) {
 // ---- how a path is judged for deleting
 const SYSTEM_DIRS = new Set(['bin', 'boot', 'dev', 'etc', 'lib', 'lib32', 'lib64', 'libx32', 'opt', 'proc', 'root', 'run', 'sbin', 'srv', 'sys', 'usr', 'var', 'home', 'mnt', 'media', 'Users', 'System', 'Library', 'Applications', 'Volumes', 'private', 'opt', 'snap', 'nix']);
 const TMP_DIRS = ['/tmp', '/var/tmp', '/private/tmp', '/dev/shm', '/private/var/folders', '/var/folders'];
+// Windows: C:\tmp, C:\temp, C:\Windows\Temp, a user's AppData\Local\Temp and %TEMP% are shared temporary directories
+const WIN_TMP = /^(\/%temp%|\/[a-z]\/(?:tmp|temp|windows\/temp|users\/[^/]+\/appdata\/local\/temp))(\/|$)/;
+const WIN_SYSTEM = /^\/[a-z]\/(windows|users|program files|program files \(x86\)|programdata|system32|perflogs|recovery|\$recycle\.bin)$/;
+/** the shared temporary directory a (drive-canonical) path is in or is, or null */
+const tmpRoot = (n) => TMP_DIRS.find((d) => isInside(n, d)) ?? WIN_TMP.exec(n)?.[1] ?? null;
 const DISPOSABLE = /^(node_modules|dist|build|out|target|coverage|tmp|temp|\.next|\.nuxt|\.svelte-kit|\.output|\.cache|\.turbo|\.parcel-cache|\.vite|\.angular|\.gradle|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.tox|\.nox|\.eggs|__pycache__|\.venv|venv|\.idea|\.dart_tool|\.terraform|\.serverless|\.vercel|\.wrangler|DerivedData|Pods|[^/]*\.egg-info|[^/]*\.pyc|[^/]*\.log|[^/]*\.tsbuildinfo)$/;
 
 const short = (n) => (n.length > 80 ? n.slice(0, 80) + '...' : n);
@@ -1330,16 +1366,21 @@ function classifyPath(n, st, under) {
     return `a path on another machine (${short(n)})`;
   }
   if (n === '/') return under ? `a path outside the project (/)` : 'the filesystem root';
-  if (!under && home && n === home) return 'your home directory';
+  const nc = driveCanon(n), rc = root && driveCanon(root);
+  if (!under && home && nc === driveCanon(home)) return 'your home directory';
   const parts = n.split('/');
   if (!under && parts.length === 2 && SYSTEM_DIRS.has(parts[1])) return `a system directory (${n})`;
+  if (!under && /^\/[a-z]$/.test(nc)) return `the whole ${nc[1].toUpperCase()}: drive`;
+  if (!under && WIN_SYSTEM.test(nc)) return `a system directory (${short(n)})`;
+  if (!under && /^\/unc:(\/[^/]+){1,2}$/.test(nc)) return `a network share (${short(n)})`;
   if (st.remote === 'container') return null;
-  if (TMP_DIRS.includes(n)) return under ? null : `the shared temporary directory (${n})`;
-  if (TMP_DIRS.some((t) => isInside(n, t))) return null;
-  if (root && isInside(n, root)) {
-    if (n === root) return under ? null : 'the whole project directory';
-    const rel = n.slice(root.length + 1);
-    if (rel === '.git' || /^\.git\/(objects|refs|HEAD)(\/|$)/.test(rel)) return 'the git history of this project';
+  const t = tmpRoot(nc);
+  if (t === nc) return under ? null : `the shared temporary directory (${short(n)})`;
+  if (t) return null;
+  if (rc && isInside(nc, rc)) {
+    if (nc === rc) return under ? null : 'the whole project directory';
+    const rel = nc.slice(rc.length + 1);
+    if (rel === '.git' || /^\.git\/(objects|refs|HEAD)(\/|$)/i.test(rel)) return 'the git history of this project';
     return null;
   }
   if (!root) return null;
@@ -1349,7 +1390,7 @@ function classifyPath(n, st, under) {
 function pathRisk(w, st) {
   const cwd = st.cwd;
   if (w.under !== undefined) {
-    const d = w.under.startsWith('/') ? normPath(w.under) : cwd ? normPath(cwd + '/' + w.under) : null;
+    const d = winAbs(w.under) ?? (w.under.startsWith('/') ? normPath(w.under) : cwd ? normPath(cwd + '/' + w.under) : null);
     return d ? classifyPath(d, st, true) : 'a relative path in a working directory the guard does not know';
   }
   const s = w.s;
@@ -1364,9 +1405,14 @@ function pathRisk(w, st) {
   // a trailing * means everything inside the directory in front of it
   // (what /^(.*?)\/*(\*+|\.\*)$/ captured, without its quadratic backtracking on long runs of slashes)
   const front = trailingGlobDir(s);
-  const dir = front !== null ? (front === '' ? (s.startsWith('/') ? '/' : '.') : front) : s;
+  let dir = front !== null ? (front === '' ? (s.startsWith('/') ? '/' : '.') : front) : s;
+  if (/^[A-Za-z]:[^\\/]/.test(dir)) return `a path relative to the current folder of drive ${dir[0].toUpperCase()}:, which the guard does not know`;
+  if (/^\\[^\\]/.test(dir)) return `a path from the root of the current Windows drive (${short(dir)})`;
+  if (/(^|\\)\.\.(\\|$)/.test(dir)) dir = dir.replace(/\\/g, '/'); // ..\..\x climbs out on Windows
+  const wa = winAbs(dir);
   let n;
-  if (dir.startsWith('/')) n = normPath(dir);
+  if (wa) n = wa;
+  else if (dir.startsWith('/')) n = normPath(dir);
   else if (cwd) n = normPath(cwd + '/' + dir);
   else return !dir.split('/').includes('..') && DISPOSABLE.test(base(dir)) ? null : 'a relative path in a working directory the guard does not know';
   return classifyPath(n, st, false);
@@ -1489,7 +1535,7 @@ for (const sh of SHELLS) {
   };
 }
 UNWRAP.python = UNWRAP.python3 = UNWRAP.node = UNWRAP.ruby = UNWRAP.perl = UNWRAP.php = (a, cx, st) => {
-  // code in other languages is not read; only a decoder piped straight into an interpreter is held
+  // inline code is skimmed by the sh.inline-code rule; here only a decoder piped straight into an interpreter is held
   const sin = cx.stdin;
   if (sin?.kind === 'pipe' && (sin.names || []).some((n) => DECODERS.has(n)) && !a.length) hit(st, 'sh.decode-exec', 'Decoded text is piped into an interpreter, so the guard cannot read what it runs. Held without being read.', (cx.argv || []).map((w) => w.raw ?? w.s).join(' '));
   return null;
@@ -1694,10 +1740,10 @@ UNWRAP.alias = (a, cx, st) => {
   return null;
 };
 UNWRAP.cd = UNWRAP.pushd = (a, cx, st) => {
-  const t = a.filter((x) => !/^-[LPe@]*$/.test(x.s))[0];
+  const t = a.filter((x) => !/^-[LPe@]*$/.test(x.s) && !(cx.shell === 'cmd' && /^\/d$/i.test(x.s)))[0];
   if (!t) { st.cwd = st.o.home ?? null; return null; }
   if (!t.lit || t.s === '-' || t.glob) { st.cwd = null; return null; }
-  st.cwd = t.s.startsWith('/') ? normPath(t.s) : st.cwd ? normPath(st.cwd + '/' + t.s) : null;
+  st.cwd = winAbs(t.s) ?? (t.s.startsWith('/') ? normPath(t.s) : st.cwd ? normPath(st.cwd + '/' + t.s) : null);
   return null;
 };
 UNWRAP.popd = (a, cx, st) => { st.cwd = null; return null; };
@@ -2482,6 +2528,344 @@ function findRule(cx) {
   }
   return null;
 }
+
+// ---- inline code: python -c, node -e, ruby -e, perl -e, php -r. A scan for known calls, not a parser of those
+// languages: it finds calls that delete files and judges their literal targets like rm -r does (inside the project
+// passes); a target that is not a literal is held. Literal commands given to system, subprocess, child_process and
+// backticks are read as shell text.
+const INLINE_MAX = 65_536;
+const argvText = (cx) => (cx.argv || []).map((w) => w.raw ?? w.s).join(' ');
+const inlineLang = (prog) => (/^(python[0-9.]*|py|pypy[0-9.]*)$/.test(prog) ? 'python' : ['node', 'nodejs', 'bun'].includes(prog) ? 'node' : ['ruby', 'perl', 'php'].includes(prog) ? prog : null);
+const NODE_VAL = OPT_SET('-r --require --import --loader --experimental-loader -C --conditions --env-file --title --stack-size');
+/** the inline code pieces a command line runs, as text (empty when it runs a script file, a module or nothing known) */
+function inlineCode(lang, args, cx) {
+  const out = [];
+  let file = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i], s = a.s;
+    if (s === '--') { file = !out.length && i + 1 < args.length && args[i + 1].s !== '-'; break; }
+    if (s === '-') break;
+    if (s[0] !== '-' || s.length < 2) { file = !out.length; break; }
+    if (lang === 'python') {
+      if (s.startsWith('--')) continue;
+      for (let k = 1; k < s.length; k++) {
+        const ch = s[k];
+        if (ch === 'c') { const rest = s.slice(k + 1); if (rest) out.push(rest); else if (args[i + 1]) out.push(args[i + 1].s); return out; }
+        if (ch === 'm') return out; // a module: not read
+        if (ch === 'W' || ch === 'X' || ch === 'Q') { if (k === s.length - 1) i++; break; }
+      }
+      continue;
+    }
+    if (lang === 'node') {
+      const eq = s.indexOf('=');
+      if (eq > 0 && /^--(eval|print)$/.test(s.slice(0, eq))) { out.push(s.slice(eq + 1)); return out; }
+      if (/^(-e|-p|-pe|-ep|--eval|--print)$/.test(s)) { if (args[i + 1]) out.push(args[i + 1].s); return out; }
+      if (NODE_VAL.has(s)) i++;
+      continue;
+    }
+    if (lang === 'php') {
+      if (s === '-r') { if (args[i + 1]) out.push(args[i + 1].s); return out; }
+      if (s === '-f') { file = true; break; }
+      if (/^-[cdzt]$/.test(s)) i++;
+      continue;
+    }
+    // ruby and perl: -e (perl also -E) may come several times and in clusters such as -ne or -le
+    if (/^-[A-Za-z]*e$/.test(s) || (lang === 'perl' && /^-[A-Za-z]*E$/.test(s))) { if (args[i + 1]) out.push(args[++i].s); continue; }
+  }
+  if (!out.length && !file && cx.stdin?.text != null) out.push(cx.stdin.text); // python - <<EOF, node < <<EOF ...
+  return out;
+}
+const quoteEnd = (s, j) => { const q = s[j]; for (let k = j + 1; k < s.length; k++) { if (s[k] === '\\') { k++; continue; } if (s[k] === q) return k; } return s.length; };
+/** the text inside the bracket at s[i] and the index of its match, skipping quoted strings */
+function bracketSpan(s, i) {
+  const open = s[i], close = { '(': ')', '[': ']', '{': '}' }[open];
+  let d = 0;
+  for (let j = i; j < s.length; j++) {
+    const c = s[j];
+    if (c === '"' || c === "'" || c === '`') { j = quoteEnd(s, j); continue; }
+    if (c === open) d++;
+    else if (c === close && --d === 0) return [s.slice(i + 1, j), j];
+  }
+  return [s.slice(i + 1), s.length];
+}
+/** split on the commas that are not inside brackets or strings */
+function topSplit(s) {
+  const out = [];
+  let d = 0, from = 0;
+  for (let j = 0; j < s.length; j++) {
+    const c = s[j];
+    if (c === '"' || c === "'" || c === '`') { j = quoteEnd(s, j); continue; }
+    if ('([{'.includes(c)) d++;
+    else if (')]}'.includes(c)) d--;
+    else if (c === ',' && !d) { out.push(s.slice(from, j)); from = j + 1; }
+  }
+  out.push(s.slice(from));
+  return out.map((x) => x.trim()).filter(Boolean);
+}
+/** the same text with the inside of every string literal blanked, so a call named inside a string is not a call */
+function maskStrings(s) {
+  let out = '';
+  for (let j = 0; j < s.length; j++) {
+    const c = s[j];
+    if (c !== '"' && c !== "'" && c !== '`') { out += c; continue; }
+    const e = quoteEnd(s, j);
+    out += c + ' '.repeat(Math.max(0, Math.min(e, s.length) - j - 1)) + (e < s.length ? s[e] : '');
+    j = e;
+  }
+  return out;
+}
+/** the value of a string literal in inline code, or null when the text is not one whole literal with a known value */
+function strLit(t, lang) {
+  const m = /^([rRbBuUfF]{0,2})(['"`])([\s\S]*)$/.exec(t.trim());
+  if (!m || (m[1] && lang !== 'python')) return null;
+  const q = m[2], body = m[3];
+  if (!body.endsWith(q) || quoteEnd(q + body, 0) !== body.length) return null;
+  const v = body.slice(0, -1);
+  if (v.includes(SENT)) return null;
+  if (/[fF]/.test(m[1]) && v.includes('{')) return null;
+  if (q === '`' && (lang !== 'node' || v.includes('${'))) return null; // ruby, perl, php: backticks run a command
+  if (lang !== 'python' && lang !== 'node' && q === '"' && /#\{|\$[\w{]|@\w/.test(v)) return null; // interpolation
+  return /[rR]/.test(m[1]) || (q === "'" && (lang === 'perl' || lang === 'php' || lang === 'ruby')) ? v.replace(/\\(['\\])/g, '$1') : v.replace(/\\(.)/g, '$1');
+}
+const UNKNOWN_PATH = { s: SENT, lit: false, glob: false, raw: '?' };
+/** a delete target as a word for pathRisk */
+function inlineTarget(t, lang) {
+  const p = /^(?:pathlib\s*\.\s*)?(?:Pure)?(?:Posix|Windows)?Path\s*\(([\s\S]*)\)$/.exec(t) || /^new\s+File\s*\(([\s\S]*)\)$/.exec(t);
+  const v = strLit(p ? p[1] : t, lang);
+  return v === null ? UNKNOWN_PATH : { s: v, lit: true, glob: /[*?]/.test(v), raw: v };
+}
+const INLINE_DEL = /(?<![\w$])(?:(?:shutil\s*\.\s*)?rmtree|remove_tree|(?:os\s*\.\s*)?removedirs|os\s*\.\s*(?:remove|unlink|rmdir)|(?:fs\s*\.\s*)?(?:promises\s*\.\s*)?(?:rm|rmdir|unlink)(?:Sync)?|rimraf(?:\s*\.\s*sync)?|(?:fs|fse|fsExtra|fs_extra|fsx|extra)\s*\.\s*(?:remove|removeSync|emptyDir|emptyDirSync)|(?:removeSync|emptyDirSync|emptyDir)|FileUtils\s*(?:\.|::)\s*(?:rm_rf|rm_r|rm_f|rm|remove_dir|remove_entry_secure|remove_entry|rmtree|remove|rmdir)|(?:File|Dir)\s*(?:\.|::)\s*(?:delete|unlink|rmdir))(?=\s*\(|[ \t]+['"\w$@\[])/g;
+const INLINE_EXEC = /(?<![\w$])(?:os\s*\.\s*(?:system|popen|exec[lv]p?e?|spawn[lv]p?e?)|subprocess\s*\.\s*(?:run|call|check_call|check_output|Popen|getoutput|getstatusoutput)|(?:child_process\s*\.\s*)?(?:execSync|spawnSync|execFileSync|execFile|exec|spawn)|system|popen|shell_exec|passthru|proc_open|Kernel\s*\.\s*system|IO\s*\.\s*popen|Open3\s*\.\s*\w+)(?=\s*\(|[ \t]+['"\w$@\[])/g;
+const shq = (s) => "'" + s.replace(/'/g, "'\\''") + "'";
+/** the argument text after a call name that ends at `at`: inside its parentheses, or up to the end of the statement */
+function callArgs(code, at) {
+  let j = at;
+  while (j < code.length && /\s/.test(code[j])) j++;
+  if (code[j] === '(') return bracketSpan(code, j)[0];
+  let e = j;
+  for (; e < code.length && !/[;\n]/.test(code[e]); e++) { if (code[e] === '"' || code[e] === "'") e = quoteEnd(code, e); }
+  const t = code.slice(j, e), k = t.search(/\s(?:if|unless|or|and)\b/); // perl and ruby: unlink $f if -e $f
+  return k < 0 ? t : t.slice(0, k);
+}
+function scanInline(code, lang, st) {
+  if (code.length > INLINE_MAX) return `Inline ${lang} code too long for the guard to read. Held without being read.`;
+  const masked = maskStrings(code), via = `inline ${lang} code`;
+  const sub = fork(st, { via: st.via ?? via });
+  const keyword = () => (code.toLowerCase().match(/[a-z0-9]+/g) || []).some((x) => KEYWORDS.has(x));
+  let reason = null, calls = 0;
+  const TOO_MANY = `Inline ${lang} code with too many calls for the guard to read. Held without being read.`;
+  for (const m of masked.matchAll(INLINE_EXEC)) {
+    if (++calls > 50) return TOO_MANY;
+    if (lang === 'python' && m[0] === 'exec') continue; // the Python builtin runs Python, not a shell
+    const pieces = topSplit(callArgs(code, m.index + m[0].length));
+    const words = [];
+    let known = pieces.length > 0;
+    for (const p of pieces) {
+      if (/^\w+\s*=/.test(p) && !p.startsWith('[')) break; // shell=True, cwd=..., an options object follows
+      if (p.startsWith('[')) { for (const e of topSplit(bracketSpan(p, 0)[0])) { const v = strLit(e, lang); if (v === null) known = false; else words.push(v); } continue; }
+      if (p.startsWith('{')) break;
+      const v = strLit(p, lang);
+      if (v === null) { known = false; break; }
+      words.push(v);
+      if (words.length === 1 && pieces.length > 1 && !pieces[1].startsWith('[') && !/^(perl|ruby|php)$/.test(lang)) break; // exec(cmd, options)
+    }
+    if (known && words.length) evalScript(words.length === 1 ? words[0] : words.map(shq).join(' '), sub, {}, via);
+    else if (keyword()) reason ??= `Inline ${lang} code runs a command built from a value the guard cannot see, in code with a dangerous word in it.`;
+  }
+  if (lang === 'ruby' || lang === 'perl' || lang === 'php') { // backticks, qx{} and %x() run a shell command
+    for (const m of code.matchAll(/`([^`]*)`|\bqx\s*\{([^}]*)\}|\bqx\s*\(([^)]*)\)|%x\s*\(([^)]*)\)|%x\s*\{([^}]*)\}/g)) {
+      const t = m.slice(1).find((x) => x !== undefined) ?? '';
+      if (!t.includes(SENT) && !/#\{|\$[\w{]/.test(t)) evalScript(t, sub, {}, via);
+      else if (keyword()) reason ??= `Inline ${lang} code runs a command built from a value the guard cannot see, in code with a dangerous word in it.`;
+    }
+  }
+  for (const m of masked.matchAll(INLINE_DEL)) {
+    if (++calls > 50) return TOO_MANY;
+    const pieces = topSplit(callArgs(code, m.index + m[0].length));
+    let targets;
+    if (!pieces.length) { // Path("x").unlink(): the target is the object in front
+      const recv = /(?:(?:pathlib\s*\.\s*)?(?:Pure)?(?:Posix|Windows)?Path\s*\(([^()]*)\))\s*\.\s*$/.exec(code.slice(0, m.index));
+      targets = [recv ? inlineTarget(recv[1], lang) : UNKNOWN_PATH];
+    } else {
+      const list = lang === 'perl' || lang === 'php' && /unlink/.test(m[0]) ? pieces : pieces.slice(0, 1);
+      targets = [];
+      for (const p of list) {
+        if (p.startsWith('[')) targets.push(...topSplit(bracketSpan(p, 0)[0]).map((e) => inlineTarget(e, lang)));
+        else targets.push(inlineTarget(p, lang));
+      }
+    }
+    for (const t of targets) {
+      const r = pathRisk(t, st);
+      if (r) { reason ??= `Inline ${lang} code deletes ${r}.`; break; }
+    }
+  }
+  return reason;
+}
+rule('sh.inline-code', 'python -c, node -e, ruby -e, perl -e, php -r and code fed to them on standard input: rmtree, os.remove, fs.rmSync, rimraf, FileUtils.rm_rf, unlink and the like on a path outside the project or one built at run time; commands they run through system, subprocess or child_process are read as shell', 'python python2 python3 py pypy pypy3 node nodejs bun ruby perl php', (cx) => {
+  const lang = inlineLang(cx.prog);
+  if (!lang) return null;
+  const out = [];
+  for (const code of inlineCode(lang, cx.args, cx)) { const r = scanInline(code, lang, cx.st); if (r) out.push(r); }
+  return out.length ? out[0] : null;
+});
+
+// ---- PowerShell and cmd: powershell -Command, pwsh -c, cmd /c, or the same commands typed into the agent's shell.
+// A reading good enough to find deletes, not a full parser: quotes, $variables (unknown), $env:TEMP, %VAR%,
+// ; | & && || newlines, (..), $(..) and {..} blocks. Every statement goes through the map as a command.
+const PS_RECURSE = /^-r(e(c(u(r(se?)?)?)?)?)?(:\$?true)?$/i;
+const PS_ALIAS_RM = new Set(['remove-item', 'ri', 'rm', 'del', 'erase', 'rd', 'rmdir']);
+const PS_VAR = /(?:(env):)?([A-Za-z_][A-Za-z0-9_]*)(?::[A-Za-z_][A-Za-z0-9_]*)?/y, CMD_VAR = /%([A-Za-z_]\w*)%/y; // sticky: no copies
+const psParam = (name, full, min) => name.length >= min && full.startsWith(name);
+/** the statements of PowerShell (ps) or cmd text: [{words, piped, pipedRec}] */
+function winStatements(text, ps, out = [], nest = 0) {
+  let words = [], w = null, lit = true, piped = false, pipedRec = false;
+  const push = () => { if (w !== null) words.push({ s: w, lit, glob: false, raw: w }); w = null; lit = true; };
+  const add = (c, known = true) => { w = (w ?? '') + c; if (!known) lit = false; };
+  const end = (pipe) => {
+    push();
+    if (words.length) out.push({ words, piped, pipedRec });
+    pipedRec = pipe && (pipedRec || words.some((x) => x.lit && PS_RECURSE.test(x.s)));
+    piped = pipe; words = [];
+  };
+  const inner = (i) => { const [t, j] = bracketSpan(text, i); if (nest < 24) winStatements(t, ps, out, nest + 1); return j; };
+  const psVar = (i) => { // text[i] is $; returns the index of the last character used
+    if (text[i + 1] === '(') { add(SENT, false); return inner(i + 1); }
+    if (text[i + 1] === '{') { const e = text.indexOf('}', i); add(SENT, false); return e < 0 ? text.length : e; }
+    PS_VAR.lastIndex = i + 1;
+    const m = PS_VAR.exec(text);
+    if (!m) { add('$'); return i; }
+    if (m[1] && /^(temp|tmp)$/i.test(m[2])) add('%TEMP%');
+    else if (!m[1] && /^(true|false|null)$/i.test(m[2])) add('$' + m[2]);
+    else add(SENT, false);
+    return i + m[0].length;
+  };
+  const cmdVar = (i) => { CMD_VAR.lastIndex = i; const m = CMD_VAR.exec(text); if (!m) { add('%'); return i; } if (/^(temp|tmp)$/i.test(m[1])) add('%TEMP%'); else add(SENT, false); return i + m[0].length - 1; };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === SENT) { add(c, false); continue; }
+    if (c === ' ' || c === '\t' || c === '\r') { push(); continue; }
+    if (c === '\n' || c === ';') { end(false); continue; }
+    if (c === '|') { if (text[i + 1] === '|') { i++; end(false); } else end(true); continue; }
+    if (c === '&') { if (text[i + 1] === '&') i++; end(false); continue; }
+    if (ps) {
+      if (c === '#' && w === null) { const e = text.indexOf('\n', i); i = e < 0 ? text.length : e - 1; continue; }
+      if (c === '`') { if (text[i + 1] !== '\n') add(text[i + 1] ?? ''); i++; continue; }
+      if (c === '$') { i = psVar(i); continue; }
+      if (c === '(') { add(SENT, false); i = inner(i); continue; }
+      if (c === '{') { push(); i = inner(i); continue; }
+      if (c === "'") { const e = text.indexOf("'", i + 1) < 0 ? text.length : text.indexOf("'", i + 1); add(text.slice(i + 1, e)); w ??= ''; i = e; if (text[i + 1] === "'") add("'"); continue; }
+      if (c === '"') {
+        w ??= '';
+        let j = i + 1;
+        for (; j < text.length && text[j] !== '"'; j++) {
+          if (text[j] === '`') { add(text[j + 1] ?? ''); j++; } else if (text[j] === '$') j = psVar(j); else add(text[j], text[j] !== SENT);
+        }
+        i = j; continue;
+      }
+    } else {
+      if (c === '^') { add(text[i + 1] ?? ''); i++; continue; }
+      if (c === '%') { i = cmdVar(i); continue; }
+      if (c === '(' || c === ')') { end(false); continue; }
+      if (c === '"') { w ??= ''; let j = i + 1; for (; j < text.length && text[j] !== '"'; j++) { if (text[j] === '%') j = cmdVar(j); else add(text[j], text[j] !== SENT); } i = j; continue; }
+    }
+    add(c);
+  }
+  end(false);
+  return out;
+}
+/** a PowerShell argument written in .NET call syntax: 'x', "x" or a variable */
+function psLiteral(t) {
+  t = t.trim();
+  let m = /^'((?:[^']|'')*)'$/.exec(t);
+  if (m) return { s: m[1].replace(/''/g, "'"), lit: true, glob: false, raw: t };
+  m = /^"([^"$`]*)"$/.exec(t);
+  if (m && !m[1].includes(SENT)) return { s: m[1], lit: true, glob: false, raw: t };
+  return UNKNOWN_PATH;
+}
+function winScript(text, st, ps, label) {
+  if (st.depth >= 3) { st.res.unreadable = true; return; }
+  const s2 = fork(st, { depth: st.depth + 1, via: st.via ?? label });
+  if (text.length > INLINE_MAX) { hit(s2, 'sh.win-delete', `${ps ? 'PowerShell' : 'cmd'} text too long for the guard to read. Held without being read.`, text.slice(0, 200)); return; }
+  if (ps) {
+    for (const m of text.matchAll(/\[(?:System\.)?IO\.Directory\]\s*::\s*Delete\s*\(/gi)) {
+      const [inside] = bracketSpan(text, m.index + m[0].length - 1);
+      const p = topSplit(inside);
+      if (!/^\$true$/i.test(p[1] ?? '')) continue;
+      const r = pathRisk(psLiteral(p[0] ?? ''), s2);
+      if (r) hit(s2, 'sh.win-delete', `[IO.Directory]::Delete with $true recursively deletes ${r}.`, m[0] + inside + ')');
+    }
+  }
+  for (const { words, piped, pipedRec } of winStatements(text, ps)) {
+    if (ps && words[0].lit && PS_ALIAS_RM.has(lc(words[0].s))) words[0] = { ...words[0], s: 'Remove-Item' };
+    runExec(words, { stdin: piped ? { kind: 'pipe', names: [], rec: pipedRec } : { kind: 'none' }, redirs: [], shell: ps ? 'ps' : 'cmd' }, s2);
+  }
+}
+const PS_VALS = [['executionpolicy', 2], ['ep', 2], ['windowstyle', 1], ['version', 1], ['inputformat', 1], ['outputformat', 1], ['configurationname', 4], ['workingdirectory', 2], ['wd', 2], ['psconsolefile', 2], ['settingsfile', 2], ['custompipename', 2]];
+UNWRAP.powershell = UNWRAP.pwsh = UNWRAP.powershell_ise = (a, cx, st) => {
+  const run = (rest) => {
+    if (rest.length === 1 && rest[0].s === '-') { if (cx.stdin?.text != null) winScript(cx.stdin.text, st, true, cx.prog); return null; }
+    if (rest.length) winScript(rest.map((x) => x.s).join(' '), st, true, cx.prog);
+    return null;
+  };
+  for (let i = 0; i < a.length; i++) {
+    const s = a[i].s;
+    if (s.length > 1 && (s[0] === '-' || s[0] === '/')) {
+      const name = s.slice(1).replace(/:[\s\S]*$/, '').toLowerCase();
+      if (name === 'e' || name === 'ec' || psParam(name, 'encodedcommand', 2)) {
+        hit(st, 'sh.decode-exec', 'An encoded PowerShell command (-EncodedCommand) is base64 text the guard does not decode. Held without being read.', argvText(cx));
+        return null;
+      }
+      if (psParam(name, 'command', 1)) return run(a.slice(i + 1));
+      if (psParam(name, 'file', 1)) return null; // a script file: not read
+      if (!s.includes(':') && PS_VALS.some(([v, min]) => psParam(name, v, min))) i++;
+      continue;
+    }
+    return cx.prog === 'pwsh' ? null : run(a.slice(i)); // powershell.exe runs a bare argument as a command, pwsh as a file
+  }
+  if (cx.stdin?.text != null) winScript(cx.stdin.text, st, true, cx.prog);
+  return null;
+};
+UNWRAP.cmd = (a, cx, st) => {
+  for (let i = 0; i < a.length; i++) {
+    const s = a[i].s, m = /^\/\/?([ckCK])([\s\S]*)$/.exec(s);
+    if (m) { winScript([m[2], ...a.slice(i + 1).map((x) => x.s)].filter(Boolean).join(' '), st, false, 'cmd'); return null; }
+    if (/^\/\/?[A-Za-z]/.test(s)) continue; // /q /d /s /e:on /v:on
+    return null;
+  }
+  return null;
+};
+rule('sh.win-delete', 'PowerShell and cmd: Remove-Item (ri, rm, del, erase, rd, rmdir) with -Recurse, /s or a wildcard on a path outside the project or one built at run time; [IO.Directory]::Delete(path, $true); powershell -Command and cmd /c text is read as commands', 'remove-item ri del erase rd rmdir', (cx) => {
+  const st = cx.st, args = cx.args, onlyRecursive = cx.prog === 'rd' || cx.prog === 'rmdir';
+  let rec = false, wild = false;
+  const targets = [];
+  const list = (a) => (a.lit ? a.s.split(',').filter(Boolean).map((p) => ({ s: p, lit: true, glob: /[*?]/.test(p), raw: p })) : [a]);
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i], s = a.s;
+    if (a.lit && PS_RECURSE.test(s)) { rec = true; continue; }
+    if (a.lit && /^\/[A-Za-z](:\S*)?$/.test(s)) { if (/^\/s$/i.test(s)) rec = true; continue; } // cmd switches: /s /q /f
+    const m = a.lit && /^-([A-Za-z]+)(:([\s\S]*))?$/.exec(s);
+    if (m) {
+      const name = m[1].toLowerCase();
+      if (psParam(name, 'path', 2) || psParam(name, 'literalpath', 1) || name === 'lp' || name === 'pspath') {
+        const v = m[2] ? { ...a, s: m[3], raw: m[3] } : args[++i];
+        if (v) targets.push(...list(v));
+        continue;
+      }
+      if (psParam(name, 'include', 1) || psParam(name, 'filter', 2)) { wild = true; if (!m[2]) i++; continue; }
+      if (!m[2] && (psParam(name, 'exclude', 2) || psParam(name, 'credential', 2) || psParam(name, 'stream', 2) || /^(erroraction|ea|warningaction|wa|informationaction|infa|errorvariable|ev|outvariable|ov|outbuffer|ob|pipelinevariable|pv)$/.test(name))) i++;
+      continue;
+    }
+    targets.push(...list(a));
+  }
+  wild ||= targets.some((t) => t.lit && /[*?]/.test(t.s));
+  if (!targets.length) return cx.shell === 'ps' && cx.stdin?.kind === 'pipe' && (rec || cx.stdin.rec) ? 'Recursively deletes the paths piped into it, which the guard cannot see.' : null;
+  if (!rec && (onlyRecursive || !wild)) return null;
+  for (const t of targets) {
+    const r = pathRisk(t, st);
+    if (r) return rec ? `Recursively deletes ${r}.` : `Deletes everything a wildcard matches in ${r}.`;
+  }
+  return null;
+});
 rule('sh.disk', 'dd of=/dev/..., mkfs, wipefs, blkdiscard, sgdisk, diskutil erase, and writes to a disk device', 'dd mkfs wipefs blkdiscard sgdisk diskutil fdisk parted', (cx) => {
   if (cx.prog === 'dd') {
     const of = cx.args.find((x) => x.s.startsWith('of='));
@@ -2505,7 +2889,7 @@ const BY_PROG = new Map();
 for (const r of R) for (const p of r.progs) { if (!BY_PROG.has(p)) BY_PROG.set(p, []); BY_PROG.get(p).push(r); }
 const MKFS = /^(mkfs(\..+)?|mke2fs|mkswap|newfs)$/;
 function runRules(prog, cx) {
-  const key = MKFS.test(prog) ? 'mkfs' : prog;
+  const key = MKFS.test(prog) ? 'mkfs' : /^python\d+\.\d+$/.test(prog) ? 'python3' : prog;
   for (const r of BY_PROG.get(key) || []) {
     if (cx.st.o.disable.has(r.id)) continue;
     let out = null;

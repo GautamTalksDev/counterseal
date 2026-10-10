@@ -288,7 +288,8 @@ real key (S1). Test: *status flags a changed script*.
 **G10. A command the map does not read.** The map reads shell text with a real parser (quotes, escapes, `;` `&&` `|`,
 groups, loops, here-documents, substitutions, brace expansion, simple variables on the line, `cd`, `sudo` `env` `xargs`
 `find -exec` `sh -c` `eval` `ssh` `docker exec` `kubectl exec` `npx` and `package.json` scripts). Its documented gaps are
-aliases and functions defined elsewhere, script files and Makefiles, code in other languages, PowerShell and `cmd`, encoded
+aliases and functions defined elsewhere, script files and Makefiles, code in other languages and PowerShell or `cmd` beyond
+a skim for known delete calls (`sh.inline-code`, `sh.win-delete`), encoded
 payloads, globs, symlinks and shells nested deeper than three; each one is a `GAP` vector in `sdk/shellmap.vectors.txt`
 and is listed in the docs. A decoder piped into a shell or `eval` is held unread (`sh.decode-exec`); a program name built
 at run time inside a command that has a dangerous word in it is held (`sh.dynamic-program`); text that does not parse is

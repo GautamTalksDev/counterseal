@@ -3,6 +3,30 @@
 All notable changes to Counterseal. The CLI follows [Semantic Versioning](https://semver.org/); the hosted service and
 the self-hosted Worker change together with this repository (see [docs/DEPLOY.md](docs/DEPLOY.md) for migrations).
 
+## Unreleased
+
+### Fixed
+
+- **Guard: shell map `2026-10-10.2`, 29 rules.** Three gaps a replay test found, where a destructive command passed
+  without a hold:
+  - **Inline code** (new rule `sh.inline-code`). `python -c`, `node -e`/`-p`/`--eval`, `ruby -e`, `perl -e`, `php -r`
+    and code fed to them on standard input (`python - <<EOF`) are skimmed for calls that delete files (`shutil.rmtree`,
+    `os.remove`, `os.unlink`, `os.rmdir`, `os.removedirs`, `Path.unlink`, `Path.rmdir`, `fs.rm`, `fs.rmSync`,
+    `fs.unlink`, `rimraf`, fs-extra `remove` and `emptyDir`, `FileUtils.rm_rf`, `File.delete`, `unlink`, `rmdir`). A
+    literal target is judged like `rm -r` (inside the project passes); a target that is not a literal is held. Literal
+    commands given to `os.system`, `subprocess`, `child_process`, `system` and backticks are read as shell text. The
+    incident `python -c "import os,shutil; shutil.rmtree('C:/tmp',ignore_errors=True)"` is now held.
+  - **PowerShell and cmd** (new rule `sh.win-delete`). `Remove-Item` and its aliases (`ri`, `rm`, `del`, `erase`, `rd`,
+    `rmdir`) with `-Recurse` (any prefix), `/s` or a wildcard on a path outside the project, a pipe into a recursive
+    delete, and `[IO.Directory]::Delete(path, $true)`. The text of `powershell -Command`, `pwsh -c` and `cmd /c` is read
+    statement by statement through the whole map. `-EncodedCommand` is held without being read (`sh.decode-exec`).
+  - **Windows paths.** `C:\x`, `C:/x`, `\\server\share` and `%TEMP%` are absolute paths, and `/mnt/c/x` and `/c/x` are
+    the same folder as `C:\x`. `C:\tmp`, `C:\temp`, `C:\Windows\Temp`, a user's `AppData\Local\Temp` and `%TEMP%` are
+    shared temporary directories; a drive root, `C:\Windows`, `C:\Users` and `C:\Program Files` are system directories.
+    A path inside a Windows project root still passes, as it does for `rm`.
+- The documented limits (header of `sdk/shellmap.mjs`, the docs page, the guide and the threat model) now say what is
+  skimmed and what is still not read: script files, other calls in inline code, PowerShell beyond the statements above.
+
 ## 0.3.0 (October 2026)
 
 Counterseal is LEASH, WITNESS and SIGIL merged into one product. The CLI is now the `counterseal` package on npm

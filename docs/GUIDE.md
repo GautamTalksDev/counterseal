@@ -246,7 +246,7 @@ The full contract (request fields, errors, budgets) is in [docs/PROTOCOL.md](PRO
 
 `counterseal guard` is the hook that does the asking for you. It reads each shell command your coding agent is about to
 run the way a shell does (quotes, `&&` and pipes, `sh -c`, `sudo`, `xargs`, `ssh`, `docker exec`, `package.json` scripts and
-more) and holds the ones on the **shell map** (version `2026-10-10.1`, 27 rules: `terraform destroy`, `git push --force`,
+more) and holds the ones on the **shell map** (version `2026-10-10.2`, 29 rules: `terraform destroy`, `git push --force`,
 `DROP TABLE` through `psql`, `railway volume delete`, `gh repo delete`, `rm -rf` outside the project, `kubectl delete`,
 `docker volume prune`, cloud CLI deletes, `curl` to a brokered API with a write method, and more) until you approve that
 exact command, once, with a passkey. Everything not on the map is left to the agent's own permission settings.
@@ -292,7 +292,8 @@ switched on, `guard install` adds no second hook to Claude Code.
   values, `PASSWORD=` style variables), the rule, why, the name of the folder (not its path) and the session id. Held
   commands are shown on your devices and may appear on the lock screen.
 - **What it does not see.** Aliases and functions defined outside the command line; the contents of script files and
-  Makefiles; code in other languages (`python -c`, `node -e`); PowerShell and `cmd`; encoded payloads (a decoder piped
+  Makefiles; code in other languages beyond a skim of inline code (`python -c`, `node -e`) for known delete calls; PowerShell
+  and `cmd` beyond Remove-Item, `[IO.Directory]::Delete` and the commands they run; encoded payloads (a decoder piped
   into a shell is held, not read); globs; symlinks. An agent that edits its own hook settings, the guard's files or its
   config, or runs the same effect through a script, is not stopped: **a seatbelt, not a sandbox**. For a hard stop, give
   the agent a Counterseal token instead of the real key.

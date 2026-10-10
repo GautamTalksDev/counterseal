@@ -383,3 +383,37 @@ test('MCP tools: policy hold patterns, SQL arguments, allow patterns, then the w
   // annotations are never read
   assert.equal(held({ server: 's', tool: 'delete_project', annotations: { readOnlyHint: true }, input: {} }).hold, true);
 });
+
+test("Windows project roots (WSL /mnt/c and Git Bash /c): inside the project passes, outside, temp and system folders are held", () => {
+  const INCIDENT = `python -c "import os,shutil; shutil.rmtree(\x27C:/tmp\x27,ignore_errors=True)"`;
+  for (const root of ["/mnt/c/Users/u/proj", "/c/Users/u/proj"]) {
+    const o = { cwd: root, root, home: root.replace(/\/proj$/, "") };
+    const held = (cmd) => classify(cmd, o).hits.map((h) => h.rule);
+    for (const cmd of [
+      "python -c \"import shutil; shutil.rmtree(\x27C:/Users/u/proj/build\x27)\"",
+      "Remove-Item -Recurse -Force \x27C:\\Users\\u\\proj\\dist\x27",
+      "rm -rf C:/Users/u/proj/out",
+      "rm -rf /mnt/c/users/u/PROJ/out",
+      "rm -rf ./build",
+      "powershell -Command \"Remove-Item -Recurse ./build\"",
+      "cmd /c \"rd /s /q C:\\Users\\u\\proj\\node_modules\"",
+      "git rm -r --cached x",
+      "node -e \"console.log(1)\"",
+      "python script.py",
+      "Remove-Item file.txt",
+    ]) assert.deepEqual(held(cmd), [], `${root}: ${cmd}`);
+    for (const [cmd, rule] of [
+      [INCIDENT, "sh.inline-code"],
+      ["python -c \"import shutil; shutil.rmtree(\x27C:/Users/u\x27)\"", "sh.inline-code"],
+      ["Remove-Item -Recurse C:/Users/u/proj", "sh.win-delete"],
+      ["Remove-Item -Recurse -Force C:/Windows/Temp", "sh.win-delete"],
+      ["rm -rf C:/Users/u/other", "sh.rm"],
+      ["rm -rf \x27C:\\Users\\u\\proj\\..\\other\x27", "sh.rm"],
+      ["rm -rf C:/Users/u/proj/.git", "sh.rm"],
+      ["cmd /c \"rd /s /q %TEMP%\"", "sh.win-delete"],
+    ]) assert.ok(held(cmd).includes(rule), `${root}: ${cmd} should be held by ${rule}, got ${held(cmd)}`);
+  }
+  // the exact incident is held with no project root and with a Linux one too
+  assert.ok(classify(INCIDENT, {}).hold);
+  assert.match(classify(INCIDENT, OPT).hits[0].why, /shared temporary directory/);
+});
