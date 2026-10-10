@@ -706,6 +706,17 @@ test('map lists every rule', async () => {
   assert.match((await cli(t, [])).stdout, /leashcli guard/);
 });
 
+test('a reader that closes the pipe early (guard map | head) is not an error', async () => {
+  const t = await setup();
+  const p = spawn(process.execPath, [CLI_FILE, 'guard', 'map', '--json'], { env: { ...t.env, PATH: process.env.PATH }, cwd: t.dir, stdio: ['ignore', 'pipe', 'pipe'] });
+  p.stdout.destroy(); // the reader is gone before the first byte is written
+  let stderr = '';
+  p.stderr.on('data', (d) => (stderr += d));
+  const status = await new Promise((done) => p.on('close', done));
+  assert.equal(stderr, '', 'no stack trace');
+  assert.equal(status, 0);
+});
+
 test('update-map fetches the live API map and the hook uses it', async () => {
   const t = await setup({ mode: { 'claude-code': 'retry' } });
   t.stub.state.meta = { mapVersion: '2026-10-11.1', providers: [{ id: 'newone', host: 'api.newprovider.dev', base: '/v2', irreversible: [{ id: 'nw.delete', method: 'DELETE', path: '/**', why: 'Deletes a project.' }] }] };

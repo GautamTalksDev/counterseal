@@ -687,8 +687,21 @@ function showMap(a) {
   for (const r of TOOL_RULES) out(`  ${r.id.padEnd(22)} ${r.what}`);
 }
 
+let pipesQuiet = false;
+/** `leashcli guard map | head` closes the pipe early: that is not an error, and the hook keeps its own exit code */
+function quietPipes() {
+  if (pipesQuiet) return;
+  pipesQuiet = true;
+  process.stdout.on('error', (e) => {
+    if (e && e.code === 'EPIPE') process.exit(process.exitCode || 0);
+    process.stderr.write(`leashcli guard: ${scrub(e?.message || e)}\n`);
+    process.exit(1);
+  });
+}
+
 /** the entry point: leashcli guard <command> ... */
 export async function main(argv, env = process.env, cwd = process.cwd()) {
+  quietPipes();
   const [sub, ...a] = argv;
   switch (sub) {
     case 'hook': {
