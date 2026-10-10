@@ -24,6 +24,13 @@ jobs:
         run: node scripts/sync-guard.mjs --check
       - name: Brand in step (server/src/brand.js)
         run: node scripts/rebrand.mjs --check
+      - name: Install lines name one CLI package (BRAND.cliInstall)
+        run: node scripts/cli-name.mjs --check && node --check packages/leashcli/leash.mjs
+      - name: CycloneDX SBOM of the CLI (npm sbom; the release attaches it, see publish.yml)
+        run: |
+          cd cli && npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm sbom --sbom-format cyclonedx --sbom-type application --package-lock-only > ../counterseal.cdx.json && rm package-lock.json
+          node -e "const b=require('../counterseal.cdx.json'); if (b.bomFormat!=='CycloneDX'||(b.components||[]).length) process.exit(1); console.log('SBOM', b.specVersion, b.metadata.component.purl)"
       - name: Receipts CLI refuses to pass without verifying
         run: if node sdk/receipts.mjs; then exit 1; fi
       - name: No em or en dashes in user-facing text

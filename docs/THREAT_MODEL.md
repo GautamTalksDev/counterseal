@@ -28,7 +28,7 @@ can read on the machine it runs on, an attacker who prompt-injects that agent ca
 | A removed team member | Nothing | Sign in (passkeys deleted), use a session or a CLI session (deleted), get alerts (devices deleted), have a seal count, use a token, guard key or receipts key they made (revoked) |
 | Someone who knows a gate's id (it is pasted in workflow files, so it is public) | Ask that gate with a GitHub token from the repository and workflow it accepts | Get a hold from any other repository, workflow, ref or trigger (`403`, nothing written, nobody alerted); learn which repository the gate belongs to; approve anything |
 | A person who can edit the workflow in a repository a gate accepts | Remove the gate step; send any summary text (shown as "not verified"); start runs the gate accepts | Approve; make a run the gate refuses; get the phase 2 token before an approval; use another repository's gate |
-| A device-code phisher (starts `leashcli login` and sends someone the code) | Get a CLI session in that person's account if they sign in, type the code, ignore the country and network shown, confirm they ran it and approve with their passkey | Put the code in a link the app accepts; reuse a code; keep the session past 7 days or past a revoke; act unseen (audit entry and device alert at sign-in) |
+| A device-code phisher (starts `counterseal login` and sends someone the code) | Get a CLI session in that person's account if they sign in, type the code, ignore the country and network shown, confirm they ran it and approve with their passkey | Put the code in a link the app accepts; reuse a code; keep the session past 7 days or past a revoke; act unseen (audit entry and device alert at sign-in) |
 | Someone holding a receipts API key (`lsr_`) | Record receipts within the account's quotas (public, reported, never `source: "broker"`) | Make a broker receipt; record signed receipts without the signer; replay a signed receipt |
 | A phishing site | Ask for a passkey | Get an assertion the service accepts (origin and RP ID are bound into it) |
 | A malicious web page in the user's browser | Send requests | Write to the API (SameSite=Strict, Origin check, custom header, no CORS on private routes) |
@@ -70,7 +70,7 @@ signing key at the first append and refuses to sign under others. Tests: `test/r
 **S10. Phishing for passkeys.** WebAuthn binds origin and RP ID; user verification is required.
 
 **S11. Device-code phishing (CLI sign-in).** Passkeys cannot be phished, but a consent can: an attacker runs
-`leashcli login` on their own machine and sends someone the code ("verify your account"); used at scale against other
+`counterseal login` on their own machine and sends someone the code ("verify your account"); used at scale against other
 platforms in 2025 (Microsoft on Storm-2372, Volexity, Proofpoint). RFC 8628 section 5.4 and the IETF cross-device flows
 BCP call for context on the approving device, short-lived single-use codes, limited scope and lifetime, rate limits, and
 detect and remediate. Mitigations:
@@ -80,7 +80,7 @@ detect and remediate. Mitigations:
   published leashcli 0.1.1 can only print a code, and an attacker would always pick the older flow.
 - *Context before the passkey.* The page shows what is granted (and what is not), when the sign-in started, the country
   and network it started from next to the approver's own (Cloudflare's `request.cf`, never an IP), a warning when they
-  differ, and asks "Did you just run leashcli login yourself?"; the approve button needs that confirmation and "No, deny
+  differ, and asks "Did you just run counterseal login yourself?"; the approve button needs that confirmation and "No, deny
   it" comes first (the CLI gets `access_denied`).
 - *Small and short.* Codes: single use, 5 minutes, 8 characters from 28 without modulo bias. CLI sessions: 7 days, and
   a token or receipts key a CLI session makes never outlives it. Starts: 10 an hour per network; lookups and denials: 10 per 10 minutes
@@ -275,13 +275,13 @@ the public log or its storage.
 **G8. Waiting must not cost the free plan.** A long poll re-reads every 2 seconds for at most 20 seconds: at most 12 D1
 queries and no writes (its limit is in memory). Test: *the long poll*.
 
-**The guard itself (`leashcli guard`, `sdk/shellmap.mjs`, the Claude Code plugin; on branch `feat/guard-cli`, not yet
+**The guard itself (`counterseal guard`, `sdk/shellmap.mjs`, the Claude Code plugin; on branch `feat/guard-cli`, not yet
 deployed).** Everything below runs on the agent's machine, as the agent's user.
 
 **G9. The agent switches the guard off.** It can edit the hook settings (`~/.claude/settings.json`, `~/.codex/hooks.json`,
 `~/.cursor/hooks.json`), `~/.config/leash/guard.json` (which holds `disableRules` and `onUnavailable`), the guard's
 scripts, or run the same effect through something the map does not read. This is not prevented, and every page that
-describes the guard says so. What exists: `leashcli guard status` compares the installed scripts with the hashes it
+describes the guard says so. What exists: `counterseal guard status` compares the installed scripts with the hashes it
 recorded at install and flags a changed one (noticed, not stopped); the plugin's skill tells the agent not to touch any of
 it; the plugin's scripts are pinned copies in the plugin cache. For a hard stop, give the agent a Counterseal token, not the
 real key (S1). Test: *status flags a changed script*.
@@ -539,7 +539,7 @@ unfreeze. Tests: `test/gates-freeze.test.js`.
 Residual: the gate has not yet been run against real GitHub tokens (it follows GitHub's documentation, its discovery document
 and a real token shown in a third-party README); the signed facts say what GitHub says, so a compromised workflow in the
 allowed repository gets a real token and asks truthfully; a job that waits uses Actions minutes.
-### MCP gateway mode (`leashcli mcp wrap`, CLI only)
+### MCP gateway mode (`counterseal mcp wrap`, CLI only)
 
 The wrapper sits in the stdio stream between an MCP client and a local server, reads newline-delimited JSON-RPC both ways
 (batches too, 4 MB a line), and passes on the original bytes of whatever it lets through. A held tool call is answered at
@@ -548,7 +548,7 @@ runs, once. **Enforced on the agent's machine: a seatbelt, not a sandbox.**
 
 **W1. A server changes a tool after you approved it (a rug pull).** The first complete tool list is pinned by mcp-pin's
 tool definition hash (RFC 8785, every member counts). A changed or new tool is replaced in the list by a stub that says it
-is blocked, a call to it is held (`mcp.changed`), and the person reviews a member by member diff before `leashcli mcp pin`.
+is blocked, a call to it is held (`mcp.changed`), and the person reviews a member by member diff before `counterseal mcp pin`.
 Looked at: every list the client asks for, the wrapper's own look when the server says `tools/list_changed`, and before a
 call when its last look is a minute old (`LEASH_MCP_RECHECK_MS`). A pinned tool the server stops listing is held too.
 Tests: *pins across sessions*, *tools that change during a session*, and the in-process cases (pages, a list that starts in
@@ -618,6 +618,58 @@ sees the link within those 10 minutes (a shoulder, a shared screen) could use it
 
 **D4. Old clients.** leashcli 0.1.1 and agents keep calling leash.gautamkhosla.com; `/v1` and `/p` are never
 redirected there.
+
+### The installable app, the first run and the privacy center (migration 0012, branch feat/app-trust, not yet deployed)
+
+**P1. The offline copy keeps private data.** The service worker keeps the app's own files so it opens without a network.
+It caches only a fixed list of paths (the page, its scripts, styles, fonts and icons), same origin, GET, no query string,
+no Authorization header, and only answers that are a plain 200 not marked `no-store` or `private`; the API (`/v1/`), the
+proxy (`/p/`) and `/.well-known/` are never touched. Every API answer is `no-store` anyway. Tests: `test/app-shell.test.js`
+(the worker run in node:vm), and the browser pass lists the cache.
+
+**P2. Approving from a notification.** A notification is a wake-up and a link: tapping it opens the app at that hold, and
+approving still needs the passkey ceremony in the app. The only action on an alert is Freeze, which only stops things.
+Test: *a notification never approves*.
+
+**P3. The badge tells more than it should.** The app icon shows how many requests wait, never what they are; it is set by
+the page after it loads the list and by the worker after an alert, from the same `/v1/alerts` answer the notification uses.
+
+**P4. The demo pretends to be real, or a real call pretends to be the demo.** Demo holds are made only by a browser
+session (`POST /v1/demo/call`), carry `kind: "demo"`, a token id no real token or guard key can have (`demo:<member>`), a
+random request hash and the fixed request `DELETE /repos/you/practice-repo` on the host word `demo`. Nothing is proxied
+and no key is opened; the approval is the real passkey ceremony (so the seals and roles apply), audited as
+`demo_approved`, never sealed in the public log, and used once by the app's retry. A guard key cannot read or use a demo
+hold, and a demo hold cannot satisfy a proxied call (different token id). Limits: 10 new demos an hour per account, one
+waiting at a time, none while frozen. Tests: *Try a held call*, *the demo: ...*.
+
+**P5. The data export leaks a secret.** The export names its columns in its queries (a new column never joins it by
+accident), leaves out every hash that stands for a credential, the vault's ciphertext, IVs and wrapped keys, the last four
+characters of a vaulted key, passkey public keys and push addresses (only the push service's name). It needs an owner, a
+web session and a fresh passkey ceremony, works 3 times an hour per account and is audited (`data_export`). The holds and
+the audit log come in pages (200 and 250) so the response fits the 10 ms CPU budget. Test: *download all my data* checks
+every secret and hash is absent from the file.
+
+**P6. The evidence pack lies.** The server sends audit rows exactly as stored and the browser recomputes every hash and
+link with WebCrypto; it reports an edit, a removal and a reorder, and a pack that claims to start at the account's first
+entry must chain from 64 zeros. The log checkpoint is checked against the log's key with the same SDK the verify page
+uses. It proves the private log is internally consistent and, through receipts, matches the public log; it cannot prove
+the operator never rewrote the whole private chain and its receipts' parents together before you exported (external
+witness cosigning would). Tests: *the evidence pack*.
+
+**P7. Idle sessions.** A web session ends after an hour without an action of the person (any write, or a read the app
+marks with `x-leash-active: 1`); the app's 5-second refresh and the worker's alert fetch do not count. It still ends after
+12 hours at most. Command line sessions keep their 7 days. Test: *a web session ends after an hour without an action*.
+
+**P8. Retention.** An owner chooses 30, 90 or 365 days for closed holds (default 365); the cleanup deletes closed ones past
+it, never a waiting or approved one. The audit log keeps a fingerprint of each and is not shortened (the chain proves
+nothing is missing). Test: *retention*.
+
+**P9. Launch funnel counts identify people.** `/v1/admin/stats` returns counts only: no id, name, path or key; the
+markers are times on the account row, written once. Test: *the launch funnel*.
+
+**P10. The install line names a package that does not exist yet.** Every install line names `BRAND.cliInstall`; publish
+`counterseal` before deploying a site that says it, or switch the lines to `leashcli` (docs/DEPLOY.md). Someone could
+register a look-alike package name: the docs give only the two exact names.
 
 ## Residual risks
 

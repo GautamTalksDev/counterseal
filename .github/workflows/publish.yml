@@ -1,0 +1,88 @@
+name: publish
+# Publishes the CLI to npm with trusted publishing (OIDC, no npm token stored anywhere) and provenance, and attaches a
+# CycloneDX SBOM of each package to the GitHub release. Runs when a release tagged cli-v<version> is published, or by
+# hand with dry_run (the default) to see what would be published. docs/RELEASE.md has the checklist.
+#
+# Trusted publishing (https://docs.npmjs.com/trusted-publishers, read 9 Oct 2026): npm CLI 11.5.1 or later, Node 22.14.0
+# or later, `id-token: write`, a GitHub-hosted runner (self-hosted runners are not supported), and a trusted publisher
+# configured on npmjs.com for each package (this repository, this workflow file name). Provenance is then generated
+# automatically for a public package from a public repository; --provenance below says so explicitly.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only pack and show what would be published'
+        type: boolean
+        default: true
+permissions: { contents: read }
+concurrency: { group: publish, cancel-in-progress: false }
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'cli-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # an environment lets the repository require a reviewer before anything is published (Settings, Environments)
+    environment: npm
+    permissions:
+      contents: write   # gh release upload (the SBOMs)
+      id-token: write   # npm trusted publishing and provenance
+    env:
+      DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: '24', registry-url: 'https://registry.npmjs.org' }
+      - name: npm 11.5.1 or later (trusted publishing)
+        run: |
+          npm install -g npm@11 --no-audit --no-fund
+          node -e "const [a,b,c]=process.argv[1].split('.').map(Number); if (a<11||(a===11&&(b<5||(b===5&&c<1)))) { console.error('npm '+process.argv[1]+' cannot use trusted publishing'); process.exit(1); }" "$(npm --version)"
+      - name: The whole test suite
+        run: cd server && node --test test/*.test.js ../sdk/*.test.mjs ../cli/test/*.test.mjs
+      - name: Copies, brand and install lines in step
+        run: node scripts/sync-guard.mjs --check && node scripts/rebrand.mjs --check && node scripts/cli-name.mjs --check
+      - name: The tag, the CLI and the alias name one version
+        run: |
+          V=$(node -p "require('./cli/package.json').version")
+          A=$(node -p "require('./packages/leashcli/package.json').version")
+          D=$(node -p "require('./packages/leashcli/package.json').dependencies.counterseal")
+          C=$(node -p "/const VERSION = '([^']+)'/.exec(require('fs').readFileSync('cli/leash.mjs','utf8'))[1]")
+          echo "counterseal $V, leashcli $A (runs counterseal $D), CLI says $C"
+          test "$V" = "$A" && test "$V" = "$D" && test "$V" = "$C"
+          if [ "${{ github.event_name }}" = release ]; then test "${{ github.event.release.tag_name }}" = "cli-v$V"; fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+      - name: SBOM of counterseal (CycloneDX, from npm itself; no other tool is downloaded)
+        run: |
+          mkdir -p sbom && cp LICENSE cli/LICENSE
+          cd cli && npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm sbom --sbom-format cyclonedx --sbom-type application --package-lock-only > "../sbom/counterseal-$VERSION.cdx.json"
+          rm package-lock.json
+          node -e "const b=require('../sbom/counterseal-$VERSION.cdx.json'); if (b.bomFormat!=='CycloneDX'||(b.components||[]).length) { console.error('expected a CycloneDX SBOM with no dependencies'); process.exit(1); }"
+      - name: Publish counterseal
+        run: |
+          cd cli
+          if [ "$DRY" = true ]; then npm publish --dry-run --access public; else npm publish --provenance --access public; fi
+      - name: SBOM of leashcli (after counterseal exists on npm, which it depends on)
+        if: env.DRY != 'true'
+        run: |
+          cp LICENSE packages/leashcli/LICENSE
+          cd packages/leashcli
+          for i in 1 2 3 4 5 6; do npm view "counterseal@$VERSION" version && break; sleep 10; done
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm sbom --sbom-format cyclonedx --sbom-type application --package-lock-only > "../../sbom/leashcli-$VERSION.cdx.json"
+          rm package-lock.json
+      - name: Publish leashcli (the old name, a thin alias)
+        run: |
+          cd packages/leashcli
+          if [ "$DRY" = true ]; then npm publish --dry-run --access public; else npm publish --provenance --access public; fi
+      - name: Attach the SBOMs to the release
+        if: github.event_name == 'release'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: gh release upload "${{ github.event.release.tag_name }}" sbom/*.cdx.json --clobber
+      - name: What was published
+        if: env.DRY != 'true'
+        run: |
+          npm view "counterseal@$VERSION" dist.attestations --json || true
+          npm view "leashcli@$VERSION" dependencies --json

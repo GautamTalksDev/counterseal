@@ -30,7 +30,7 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | Area | Control | OWASP |
 |---|---|---|
 | Sign-in | Passkeys only (WebAuthn, user verification required, origin and RP ID checked, single-use 5-minute challenges, signature counters); a passkey already registered gets 409 | A07 |
-| Sessions | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app together with every token, agent key, receipts key and guard key they made, even after they signed out; a token, receipts key or guard key a CLI session makes never outlives it | A07 |
+| Sessions | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 12 h at most and 1 h without an action of yours (writes, and reads the app marks as yours; its background refresh does not count); CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app together with every token, agent key, receipts key and guard key they made, even after they signed out; a token, receipts key or guard key a CLI session makes never outlives it | A07 |
 | Guard keys and approvals | `lsg_` keys shown once, stored as SHA-256, 20 active per account; they authenticate only `/v1/approvals*`. Asking: fixed vocabularies (kind, agent, rule id), sizes capped, unknown fields refused, a folder name never a path, NUL and unpaired surrogates refused; 60 new holds an hour and 20 waiting per key, 100 waiting per account, one alert a minute per account. Waiting: a long poll of at most 20 s that writes nothing to D1. Using: one atomic update bound to key, hash and expiry. Deny reasons: 200 characters, control, format and line-break characters removed | A01, A04, API4, API6 |
 | Deploy gates | A gate remembers who made it: on a team a deploy needs the quorum of different approvers (the maker excluded when self-approval is off), a viewer makes nothing, and removing the maker revokes the gate and its tokens. OIDC verification with WebCrypto (RFC 8725): algorithm pinned, key by `kid` from the fixed GitHub URL only (fetched at most every 10 minutes per isolate, no redirects, 64 KB, RSA 2048 bits or more), signature before claims, issuer, one-string audience `<origin>/gate/<gate>`, 60 s skew, no token valid more than an hour, `jti` once. Gates are made only in a passkey ceremony from a web session (a stolen command line session cannot make one; revoking is allowed to any session). A run from the wrong repository, workflow, ref, environment or trigger is refused before anything is written or anyone is alerted. Poll secrets `gps_` are shown once, stored as SHA-256, read one hold, 30 polls a minute; waiting writes nothing to D1. Phase 2 hands out a 15 minute `lsh_` token only to the poll that spends an approval, under the gate's policy. Public receipts say `DEPLOY github.com`, the decision and the rule (the repository only if the owner opts in per gate). The action masks every secret and never lets received text start a log line. Freeze stops asking, waiting and spending | A01, A04, A07, A08, API1, API2, API4 |
 | CLI sign-in (device code) | Against device-code phishing (RFC 8628 section 5.4, the IETF cross-device flows BCP): the code is never in a link (no `verification_uri_complete`; the app ignores a code in its address and warns); the person types it, sees what is granted and the country and network the sign-in started from next to their own (Cloudflare request data, never an IP), and must confirm they ran it before the passkey; "No, deny it" sends `access_denied`. Codes: 8 characters from a 28-character alphabet without modulo bias, single use, 5 minutes. Limits: 10 starts an hour per network, 10 lookups or denials per 10 minutes and 10 approvals an hour per account. Each sign-in is audited and wakes the owner's devices with a one-tap revoke | A07, API2, API4 |
@@ -50,6 +50,8 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | Supply chain | Zero runtime dependencies in the Worker, the CLI and the SDK; GitHub Actions pinned by SHA | A03, A08 |
 | Logging | Security events (bad tokens, signatures, keys, CSRF, replays, rate limits, quota) and unexpected errors go to the live log stream with code, method and a redacted path (proxied paths are cut to the provider); never IPs, keys, tokens, cookies, account ids or bodies. Workers Logs are off, so nothing is stored | A09 |
 | Errors | Clients get a generic 500 that leaks nothing; a full, broken or unreachable log never blocks a broker decision (the receipt is counted as skipped) | A10 |
+| The installed app (service worker) | Caches only a fixed list of the app's own files (same origin, GET, no query, no credentials, never a `no-store` or `private` answer); never `/v1/`, `/p/` or `/.well-known/`; a notification only opens the exact hold (its one action is Freeze); the icon badge is a count | A02, A04 |
+| Privacy center | Data export: owner, browser session, fresh passkey, 3 an hour, audited, named columns only, no secret, hash or part of a key; evidence pack verified in the browser; retention of closed holds 30, 90 or 365 days; account deletion leaves no row naming the account (tested by scanning every table) | A01, A04, API3 |
 | Agents (LLM Top 10) | Excessive agency is the threat this exists for: irreversible calls are held outside the model; tool descriptions tell the agent not to route around holds | LLM06 |
 
 ## What it does not protect against
@@ -62,7 +64,7 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
   stopped by it. The map does not read aliases, script files, code in other languages, PowerShell or `cmd`, and does not
   decode encoded payloads (it holds a decoder piped into a shell without reading it). It is a seatbelt, not a sandbox; for
   a hard stop, give the agent a Counterseal token, not the real key.
-- The same for the MCP gateway (`leashcli mcp wrap`): it sees only what an MCP client sends through it, matches tool names
+- The same for the MCP gateway (`counterseal mcp wrap`): it sees only what an MCP client sends through it, matches tool names
   and arguments against lists (it does not understand them), does not pin prompts or resources, does not inspect tool
   results, and supports stdio servers only. A server that behaves well when it is pinned and badly later, between two of
   the wrapper's looks (at most a minute apart), is not caught until the next look. The first pin is trust on first use.
@@ -184,7 +186,7 @@ share the account's 100 waiting holds and its one alert a minute, and guard key 
 
 ## MCP gateway mode, 10 Oct 2026 (branch `feat/mcp-wrap`, CLI only, no server change)
 
-`leashcli mcp wrap` holds destructive MCP tool calls through the Approvals API (kind `tool`, agent `mcp`) and pins the
+`counterseal mcp wrap` holds destructive MCP tool calls through the Approvals API (kind `tool`, agent `mcp`) and pins the
 server's tool definitions with mcp-pin's published hash. Threat model section W; zero runtime dependencies. Tests:
 `server/test/mcp-wrap-units.test.js` (mcp-pin's hash vectors, the strict JSON reader, the SQL check held line for line to
 the server's, the policy, the pin files, the text an approval is bound to), `mcp-wrap-gateway.test.js` (the protocol corner
@@ -238,7 +240,7 @@ opens windows is an insider that the product reports but does not stop. Tests: `
 
 ## The coding-agent guard, 10 Oct 2026 (branch `feat/guard-cli`, not deployed; no server change)
 
-`leashcli guard` (CLI 0.2.1), the shell map (`sdk/shellmap.mjs`, version `2026-10-10.1`) and the Claude Code plugin. It runs
+`counterseal guard` (CLI 0.3.0), the shell map (`sdk/shellmap.mjs`, version `2026-10-10.1`) and the Claude Code plugin. It runs
 on the agent's machine and uses the Approvals API above; threat model G9 to G17. The hook fails closed (a command on the
 map is denied when the server cannot be reached, the key is bad, a limit is hit or the account is frozen), removes
 credentials it recognises before sending a command, never prints its key, sends the key only over HTTPS or to the same
@@ -264,3 +266,22 @@ every step of an approved job shares the job's identity; and the gate has not ye
 tests use a stand-in that signs like GitHub). The Brakes Freeze stops asking, waiting and spending.
 Tests: `server/test/oidc.test.js`, `gates.test.js`, `gates-security.test.js`, `gates-freeze.test.js`, `gates-app.test.js`,
 `deploy-action.test.js`, and the migration test on live-shaped data.
+
+## The installable app, the first run and the privacy center, 9 Oct 2026 (branch `feat/app-trust`, migration 0012, not deployed)
+
+The app installs to the dock, taskbar, Start menu and Home Screen (a complete manifest, maskable and monochrome icons,
+shortcuts), shows the number of waiting requests on its icon where the Badging API exists, and opens offline to a page that
+says it is offline. "Try a held call" makes a demo hold that is approved with the real passkey ceremony and never proxied or
+made public. An owner can download all the account's data and choose how long closed holds are kept; anyone on the account
+can build an evidence pack that their browser verifies. Fixed along the way: web sessions end after an hour without an action
+(OWASP ASVS 5.0 7.3.1), and deleting an account also deletes the rate limit rows that name it. A self-assessment against
+OWASP ASVS 5.0 and four OWASP Top 10 lists is on `/security/standards/` (self-assessed, not certified). Threat model P1 to
+P10. Tests: `server/test/app-trust.test.js`, `app-shell.test.js` (the service worker run in node:vm, the manifest and
+icons, security.txt), `app-ui.test.js`, and a real-browser pass with a virtual passkey at desktop and phone widths.
+
+## Supply chain for the CLI (branch `feat/app-trust`, nothing published)
+
+`.github/workflows/publish.yml` publishes `counterseal` and its alias `leashcli` with npm trusted publishing (OIDC, no
+stored npm token) and provenance, from a GitHub-hosted runner behind a protected environment, after the whole suite and a
+version check, and attaches a CycloneDX SBOM of each package (made by `npm sbom`, no extra tool) to the release.
+Checklist: docs/RELEASE.md.

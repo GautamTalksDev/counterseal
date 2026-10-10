@@ -500,6 +500,32 @@ with `publishRepo`. Never the commit, workflow, run, person, label, summary or d
 (repository, commit, ref, run, attempt, environment, gate), `approve`, `deny`, `gate_passed`, `gate_cancelled`,
 `gate_created` and `gate_revoked`.
 
+## The app, the first run and the privacy center (migration 0012, not yet deployed)
+
+All routes below are signed-in routes with the usual CSRF rules on both hosts (writes need an allow-listed `Origin` equal
+to the host and `x-leash: 1`).
+
+| Route | Who | What |
+|---|---|---|
+| `POST /v1/demo/call` `{}` | any member, browser session | Makes a demo hold (`kind: "demo"`, `DELETE /repos/you/practice-repo` on host `demo`, rule `demo.delete`, 10 minutes), or returns the one already waiting: `{hold_id, status, approve_url, expires_at, created, demo: true}`. 10 an hour per account; 423 while frozen. |
+| `POST /v1/demo/call` `{"hold": id}` | the same | The demo agent's retry: uses an approved demo hold once. 200 `{status: "executed", demo: true, response: {status: 204, provider: "demo", note}}`; 409 `not_approved` or `already_used`, 403 `denied`, 410 `expired`, 404. |
+| `POST /v1/me/installed` `{}` | any member | The app says it runs installed (display-mode standalone). Sets `installed_at` once. |
+| `POST /v1/me/retention` `{"holdDays": 30 \| 90 \| 365}` | owner, browser session | How long closed holds are kept. Audited (`retention_changed`). |
+| `POST /v1/me/export/begin`, `/finish` | owner, browser session, passkey ceremony | Everything kept about the account as JSON (`format: "counterseal-data-export/1"`), without secrets (see `never_included` in the answer). 3 an hour; audited (`data_export`). Its `holds` and `audit` are filled by paging the two routes below. |
+| `GET /v1/export/holds?after=<n>` | owner, browser session | 200 holds a page, oldest first: `{entries, done, next_after}`. |
+| `GET /v1/export/evidence?from=<ms>&to=<ms>&after=<seq>` | any member (as `GET /v1/audit`) | 250 audit entries a page, oldest first, exactly as stored (`detail` is the JSON text the hash covers): `{account_id, entries, done, next_after}`; the first page also has `from_start`, `map_version`, `range` and `log: {origin, verifier_key, checkpoint, tree_size}`. Writes nothing. |
+
+`GET /v1/me` also returns `progress: {token, call, demo, installed, alerts}` (first times, or null) and `retention: {holdDays,
+choices, rules}`. A web session ends after an hour without an action: a write, or a read sent with `x-leash-active: 1`;
+reads without it (the app's background refresh) do not extend it. The 401 then carries `reason: "idle"`.
+
+The demo's audit actions are `demo_hold`, `demo_approved`, `demo_denied` and `demo_executed`; none is a public decision,
+so none is sealed in the public log.
+
+Verifying an evidence pack: for each entry in order, `prev_hash` must equal the previous entry's `hash` (64 zeros before an
+account's first entry), and `hash = SHA-256(prev_hash | account_id | at | actor | action | detail)` in lowercase hex, with
+`|` between the fields. `site/public/app/evidence.js` does this in the browser.
+
 ## Web Bot Auth
 
 The checker and `sdk/websig.mjs` implement draft -00 of `draft-ietf-webbotauth-httpsig-protocol` (September 2026):

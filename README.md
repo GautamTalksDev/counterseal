@@ -127,7 +127,7 @@ general). They do not cap LLM tokens, and they do not cover SQL sent straight ov
   is not a GET or HEAD. Past a limit the token trips: its writes wait until a passkey resets it, reads still pass, and
   your devices are told once. `repeatsPer5Min: 3` trips on the fourth identical request (same method, path, query, content
   type and body) within 5 minutes.
-- **Freeze.** One tap in the app, `leashcli freeze`, or the Freeze button on a phone alert stops every agent token
+- **Freeze.** One tap in the app, `counterseal freeze`, or the Freeze button on a phone alert stops every agent token
   (HTTP 423), every coding-agent approval and every deploy gate, voids approvals nobody used yet and pauses approving. Any signed-in session can freeze; only a passkey in the
   app unfreezes.
 
@@ -168,13 +168,17 @@ What it does not do: stop two people who agree to act together. See [threat mode
 ## Quickstart
 
 ```bash
-npx leashcli login                      # type its code at /app#device, check where it started, approve with your passkey
-npx leashcli add github                 # paste the key once; it goes into the vault, never onto disk
-npx leashcli creds                      # note the credential id
-npx leashcli token <credentialId> --label "coding agent, laptop"
+npx counterseal login                      # type its code at /app#device, check where it started, approve with your passkey
+npx counterseal add github                 # paste the key once; it goes into the vault, never onto disk
+npx counterseal token --label "coding agent, laptop"   # with one key in the vault no id is needed (else: creds, then token <id>)
 ```
 
-The CLI package keeps its first name, `leashcli`; it is the same service. A CLI sign-in lasts 7 days, and tokens and receipts
+Or skip the terminal: create an account at /app (a name and a passkey), press **Try a held call** to approve a pretend
+one with your passkey (nothing real is called and nothing is made public), then add a key and make a token in the app.
+
+From version 0.3.0 the CLI is the `counterseal` package on npm (not published yet; until it is, run `node cli/leash.mjs` from
+this repository). `leashcli`, its first name, stays as a thin package that runs the same CLI, so old install lines and
+agent configs keep working. A CLI sign-in lasts 7 days, and tokens and receipts
 keys it makes end with it. The code is typed in the app, never sent as a link: never type a code someone sent you, because whoever
 approves a code gives that command line their account. Each sign-in alerts your devices and can be revoked in the app
 (Account), with every token and key it made.
@@ -191,7 +195,7 @@ link (Account, "Move with passkey") that adds a counterseal passkey to the same 
   "mcpServers": {
     "leash": {
       "command": "npx",
-      "args": ["-y", "leashcli", "mcp"],
+      "args": ["-y", "counterseal", "mcp"],
       "env": { "LEASH_TOKENS": "github=lsh_..." }
     }
   }
@@ -200,27 +204,27 @@ link (Account, "Move with passkey") that adds a counterseal passkey to the same 
 
 The `leash_request` tool lets the agent call any configured API. When a call is held, the tool result tells the agent to
 stop, give you the approve link, and retry the identical call after you approve. APIs that take a form instead of JSON
-(Stripe) use the tool's `form` field; `leashcli mcp` sends it as `application/x-www-form-urlencoded`.
+(Stripe) use the tool's `form` field; `counterseal mcp` sends it as `application/x-www-form-urlencoded`.
 
 ### Give the agent its own key (Prove who)
 
-Make an agent key in the app (generated in your browser; only the public half is sent), or with CLI 0.2.1 from the
+Make an agent key in the app (generated in your browser; only the public half is sent), or with CLI 0.3.0 from the
 agent's machine, then bind a token to it and give the MCP server the key file:
 
 ```bash
-npx leashcli agent-key agent-key.json --label laptop-agent     # CLI 0.2.1 (in this repo, not yet published)
-npx leashcli token <credentialId> --agent-key <agentKeyId>
+npx counterseal agent-key agent-key.json --label laptop-agent     # CLI 0.3.0 (in this repo, not yet published)
+npx counterseal token <credentialId> --agent-key <agentKeyId>
 # MCP env: { "LEASH_TOKENS": "github=lsh_...", "LEASH_AGENT_KEY": "/path/to/agent-key.json" }
 ```
 
-Signing from the MCP server needs CLI 0.2.1 too: `npx leashcli` still runs 0.1.1 from npm, which cannot sign, so a
-bound token would refuse its calls. Until 0.2.1 is published, run `cli/leash.mjs` from this repository.
+Signing from the MCP server needs CLI 0.3.0 too: `npx counterseal` still runs 0.1.1 from npm, which cannot sign, so a
+bound token would refuse its calls. Until 0.3.0 is published, run `cli/leash.mjs` from this repository.
 
 ### Approvals for what Counterseal does not proxy (a coding agent's commands)
 
 Some irreversible actions never pass through an API Counterseal brokers: `terraform destroy`, `railway volume delete`,
 `gh repo delete`, `prisma migrate reset`, `DROP TABLE` through `psql`, `git push --force`. For those, a hook on the
-agent's machine (`leashcli guard`, in the next section) holds a **guard key** (`lsg_`) and asks the Approvals API:
+agent's machine (`counterseal guard`, in the next section) holds a **guard key** (`lsg_`) and asks the Approvals API:
 
 ```bash
 # ask (Bearer lsg_): the exact command, why it is held, and the folder it runs in
@@ -242,37 +246,37 @@ curl -s -X POST "https://counterseal.gautamkhosla.com/v1/approvals/$ID/use" -H "
 
 The full contract (request fields, errors, budgets) is in [docs/PROTOCOL.md](docs/PROTOCOL.md#approvals-for-what-the-broker-does-not-proxy).
 
-### Guard your coding agent (`leashcli guard`)
+### Guard your coding agent (`counterseal guard`)
 
-`leashcli guard` is the hook that does the asking for you. It reads each shell command your coding agent is about to
+`counterseal guard` is the hook that does the asking for you. It reads each shell command your coding agent is about to
 run the way a shell does (quotes, `&&` and pipes, `sh -c`, `sudo`, `xargs`, `ssh`, `docker exec`, `package.json` scripts and
 more) and holds the ones on the **shell map** (version `2026-10-10.1`, 27 rules: `terraform destroy`, `git push --force`,
 `DROP TABLE` through `psql`, `railway volume delete`, `gh repo delete`, `rm -rf` outside the project, `kubectl delete`,
 `docker volume prune`, cloud CLI deletes, `curl` to a brokered API with a write method, and more) until you approve that
 exact command, once, with a passkey. Everything not on the map is left to the agent's own permission settings.
 
-It needs CLI 0.2.1, which is in this repository and not on npm yet; until it is, run `node cli/leash.mjs guard ...` from a
-clone instead of `npx leashcli guard ...`.
+It needs CLI 0.3.0, which is in this repository and not on npm yet; until it is, run `node cli/leash.mjs guard ...` from a
+clone instead of `npx counterseal guard ...`.
 
 ```bash
-npx leashcli login                                  # a guard key made through this ends with the sign-in (7 days at most)
-npx leashcli guard install                          # finds Claude Code, Codex and Cursor; or --agents claude-code,codex,cursor
-npx leashcli guard check -- terraform destroy       # what the map says about a command, offline
-npx leashcli guard status                           # what is installed, whether the key works, whether the account is frozen
-npx leashcli guard uninstall                        # removes only its own hooks, revokes the key
+npx counterseal login                                  # a guard key made through this ends with the sign-in (7 days at most)
+npx counterseal guard install                          # finds Claude Code, Codex and Cursor; or --agents claude-code,codex,cursor
+npx counterseal guard check -- terraform destroy       # what the map says about a command, offline
+npx counterseal guard status                           # what is installed, whether the key works, whether the account is frozen
+npx counterseal guard uninstall                        # removes only its own hooks, revokes the key
 ```
 
 `install` makes a guard key, saves it in `~/.config/leash/guard.json` (mode 600, never printed), copies the guard next to
 it, and adds hook entries to `~/.claude/settings.json`, `~/.codex/hooks.json` and `~/.cursor/hooks.json` without touching
 anything else (it saves a backup, shows the diff, and `--dry-run` shows it without writing). For a key that lasts, make one
-in the app (Account, Guard keys) and run `npx leashcli guard install --paste-key`.
+in the app (Account, Guard keys) and run `npx counterseal guard install --paste-key`.
 
 **Claude Code plugin** (the same hook, from this repository's marketplace file, no form):
 
 ```bash
 claude plugin marketplace add GautamTalksDev/leash
 claude plugin install counterseal@counterseal
-npx leashcli guard install --agents none            # makes the key the plugin's hook uses
+npx counterseal guard install --agents none            # makes the key the plugin's hook uses
 ```
 
 The plugin runs its own pinned copy of the guard (never `npx` at hook time) and needs `node` on your PATH. Claude Code
@@ -306,9 +310,9 @@ switched on, `guard install` adds no second hook to Claude Code.
 The shell map (`sdk/shellmap.mjs`, tests in `sdk/shellmap.test.mjs` with about a thousand commands in
 `sdk/shellmap.vectors.txt`, and `sdk/shellmap.bash.test.mjs`, which compares it with real bash on generated commands: the words
 a command comes to, and whether a stub `terraform destroy` really runs where the map says "not held") is documented rule by rule in the [docs](https://counterseal.gautamkhosla.com/docs/#guard-cli).
-### Put an MCP server behind Counterseal (`leashcli mcp wrap`)
+### Put an MCP server behind Counterseal (`counterseal mcp wrap`)
 
-Many MCP servers can delete, send, pay or deploy with the key you gave them. `leashcli mcp wrap` sits between your MCP
+Many MCP servers can delete, send, pay or deploy with the key you gave them. `counterseal mcp wrap` sits between your MCP
 client and any local (stdio) MCP server. It holds the destructive tool calls until you approve them with your passkey,
 and it pins the server's tool definitions, so a server that changes a tool after you approved it is hidden until you
 look. Put it in front of the server's own command in your client's MCP configuration (CLI 0.3.0, in this repo, not yet
@@ -319,7 +323,7 @@ published; until then run `cli/leash.mjs`):
   "mcpServers": {
     "supabase": {
       "command": "npx",
-      "args": ["-y", "leashcli", "mcp", "wrap", "--name", "supabase", "--", "npx", "-y", "@supabase/mcp-server-supabase@latest"],
+      "args": ["-y", "counterseal", "mcp", "wrap", "--name", "supabase", "--", "npx", "-y", "@supabase/mcp-server-supabase@latest"],
       "env": { "LEASH_GUARD_KEY": "lsg_...", "SUPABASE_ACCESS_TOKEN": "the server's own settings stay as they were" }
     }
   }
@@ -337,17 +341,17 @@ published; until then run `cli/leash.mjs`):
   receipts say only `CALL mcp`, the decision, the rule and the map version, never the tool, the arguments or the server.
 - **Pinning.** The first complete tool list your client asks for is pinned (trust on first use). After that a changed or
   new tool is shown to the model as a stub that says it is blocked, its new text never reaches the model, and calls to it
-  are held (rule `mcp.changed`) until you run `leashcli mcp pin --name supabase`, which shows what changed, member by
+  are held (rule `mcp.changed`) until you run `counterseal mcp pin --name supabase`, which shows what changed, member by
   member, and asks you to type `pin`. The server's `instructions` are pinned the same way. The wrapper checks when your
   client lists tools, when the server says its tools changed, and before a call if its last look is a minute old. The
   hash is mcp-pin's published tool definition hash (version 1, RFC 8785), so a pin means the same thing to other tools.
-  `leashcli mcp status --name supabase [--check]` shows the pin, what waits for review and whether Counterseal answers;
-  `leashcli mcp unpin --name supabase` forgets the pin.
+  `counterseal mcp status --name supabase [--check]` shows the pin, what waits for review and whether Counterseal answers;
+  `counterseal mcp unpin --name supabase` forgets the pin.
 - **Policy file** (`~/.config/leash/mcp/<name>.json`, optional, strict JSON, a typo stops the wrapper before it starts):
   `{"hold": ["send_*"], "allow": ["get_merge_status"], "sqlArgs": ["query", "sql"], "trustAnnotations": false, "repin": "terminal"}`.
   `hold` adds tool name patterns; `allow` lifts the name rule for those tools but never the SQL rule; `sqlArgs` names the
   arguments that are SQL (`[]` turns the check off); `trustAnnotations: true` also holds a tool whose definition says
-  `destructiveHint: true`; `repin: "passkey"` makes `leashcli mcp pin` itself wait for your passkey.
+  `destructiveHint: true`; `repin: "passkey"` makes `counterseal mcp pin` itself wait for your passkey.
 - **A guard key is needed to ask.** Make one in the app (Account, Guard keys) and set `LEASH_GUARD_KEY`, or put
   `{"key": "lsg_..."}` in `~/.config/leash/guard.json`, the file the coding-agent guard uses. Without one, a held call is
   refused with a message that says why; calls that are not held never touch Counterseal. A frozen account (Freeze)
@@ -423,7 +427,7 @@ Usage, what is checked, limits and errors: [docs/DEPLOY_GATE.md](docs/DEPLOY_GAT
 | Neon | `https://counterseal.gautamkhosla.com/p/neon` (paths after `/api/v2`) |
 | Fly.io (Machines API) | `https://counterseal.gautamkhosla.com/p/fly` (paths after `/v1`; vault the whole token line `fly tokens create` prints, `FlyV1 fm2_...`) |
 | Resend | `https://counterseal.gautamkhosla.com/p/resend` |
-| Shopify (Admin GraphQL API only) | `https://counterseal.gautamkhosla.com/p/shopify/admin/api/2026-07/graphql.json`; add the key with its store address: `leashcli add shopify --host your-store.myshopify.com` |
+| Shopify (Admin GraphQL API only) | `https://counterseal.gautamkhosla.com/p/shopify/admin/api/2026-07/graphql.json`; add the key with its store address: `counterseal add shopify --host your-store.myshopify.com` |
 
 The irreversible map covers 10 APIs: GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify. Management APIs only; SQL sent straight over a database connection string never passes through Counterseal. The map version is `2026-10-10.1`; every rule has its reason and the reference page it comes from in [server/src/providers.js](server/src/providers.js).
 
@@ -459,6 +463,7 @@ server/        Cloudflare Worker: API, proxy, vault, WebAuthn, policy, audit, th
   src/approvals.js   the Approvals API and guard keys: approvals for a coding agent's commands and tool calls
   src/brakes.js      money caps, the breaker and Freeze (src/money.js: how amounts are read and shown)
   src/team.js        the two-person seal: members, invites, roles, the quorum and seals
+  src/trust.js       the first run and the privacy center: the demo hold, launch funnel markers, data export, evidence pack, retention
   src/gates.js       Deploy Gate: gates, a job's request, the poll, phase 2 (src/oidc.js verifies GitHub's token; src/gatefacts.js)
   test/              node:test suite: virtual passkeys, fake upstream, migration on data from the live code
   bench/cpu.mjs      CPU of the hot paths
@@ -467,11 +472,14 @@ action/        GitHub Action (deploy-gate, zero dependencies) and sample workflo
 cli/           leash CLI and MCP server (zero dependencies), sign.mjs for agent keys, guard.mjs (the coding-agent guard),
                mcp-wrap.mjs and the mcp-*.mjs files (mcp wrap: hold destructive MCP tool calls, pin tool definitions)
   test/              the guard against a stand-in and against the real server code over HTTP; the plugin files
+packages/leashcli/  the old package name: a thin alias that runs the counterseal CLI of the same version
 sdk/           receipts (record + verify offline), websig (Web Bot Auth sign + verify) and shellmap (the shell map), zero dependencies
 plugins/       the Claude Code plugin (hook, skill, pinned scripts); .claude-plugin/marketplace.json at the root lists it
-scripts/       rebrand.mjs, sync-guard.mjs (keeps the guard copies, the SQL block and the API map in step with the server)
-site/public/   website and dashboard (strict CSP, Trusted Types, no third-party code)
-docs/          threat model, protocol, policy reference, deployment
+scripts/       rebrand.mjs, sync-guard.mjs (keeps the guard copies, the SQL block and the API map in step with the server),
+               cli-name.mjs (every install line names BRAND.cliInstall: counterseal, or leashcli before that package is published)
+site/public/   website and the installable app (strict CSP, Trusted Types, no third-party code; sw.js caches only the app's own files)
+docs/          threat model, protocol, policy reference, deployment, release checklist
+.github/       CI, and the npm publish workflow (trusted publishing, provenance, CycloneDX SBOMs)
 ```
 
 ## Develop
@@ -486,15 +494,24 @@ node dev/local.js 8790                          # http://localhost:8790 (passkey
 
 ## Deploy
 
-See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), eight additive migrations (0004 to 0011), `wrangler deploy`.
+See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), nine additive migrations (0004 to 0012), `wrangler deploy`.
+Publish the CLI before deploying a site whose install lines say `npx counterseal` (docs/RELEASE.md).
 
 ## Status and roadmap
 
-Brokers GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify; phone and desktop alerts for held calls (Web Push,
-payload-free); public receipts; agent keys; money caps, a breaker and Freeze. In this repo, not yet deployed: the Approvals API and guard keys for a
-coding agent's commands, `leashcli guard` with its shell map and Claude Code plugin (CLI 0.2.1, not yet on npm), the two-person seal (team members,
-invites, roles, quorum votes) with break-glass windows and Slack, Discord and Google Chat alerts, and the Deploy Gate for GitHub Actions. Next: AWS (SigV4
-re-signing), PlanetScale; SSO for teams; external witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
+**Live** (checked 9 Oct 2026 at leash.gautamkhosla.com; counterseal.gautamkhosla.com does not resolve yet): the broker for
+GitHub, Cloudflare, Railway, Stripe and Supabase (map `2026-10-09.1`), passkey approvals of held calls, and payload-free
+phone and desktop alerts. The published CLI is `leashcli` 0.1.1.
+
+**In this repository, not yet deployed:** the counterseal.gautamkhosla.com host and the domain move; public receipts and the
+public log; agent keys (Prove who); five more APIs (Vercel, Neon, Fly.io, Resend, Shopify; map `2026-10-10.1`); money caps,
+the breaker and Freeze; the Approvals API and guard keys; `counterseal guard` with its shell map and Claude Code plugin,
+`counterseal mcp wrap`, and CLI 0.3.0 (not yet on npm); the two-person seal with break-glass windows and Slack, Discord and
+Google Chat alerts; the Deploy Gate for GitHub Actions; and the installable app with the first-run demo, the privacy center,
+the data export and the evidence pack (migration 0012, branch `feat/app-trust`).
+
+**Next:** AWS (SigV4 re-signing), PlanetScale; SSO for teams; external witness cosigning of checkpoints (C2SP
+tlog-witness); SCITT-compatible receipts.
 
 Counterseal maps to the proxy-gateway model of the IETF draft
 [Credential Broker for Agents (CB4A)](https://www.ietf.org/archive/id/draft-hartman-credential-broker-4-agents-00.html)

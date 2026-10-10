@@ -6,7 +6,7 @@ Object (`ReceiptLog`, the public log) and static assets. It fits the Workers Fre
 ## Upgrading the live service (from the broker-only version)
 
 The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005_cli_signin.sql`, `0006_approvals.sql`,
-`0007_gates.sql`, `0008_brakes.sql`, `0009_team.sql`, `0010_provider_host.sql` and `0011_breakglass.sql` only add tables, indexes
+`0007_gates.sql`, `0008_brakes.sql`, `0009_team.sql`, `0010_provider_host.sql`, `0011_breakglass.sql` and `0012_app_trust.sql` only add tables, indexes
 and defaulted or nullable columns, so the code that runs today keeps working on the migrated database, and the new code keeps
 working with everything the old code wrote (`server/test/migration.test.js` runs the deployed code, migrates, then runs the new
 code). CLI sessions made before 0005 keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as
@@ -22,7 +22,11 @@ push devices, device codes, move links, tokens, guard keys, receipts keys and ag
 seal approves, as before (no row is rewritten: a NULL `member_id` means the account's founder). 0010 adds one nullable column, the
 store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0011 (break glass and alert
 channels, branch `feat/deploy-gate`, not yet deployed) adds the tables `windows` and `channels`; it changes no existing row, and
-with no window and no channel nothing behaves differently.
+with no window and no channel nothing behaves differently. 0012 (the installable app, the first run and the privacy center,
+branch `feat/app-trust`, not yet deployed) adds nullable columns only: five first-time markers and `hold_days` on `accounts`,
+and `seen_at` on `sessions`. A web session made before it counts its idle hour from when it was made, so the first deploy
+signs out browsers that have been idle for an hour; command line sessions are unaffected. Closed holds older than 365 days are
+deleted by the cleanup from then on (none exist yet).
 
 ```bash
 cd server
@@ -32,7 +36,7 @@ npx -y wrangler@4 d1 time-travel info leash
 # 2. new secrets (names only; values never leave your machine)
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK        # the log's Ed25519 signing key; prints the public part to stderr: keep it
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx -y wrangler@4 secret put STATS_TOKEN   # optional: /v1/admin/stats
-# 3. the additive migrations (applies 0004 to 0011; 0001 to 0003 are already applied)
+# 3. the additive migrations (applies 0004 to 0012; 0001 to 0003 are already applied)
 npx -y wrangler@4 d1 migrations apply leash --remote
 # 4. the code (creates the ReceiptLog Durable Object through the "v1" migration in wrangler.jsonc)
 npx -y wrangler@4 deploy
@@ -55,8 +59,8 @@ curl -s -H "authorization: Bearer $STATS_TOKEN" https://counterseal.gautamkhosla
 
 and in the app: on https://leash.gautamkhosla.com/app sign in with the existing passkey, see the existing tokens and
 holds, approve a test hold, then use Account, "Move with passkey" and finish on https://counterseal.gautamkhosla.com/app.
-Check that https://leash.gautamkhosla.com/ answers 301 to counterseal and that `npx leashcli holds` (0.1.1) still works.
-Run `npx leashcli login` (0.1.1): it prints `.../app#device` and a code; type the code in the app, check that the
+Check that https://leash.gautamkhosla.com/ answers 301 to counterseal and that `npx counterseal holds` (0.1.1) still works.
+Run `npx counterseal login` (0.1.1): it prints `.../app#device` and a code; type the code in the app, check that the
 approval screen shows your country and network, approve, and see the "A command line was signed in" alert and the
 sign-in under Account, Command line sign-ins.
 
@@ -84,7 +88,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" |
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))" | npx -y wrangler@4 secret put IP_SALT
 node dev/vapid-keygen.mjs | npx -y wrangler@4 secret put VAPID_PRIVATE_JWK   # phone alerts (Web Push); optional
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK          # the public log
-npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0011
+npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0012
 npx -y wrangler@4 deploy
 ```
 
@@ -152,6 +156,13 @@ after sign-ins.
 | Two-person seal: the seal that approves, sealed | about 9 (the above, the approval, receipt bookkeeping) | 1 request, about 7 rows |
 | Two-person seal: making an invite / joining | about 7 / about 9, plus one per device alerted | none |
 | Two-person seal: reading the team (`GET /v1/team`) | 0 (5 D1 queries) | none |
+| First run: "Try a held call" (`POST /v1/demo/call`) | about 4 (limit, hold, audit, the demo marker once), plus one per device alerted (at most one alert a minute) | none (never sealed) |
+| The demo agent's retry after approval | about 3 (the hold used, audit, limit) | none |
+| Launch funnel markers (first token, first protected call, alerts, installed) | at most 1, once per account per isolate; never on a poll | none |
+| Web session activity (the idle hour) | at most 1 a minute per active browser session; the 5-second refresh writes nothing | none |
+| Data export (`POST /v1/me/export/begin` and `finish`) | about 5 (limit, challenge, passkey counter, audit); 21 D1 queries; then pages of 200 holds and 250 audit entries, 0 writes each | none |
+| Evidence pack, one page of 250 audit entries (`GET /v1/export/evidence`) | 0 (at most 3 D1 queries) | 1 request on the first page, within the 60 a minute per account |
+| Retention cleanup (part of the sweep) | the closed holds it deletes | none |
 | Receipts API, one unsigned receipt | about 3 | 1 request |
 | Public log read (stats, checkpoint, key) | 0 | 0 within 10 s of the last head read per isolate |
 | Public log read (entries, proofs) | 0 | 1 |
@@ -235,6 +246,16 @@ Break glass and alert channels (part 2b of the two-person seal), same method; th
 | Add an alert channel (passkey verify, seal the address, insert) | 1.7 ms (2.8) | |
 | A held DELETE with one alert channel (hold, push check, unseal, post stubbed) | 3.2 ms (6.8) | 1.8 ms |
 
+The app, the first run and the privacy center (branch feat/app-trust), same method, 9 Oct 2026:
+
+| Path | Worker CPU | Durable Object CPU |
+|---|---|---|
+| "Try a held call" (`POST /v1/demo/call`: hold, audit, alert check) | 0.61 ms (0.95) | |
+| Evidence pack, first page (250 audit entries as stored, the checkpoint) | 0.71 ms (1.08) | |
+| Data export (every table but holds and the audit log, passkey verify included) | 2.78 ms (6.88) | |
+
+The audit chain is verified in the browser, never on the server: re-hashing a long log would not fit in 10 ms.
+
 These are Node numbers, not a load test on Workers. Run one before raising the batch caps in `server/src/receipts.js`.
 
 ## Two hosts: counterseal.gautamkhosla.com and leash.gautamkhosla.com
@@ -271,18 +292,33 @@ identical on both.
 - **Rollback note.** Rolling the code back to the version before the move makes `ORIGIN` the only host again; passkeys
   made on counterseal then cannot sign in on the old host until the move is redeployed.
 
-## Publishing the CLI
+## Publishing the CLI (publish first, then deploy)
 
-```bash
-cd cli && npm publish --access public      # leashcli 0.2.1 (agent keys, the typed sign-in code; its default server is counterseal); the planned new name is "counterseal"
-```
+From 0.3.0 the CLI is published as `counterseal` (`cli/package.json`, bin `counterseal`), and `leashcli`, its first name, is a
+thin package (`packages/leashcli`) that depends on `counterseal` of the same version and runs it, so install lines and agent configs that name
+leashcli keep working. Neither is published yet. The steps, with the release checklist, are in
+[docs/RELEASE.md](RELEASE.md): a GitHub release tagged `cli-v0.3.0` runs `.github/workflows/publish.yml` (npm trusted
+publishing with provenance, a CycloneDX SBOM of each package attached to the release).
+
+**Order.** Every install line on the site, in the docs and in the app names one package, `BRAND.cliInstall` in
+`server/src/brand.js` (`counterseal` on this branch). So:
+
+1. Publish the CLI (`counterseal`, then `leashcli`).
+2. Check `npx counterseal --version` prints 0.3.0 on a clean machine.
+3. Then deploy the Worker and site.
+
+To deploy before publishing, set `cliInstall: 'leashcli'` in `server/src/brand.js`, run `node scripts/cli-name.mjs` (it
+rewrites only command lines: `npx ...`, the MCP config's `"-y", "..."`, "... login" style mentions and the CLI's `PKG`
+constant), run the tests, and deploy; the published `leashcli` 0.1.1 then serves those lines until 0.3.0 is out (it has no
+guard and cannot sign; the docs say so). Switch back the same way after publishing. `node scripts/cli-name.mjs --check` (in
+CI and `server/test/brand.test.js`) fails if any line names the other package.
 
 ## The coding-agent guard (nothing to deploy on the Worker)
 
-`leashcli guard` is a client of the Approvals API (migration 0006), so the Worker needs nothing beyond that. What makes it
+`counterseal guard` is a client of the Approvals API (migration 0006), so the Worker needs nothing beyond that. What makes it
 available to people:
 
-1. **Publish the CLI** (above): `guard.mjs` and `shellmap.mjs` are in the package's `files`. Until 0.2.1 is on npm, `npx leashcli guard`
+1. **Publish the CLI** (above): `guard.mjs` and `shellmap.mjs` are in the package's `files`. Until 0.3.0 is on npm, `npx counterseal guard`
    runs nothing (0.1.1 has no such command); the docs and README say so.
 2. **The plugin needs the repository to be readable by the people who add it.** `claude plugin marketplace add GautamTalksDev/leash`
    reads `.claude-plugin/marketplace.json` from the default branch, so the files must be on the branch people get (not only on
@@ -292,5 +328,5 @@ available to people:
    rewrites the generated API map block in `sdk/shellmap.mjs` and the copies in `cli/` and `plugins/counterseal/scripts/`;
    CI runs it with `--check`. A new plugin version (`plugins/counterseal/.claude-plugin/plugin.json`) is what makes Claude Code
    offer an update, because the scripts are pinned inside the plugin.
-4. **Nothing is tested in the agents' own apps yet** (see the README): try `leashcli guard status` and one held command in each
+4. **Nothing is tested in the agents' own apps yet** (see the README): try `counterseal guard status` and one held command in each
    agent you intend to name in public copy before naming it.
