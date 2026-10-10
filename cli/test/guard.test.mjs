@@ -788,7 +788,8 @@ test('the CLI and the guard report the same version, and the package ships the g
   assert.equal(GUARD_VERSION, m[1]);
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(pkg.version, m[1]);
-  assert.deepEqual(pkg.files.sort(), ['guard.mjs', 'leash.mjs', 'shellmap.mjs', 'sign.mjs']);
+  // the guard's files, and the files of `mcp wrap` (every file mcp-wrap.mjs imports, so the package runs on its own)
+  assert.deepEqual(pkg.files.sort(), ['guard.mjs', 'leash.mjs', 'mcp-ask.mjs', 'mcp-hash.mjs', 'mcp-json.mjs', 'mcp-policy.mjs', 'mcp-sql.mjs', 'mcp-store.mjs', 'mcp-wrap.mjs', 'shellmap.mjs', 'sign.mjs', 'spawn.mjs']);
 });
 
 test('no em or en dash, and no brand names that are retired, in the guard files', () => {

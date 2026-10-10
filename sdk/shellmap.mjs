@@ -23,12 +23,15 @@ export const SHELL_MAP_VERSION = '2026-10-10.1';
 
 const SENT = '\uE000'; // marks a piece of a word whose value is not known (a variable, a substitution, a glob)
 
+const LIMITS = { sql: 32_768 }; // server/src/providers.js LIMITS.sql: longer SQL is not read, so it is held
+
 // ---------------------------------------------------------------- SQL
 // A real tokenizer: single-quoted strings, double-quoted and backtick identifiers, -- and nested /* */ comments.
 // Returns null (unreadable, so held) for unterminated strings or comments, backslashes inside strings (E'' escapes
 // would shift where a string ends) and any $ that is not a $1 style parameter (dollar quotes, $$ bodies).
 export function sqlTokens(sql) {
   const s = String(sql ?? ''), out = [];
+  if (s.length > LIMITS.sql) return null; // too long to read within the CPU budget: unreadable, so held
   let i = 0;
   while (i < s.length) {
     const c = s[i];

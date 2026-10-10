@@ -13,6 +13,9 @@
 //                                    and, for tokens bound to an agent key, LEASH_AGENT_KEY=<path to the key file>
 //   leash guard install | uninstall | status | check | map | hook   hold a coding agent's irreversible shell commands
 //                                    until you approve them with a passkey (see guard.mjs)
+//   leash mcp wrap --name <id> -- <command> [args...]   put a local MCP server behind Counterseal: destructive tool calls wait
+//                                    for your passkey, and a tool definition that changes after you pinned it is held
+//   leash mcp pin|unpin|status --name <id>              pin what the server shows now, forget the pin, show it (see mcp-wrap.mjs)
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { signBrokerRequest, generateAgentKey, importAgentKey, keyid, proveAgentKey } from './sign.mjs';
 import { homedir } from 'node:os';
@@ -232,11 +235,11 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', 'leashcli
       break;
     }
     case 'agent-keys': table((await api('GET', '/v1/agent-keys')).agentKeys.filter((k) => !k.revoked_at), ['id', 'label', 'keyid', 'tokens']); break;
-    case 'mcp': mcp(); break;
+    case 'mcp': if (['wrap', 'pin', 'unpin', 'status'].includes(args[0])) await (await import('./mcp-wrap.mjs')).main(args); else mcp(); break;
     case 'guard': await (await import('./guard.mjs')).main(args); break;
     case '--version': case '-v': console.log(VERSION); break;
     default:
-      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token <credentialId> [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | guard install|uninstall|status|check|map');
+      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token <credentialId> [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | mcp wrap|pin|unpin|status --name <id> | guard install|uninstall|status|check|map');
   }
 } catch (e) {
   die(`leash: ${e.message}`);

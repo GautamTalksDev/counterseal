@@ -16,7 +16,7 @@ import * as CliSql from '../../cli/mcp-sql.mjs';
 import * as ServerSql from '../src/providers.js';
 import { classifyTool, normalisePolicy, parsePolicy, nameHit, words, looksLikeSql, sqlTexts, WHY, PolicyError, MCP_POLICY_VERSION } from '../../cli/mcp-policy.mjs';
 import * as Store from '../../cli/mcp-store.mjs';
-import { detailOf, LineReader, lineText, spliceArray, withoutMember, serverEnv } from '../../cli/mcp-wrap.mjs';
+import { detailOf, LineReader, lineText, spliceArray, withoutMember, withoutFolded, serverEnv } from '../../cli/mcp-wrap.mjs';
 import { plan, escapeArgument } from '../../cli/spawn.mjs';
 
 const ch = (...codes) => String.fromCharCode(...codes);
@@ -451,4 +451,31 @@ test('starting the server: a .cmd shim runs through cmd.exe with every argument 
   for (const meta of ['&', '|', '(', ')', '%', '"']) {
     for (let i = 0; i < line.length; i++) if (line[i] === meta && line[i - 1] !== '^') assert.fail(`unescaped ${meta} at ${i} in ${line}`);
   }
+});
+
+test('the npm package carries every file the wrapper imports, and nothing the wrapper needs comes from a package', () => {
+  const dir = new URL('../../cli/', import.meta.url);
+  const pkg = JSON.parse(readFileSync(new URL('package.json', dir), 'utf8'));
+  assert.equal(pkg.dependencies, undefined, 'zero runtime dependencies');
+  const seen = new Set();
+  const walk = (file) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const text = readFileSync(new URL(file, dir), 'utf8');
+    for (const m of text.matchAll(/(?:from|import\()\s*'([^']+)'/g)) {
+      const spec = m[1];
+      if (spec.startsWith('node:')) continue;
+      assert.ok(spec.startsWith('./'), `${file} imports ${spec}, which is not a file of the package or a node: module`);
+      assert.ok(pkg.files.includes(spec.slice(2)), `${spec} (imported by ${file}) is not in package.json files`);
+      walk(spec.slice(2));
+    }
+  };
+  walk('mcp-wrap.mjs');
+  assert.ok(seen.size >= 8);
+});
+
+test('withoutFolded cuts every spelling of a member and keeps the other bytes', () => {
+  const text = '{ "a":1 ,"Instructions":"x", "instructions" : "y","INSTRUCTIONS":2,"b":[1, 2] }';
+  const p = parseStrict(text, { track: 2 });
+  assert.equal(withoutFolded(text, p.spans.get(p.value), "instructions"), "{\"a\":1,\"b\":[1, 2]}");
 });
