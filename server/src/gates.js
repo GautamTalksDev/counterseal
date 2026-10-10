@@ -30,6 +30,7 @@ import { int } from './ledger.js';
 import { verifyGithubToken, SKEW } from './oidc.js';
 import { GATE_AGENT, GATE_HOST, GATE_METHOD, gateHash, gateContext, factsOf, previewOf } from './gatefacts.js';
 import { WAIT_MAX, WAIT_STEP, WAIT_READS, POLLS_PER_MINUTE } from './approvals.js';
+import { BRAND } from './brand.js';
 
 export const MAX_GATES = 20, HOLDS_PER_HOUR = 30, PENDING_PER_GATE = 10, TOKEN_TTL = 15 * 60_000, GRANT_WINDOW = 11 * 60_000;
 export const DEFAULT_MINUTES = 15, MAX_MINUTES = 60, MAX_SUMMARY = 120;
@@ -51,6 +52,10 @@ const OIDC_BEARER = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/;
 /** the audience a gate's tokens must carry: this service's product host and the gate, so a token made for one gate (or
  *  for another service) is no use at any other */
 export const audienceFor = (env, gateId) => `${hosts(env)[0].origin}/gate/${gateId}`;
+
+/** Freeze (src/brakes.js): while the owner has the account frozen nothing new is asked, a wait ends at once with this
+ *  answer, and no approval is spent. Same code and status as every other frozen answer (423 account_frozen). */
+const frozen = () => new HttpError(423, 'account_frozen', `This ${BRAND.name} account is frozen: every agent token, coding-agent approval and deploy gate is stopped. Its owner can unfreeze it with a passkey in the app.`);
 
 const sleep = (env, ms) => (env.__sleep ? env.__sleep(ms) : globalThis.scheduler?.wait ? globalThis.scheduler.wait(ms) : new Promise((ok) => setTimeout(ok, ms)));
 const statusOf = (h, t = now()) => (['pending', 'approved'].includes(h.status) && h.expires_at <= t ? 'expired' : h.status);
@@ -174,9 +179,12 @@ export async function request(c) {
   // 1. GitHub's signature and the token's own claims, before anything touches the database (the audience names this gate)
   const claims = await verifyGithubToken(env, m[1], { audience: audienceFor(env, gateId), now: t });
   // 2. the gate, and whether this run is the kind it accepts. A refused run writes nothing and alerts no one.
-  const g = await env.DB.prepare('SELECT g.*, a.receipts AS receipts_on FROM gates g JOIN accounts a ON a.id = g.account_id WHERE g.id = ?').bind(gateId).first();
+  const g = await env.DB.prepare('SELECT g.*, a.receipts AS receipts_on, a.frozen_at FROM gates g JOIN accounts a ON a.id = g.account_id WHERE g.id = ?').bind(gateId).first();
   if (!g || g.revoked) throw new HttpError(404, 'gate_not_found', 'There is no such gate, or it was revoked.');
   checkRun(g, claims);
+  // Freeze: nothing new is asked, held or alerted, and the token is not spent. (After the run is known to be this gate's:
+  // a caller from another repository still learns nothing about the account.)
+  if (g.frozen_at) throw frozen();
   // 3. the token is spent: it can ask once (a replay of a token that was used, or leaked, finds nothing to ask with)
   if (await d1Seen(env.DB)('oidc:' + claims.jti, (claims.exp + SKEW) * 1000)) throw new HttpError(401, 'oidc_replayed', 'This token was already used. The action asks GitHub for a fresh one on every try.');
 
@@ -240,10 +248,11 @@ export async function pollAuth(request) {
   return { hash: await sha256hex(m[1]) };
 }
 
-const readHold = (env, p, id, t) => env.DB.prepare("SELECT h.id, h.status, h.deny_reason, h.expires_at, h.req_hash, h.context, h.rule, h.account_id, p.gate_id FROM gate_polls p JOIN holds h ON h.id = p.hold_id WHERE p.hash = ? AND p.hold_id = ? AND p.expires_at > ? AND h.kind = 'deploy'").bind(p.hash, id, t).first();
+const readHold = (env, p, id, t) => env.DB.prepare("SELECT h.id, h.status, h.deny_reason, h.expires_at, h.req_hash, h.context, h.rule, h.account_id, p.gate_id, a.frozen_at FROM gate_polls p JOIN holds h ON h.id = p.hold_id JOIN accounts a ON a.id = h.account_id WHERE p.hash = ? AND p.hold_id = ? AND p.expires_at > ? AND h.kind = 'deploy'").bind(p.hash, id, t).first();
 
 /** GET /v1/gate/status/:id?wait=N: the decision, waiting up to N seconds for one (no D1 writes while it waits). The poll
- *  that finds the hold approved spends it: that approval is that run's, once. */
+ *  that finds the hold approved spends it: that approval is that run's, once. A freeze ends the wait with 423 at the next
+ *  read (every 2 seconds), and an approval is never spent while the account is frozen. */
 export async function status(c, id) {
   const env = c.env, t0 = now();
   const w = c.url.searchParams.get('wait');
@@ -251,11 +260,13 @@ export async function status(c, id) {
   await readLimit(env, 'gpoll:' + c.poll.hash.slice(0, 24), POLLS_PER_MINUTE, t0);
   let h = await readHold(env, c.poll, id, t0);
   if (!h) throw new HttpError(404, 'not_found');
+  if (h.frozen_at) throw frozen();
   const deadline = t0 + wait * 1000;
   for (let i = 0; i < WAIT_READS && statusOf(h) === 'pending' && now() < deadline; i++) {
     await sleep(env, Math.min(WAIT_STEP, deadline - now()));
     h = await readHold(env, c.poll, id, now());
     if (!h) throw new HttpError(404, 'not_found');
+    if (h.frozen_at) throw frozen();
   }
   const st = statusOf(h);
   if (st === 'approved') return pass(c, h);
@@ -269,8 +280,9 @@ async function pass(c, h) {
   const f = factsOf(h.context);
   // the hold must still say what was approved: its stored facts hash to the hash the approval is bound to
   if (!f || (await gateHash(f)) !== h.req_hash) throw new HttpError(409, 'hash_mismatch', 'This approval is not for the run it names. Ask again.');
-  const g = await env.DB.prepare('SELECT g.*, a.receipts AS receipts_on FROM gates g JOIN accounts a ON a.id = g.account_id WHERE g.id = ? AND g.account_id = ?').bind(h.gate_id, h.account_id).first();
+  const g = await env.DB.prepare('SELECT g.*, a.receipts AS receipts_on, a.frozen_at FROM gates g JOIN accounts a ON a.id = g.account_id WHERE g.id = ? AND g.account_id = ?').bind(h.gate_id, h.account_id).first();
   if (!g || g.revoked) throw new HttpError(409, 'gate_revoked', 'This gate was revoked.');
+  if (g.frozen_at) throw frozen();
   // phase 2: check the key can be handed out before the approval is spent
   let cred = null;
   if (g.credential_id) {
@@ -279,11 +291,14 @@ async function pass(c, h) {
     const live = await env.DB.prepare('SELECT COUNT(*) AS n FROM tokens WHERE account_id = ? AND revoked = 0 AND expires_at > ?').bind(g.account_id, t).first();
     if (live.n >= MAX_LIVE_TOKENS) throw new HttpError(409, 'too_many_tokens', `Up to ${MAX_LIVE_TOKENS} live tokens. Revoke some first; the approval is still good.`);
   }
+  // (a freeze between the read above and this statement also stops it: the account is checked in the same statement)
   const u = await env.DB.prepare(`UPDATE holds SET status = 'used' WHERE id = ?1 AND token_id = ?2 AND req_hash = ?3 AND status = 'approved' AND expires_at > ?4 AND kind = 'deploy'
-      AND EXISTS (SELECT 1 FROM gates x WHERE x.id = ?5 AND x.revoked = 0 AND (x.repository_id IS NULL OR (x.repository_id = ?6 AND x.repository_owner_id = ?7))) RETURNING id`)
-    .bind(h.id, tokenIdOf(g.id), h.req_hash, t, g.id, f.repository_id, f.owner_id).first();
+      AND EXISTS (SELECT 1 FROM gates x WHERE x.id = ?5 AND x.revoked = 0 AND (x.repository_id IS NULL OR (x.repository_id = ?6 AND x.repository_owner_id = ?7)))
+      AND NOT EXISTS (SELECT 1 FROM accounts WHERE id = ?8 AND frozen_at IS NOT NULL) RETURNING id`)
+    .bind(h.id, tokenIdOf(g.id), h.req_hash, t, g.id, f.repository_id, f.owner_id, g.account_id).first();
   if (!u) {
     const again = await readHold(env, c.poll, h.id, t);
+    if (again && again.frozen_at) throw frozen();
     const st = again ? statusOf(again, t) : 'expired';
     if (st === 'used' || st === 'expired') return { id: h.id, status: st, deny_reason: null, expires_at: h.expires_at };
     throw new HttpError(409, 'gate_bound_elsewhere', 'This gate was bound to a different repository while the job waited. Ask again.');
