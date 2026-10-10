@@ -97,7 +97,7 @@
     <li>Each vaulted API key encrypted with AES-256-GCM under its own key, wrapped by a master key held as a platform secret outside the database, and bound to its row; no API returns a key.</li>
     <li>Agents get scoped, expiring, revocable tokens; tokens, keys and sessions are stored only as SHA-256 hashes.</li>
     <li>Roles checked on the server for every request; destructive changes need a fresh passkey ceremony; account-wide actions need the owner.</li>
-    <li>HTTPS only (HSTS preload), a strict Content Security Policy with Trusted Types, no third-party code on any page.</li>
+    <li>HTTPS only (HSTS), a strict Content Security Policy with Trusted Types, no third-party code on any page.</li>
     <li>Rate limits on every endpoint; per-account ceilings on everything an account can create.</li>
     <li>A hash-chained audit log of every decision and security change, exportable and verifiable by the Controller.</li>
     <li>Request logs off (Workers Logs disabled); IP addresses kept only as salted hashes for rate limiting, for a day at most.</li>

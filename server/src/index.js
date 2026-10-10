@@ -16,7 +16,7 @@ import * as Push from './push.js';
 import { LEDGER_ROUTES, PUBLIC_PATH, CORS, logOf, apiKey, cachedHead, quotaFor, dayCapFor, usageOf, cleanupStatements, forgetAccount, deleteStatements, int } from './ledger.js';
 import { logKey } from './note.js';
 import { directoryTool } from './tools.js';
-import { stats, checkStatsToken, markSeen } from './admin.js';
+import { stats, checkStatsToken, markSeen, rewrapVault } from './admin.js';
 import * as Passkeys from './passkeys.js';
 import * as Brakes from './brakes.js';
 import * as Team from './team.js';
@@ -260,6 +260,8 @@ const ROUTES = [
     try { head = await cachedHead({ key: await logKey(c.env), log: c.log }); } catch { /* the log is optional for these numbers */ }
     return stats(c.env, head);
   }],
+  // master key rotation: move vaulted rows to the new master key (docs/KEY_ROTATION.md); counts only
+  ['POST', /^\/v1\/admin\/vault\/rewrap$/, 'admin', (c) => rewrapVault(c.env, c.body)],
   ...LEDGER_ROUTES,
 ];
 
@@ -334,6 +336,9 @@ export async function handle(request, rawEnv, opts = {}) {
     return q;
   };
   if (url.hostname === BRAND.retiredDomain) return movedPermanently(A.host(rawEnv).origin + url.pathname + url.search);
+  // plain HTTP to the one host (Cloudflare passes it to the Worker): never served, every method gets a 301 to HTTPS, so no
+  // page, API answer or proxied call is ever given over a connection anyone on the path can read or change
+  if (url.protocol === 'http:' && A.host(rawEnv).origin === 'https://' + url.host) return movedPermanently('https://' + url.host + url.pathname + url.search);
   const env = { ...rawEnv, __ctx: ctx ? { waitUntil } : undefined, __log: opts.log || rawEnv.__log };
   const isPublic = PUBLIC_PATH.test(url.pathname);
   try {

@@ -8,6 +8,7 @@
 // markers of migration 0012 (src/trust.js); the totals also count older evidence (any token made, a token or guard key
 // ever used, an alert device), so accounts from before the markers are not lost.
 import { HttpError, sha256, eqBytes, now } from './util.js';
+import { rewrap } from './vault.js';
 
 const DAY = 86_400_000;
 
@@ -91,3 +92,32 @@ export function markSeen(env, accountId) {
   return env.DB.prepare('UPDATE accounts SET last_seen = ? WHERE id = ? AND (last_seen IS NULL OR last_seen < ?)').bind(t, accountId, day * DAY).run();
 }
 export const _resetSeen = () => seen.clear();
+
+// Master key rotation (docs/KEY_ROTATION.md): POST /v1/admin/vault/rewrap with the STATS_TOKEN bearer, after LEASH_KEK_NEXT
+// (or LEASH_KEK plus LEASH_KEK_OLD) was set. Each call moves up to PAGE rows of each sealed table to the
+// new key and returns where to continue ({"after": {"credentials": id, "channels": id}}); `next` is null for a table
+// that is done. Counts and row-id cursors only, never a secret: only the data key is unwrapped and wrapped again.
+const SEALED = { credentials: 'SELECT id, wrapped_dek, dek_iv FROM credentials WHERE id > ? ORDER BY id LIMIT ?', channels: 'SELECT id, wrapped_dek, dek_iv FROM channels WHERE id > ? ORDER BY id LIMIT ?' };
+const PAGE = 100;
+export async function rewrapVault(env, body) {
+  const after = body?.after && typeof body.after === 'object' ? body.after : {};
+  const out = {};
+  for (const [table, sql] of Object.entries(SEALED)) {
+    const from = typeof after[table] === 'string' ? after[table].slice(0, 64) : '';
+    if (after[table] === null) { out[table] = { checked: 0, rewrapped: 0, failed: 0, next: null }; continue; }
+    const rows = (await env.DB.prepare(sql).bind(from, PAGE).all()).results;
+    const r = { checked: rows.length, rewrapped: 0, failed: 0, next: rows.length === PAGE ? rows[rows.length - 1].id : null };
+    const updates = [];
+    for (const row of rows) {
+      let w;
+      try { w = await rewrap(env, row); } catch (e) { if (e instanceof HttpError && e.status === 503) throw e; r.failed++; continue; }
+      if (!w) continue;
+      // the WHERE on the old wrap: a row changed in between (deleted, or rewrapped by another call) is left alone
+      updates.push(env.DB.prepare(`UPDATE ${table} SET wrapped_dek = ?, dek_iv = ? WHERE id = ? AND wrapped_dek = ?`).bind(w.wrapped_dek, w.dek_iv, row.id, row.wrapped_dek));
+      r.rewrapped++;
+    }
+    if (updates.length) await env.DB.batch(updates);
+    out[table] = r;
+  }
+  return { ...out, rotating: Boolean(env.LEASH_KEK_NEXT || env.LEASH_KEK_OLD), done: Object.values(out).every((t) => t.next === null) };
+}

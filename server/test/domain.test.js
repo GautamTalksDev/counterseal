@@ -117,3 +117,26 @@ test('approval links and phone alerts point to the one host', async () => {
   const pks = (await w.req('GET', NEW + '/v1/passkeys', { cookie: u.cookie, origin: null, xleash: false })).body.passkeys;
   assert.deepEqual(pks.map((p) => p.host), [NEW]);
 });
+
+test('plain HTTP to the one host: every method and path gets a 301 to the same URL over HTTPS, nothing is served or written', async () => {
+  const w = oneWorld();
+  const u = await newUser(w);
+  const served = [];
+  w.env.ASSETS = { fetch: async (r) => { served.push(r.url); return new Response('asset'); } };
+  const cred = (await w.req('POST', ...at(NEW, '/v1/credentials', { cookie: u.cookie, body: { provider: 'github', secret: 'ghp_' + 'H'.repeat(36) } }))).body.id;
+  const tok = (await w.req('POST', ...at(NEW, '/v1/tokens', { cookie: u.cookie, body: { credentialId: cred } }))).body.token;
+  const before = w.env.DB.raw.prepare('SELECT (SELECT COUNT(*) FROM holds) + (SELECT COUNT(*) FROM audit) AS n').get().n;
+  const PLAIN = 'http://counterseal.test';
+  for (const p of ['/', '/app/', '/docs/?a=1', '/shellmap.js', '/.well-known/security.txt', '/v1/meta', '/v1/me', '/v1/auth/login/begin', '/p/github/user', '/p/github/repos/a/b']) for (const method of ['GET', 'HEAD', 'POST', 'DELETE', 'OPTIONS']) {
+    const r = await w.req(method, PLAIN + p, { cookie: u.cookie, bearer: p.startsWith('/p/') ? tok : undefined, origin: method === 'POST' ? PLAIN : null, body: method === 'POST' ? {} : undefined });
+    assert.equal(r.status, 301, `${method} ${p}`);
+    assert.equal(r.headers.get('location'), NEW + p, `${method} ${p}`);
+    assert.match(r.headers.get('strict-transport-security'), /max-age=63072000; includeSubDomains; preload/);
+    assert.equal(r.headers.get('set-cookie'), null);
+  }
+  assert.deepEqual(served, []);
+  assert.equal(w.env.DB.raw.prepare('SELECT (SELECT COUNT(*) FROM holds) + (SELECT COUNT(*) FROM audit) AS n').get().n, before, 'nothing is proxied, held or written');
+  // local development over http (ORIGIN is http) is untouched
+  const dev = new World(); Object.assign(dev.env, { ORIGIN: 'http://localhost:8787', RP_ID: 'localhost' });
+  assert.equal((await dev.req('GET', 'http://localhost:8787/v1/meta', { origin: null, xleash: false })).status, 200);
+});
