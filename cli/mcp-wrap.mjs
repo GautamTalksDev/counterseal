@@ -352,7 +352,7 @@ export class Gateway {
     };
     let st = check();
     // nobody has listed the tools in this session yet, or the last look is old: look again (a server may change a tool without saying so)
-    if (st === 'unknown' || (st === 'ok' && this.clock() - this.lastLook > this.recheckMs)) { await this.#refresh().catch(() => {}); st = check(); }
+    if (st === 'unknown' || (st === 'ok' && this.clock() - this.lastLook >= this.recheckMs)) { await this.#refresh().catch(() => {}); st = check(); }
     return st === 'unknown' ? 'changed' : st;
   }
 
