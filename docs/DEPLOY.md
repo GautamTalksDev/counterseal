@@ -184,9 +184,9 @@ invocation from `server/test/team.test.js` (budgets) and a counting run with rec
 | Path | Worker CPU | Durable Object CPU | D1 queries |
 |---|---|---|---|
 | `GET /v1/team` | 0.2 ms (0.4) | | 5 |
-| A seal that does not complete the quorum (passkey verify, seal, nudge) | 1.1 ms (3.1) | | 15 |
-| The seal that approves (passkey verify, seal, approval), sealed | 1.2 ms (2.0) | 0.5 ms | 14 |
-| Joining a team (registration verify, member and passkey, alert) | 0.7 ms (4.7) | | 15 |
+| A seal that does not complete the quorum (passkey verify, seal, nudge) | 1.2 ms (5.8) | | 15 |
+| The seal that approves (passkey verify, seal, approval), sealed | 1.3 ms (1.8) | 0.6 ms | 14 |
+| Joining a team (registration verify, member and passkey, alert) | 0.7 ms (1.6) | | 15 |
 | A proxied GET on a team account | as on a one-person account (the same query count) | | 6 |
 
 These are Node numbers, not a load test on Workers. Run one before raising the batch caps in `server/src/receipts.js`.

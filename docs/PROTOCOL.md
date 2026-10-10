@@ -297,8 +297,8 @@ of the approval carries `meta.quorum` and `meta.votes` only.
 - `POST /v1/team/members/<id>/remove/begin|finish` (an owner removes anyone; anyone may remove themselves, which is
   leaving; fresh passkey ceremony). In one transaction: the member is marked removed (only if the rules still hold), and
   only then their sessions, passkeys and push devices are deleted, their seals on waiting holds dropped, the tokens,
-  guard keys and receipts keys they made revoked, what those asked for closed, and their open invites revoked. Returns
-  the counts. Every remaining member's devices are woken.
+  guard keys and receipts keys they made revoked, what those asked for closed, and their open invites and unused move
+  links revoked. Returns the counts. Every remaining member's devices are woken.
 
 ### Alerts
 

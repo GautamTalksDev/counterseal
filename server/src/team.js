@@ -360,7 +360,7 @@ export async function removeBegin(env, sess, id) {
 /** Removing someone, in one transaction: they are marked removed (only if the rules still hold), and then, only if that
  *  happened, their sessions, passkeys and alert devices are deleted, their seals on waiting holds are dropped, the
  *  tokens, guard keys and receipts keys they made are revoked, what those asked for is closed, and their open invites
- *  die. */
+ *  and unused move links die. */
 export async function removeFinish(env, sess, id, body) {
   await confirm(env, sess, body, 'member_remove:' + id);
   const tg = await target(env, sess, id);
@@ -384,6 +384,8 @@ export async function removeFinish(env, sess, id, body) {
     db.prepare(`UPDATE guard_keys SET revoked = 1 WHERE ${mine('')} AND revoked = 0 AND ${gone}`).bind(a, id, t),
     db.prepare(`UPDATE api_keys SET revoked = 1 WHERE ${mine('')} AND revoked = 0 AND ${gone}`).bind(a, id, t),
     db.prepare(`UPDATE invites SET revoked_at = ?3 WHERE account_id = ?1 AND created_by = ?2 AND used_at IS NULL AND revoked_at IS NULL AND ${gone}`).bind(a, id, t),
+    // a move link they made can no longer add a passkey for them
+    db.prepare(`UPDATE move_links SET used_at = ?3 WHERE ${mine('')} AND used_at IS NULL AND ${gone}`).bind(a, id, t),
   ]);
   if (!out[1].meta.changes) throw new HttpError(409, 'try_again', 'The team changed while you confirmed. Look again and retry.');
   const n = (i) => out[i].meta.changes;

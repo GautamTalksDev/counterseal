@@ -376,6 +376,7 @@ test('removing a member revokes their sessions, passkeys, devices, tokens, guard
   const rk = (await w.req('POST', '/v1/keys', { cookie: asha.cookie, body: { label: 'asha receipts' } })).body.key;
   const other = await heldCall(w, u, cred, '/repos/acme/other');
   assert.equal((await seal(w, asha, other.hold)).body.seals, 1);
+  w.env.DB.raw.prepare('INSERT INTO move_links (hash, account_id, created_at, expires_at, member_id) VALUES (?, ?, ?, ?, ?)').run('h'.repeat(64), u.id, Date.now(), Date.now() + 600_000, asha.member);
   // the rules: never the last owner, never the founder by someone else, never fewer approvers than the quorum
   assert.equal((await remove(w, u, u)).body.error, 'last_owner');
   assert.equal((await remove(w, asha, ben)).body.error, 'role_required', 'only an owner removes someone else');
@@ -394,6 +395,7 @@ test('removing a member revokes their sessions, passkeys, devices, tokens, guard
   assert.equal((await w.req('POST', '/v1/receipts', { bearer: rk, ...anon, body: { receipt: { agent: 'a', action: 'x' } } })).body.error, 'api_key_invalid');
   assert.equal(w.env.DB.raw.prepare('SELECT status FROM holds WHERE id = ?').get(mine.hold).status, 'expired');
   assert.equal(count(w, 'SELECT COUNT(*) n FROM push_subs WHERE member_id = ?', asha.member), 0);
+  assert.ok(w.env.DB.raw.prepare('SELECT used_at FROM move_links WHERE member_id = ?').get(asha.member).used_at, 'an unused move link of hers is void');
   const card = (await w.req('GET', '/v1/holds', { cookie: u.cookie })).body.holds.find((x) => x.id === other.hold);
   assert.equal(card.votes.length, 0, 'her seal is dropped');
   assert.equal((await seal(w, ben, other.hold)).body.approved, false, 'so one more seal is still needed');
