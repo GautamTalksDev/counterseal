@@ -33,6 +33,28 @@ test('a good token verifies and its claims come back in strict shapes (ids as di
   assert.equal((await verify(env, await gh.token(gh.claims({ actor: 'dependabot[bot]' })))).actor, 'dependabot[bot]');
 });
 
+test('a token shaped like a real GitHub one verifies: the claim set and the types of a live run (ids as strings, times as numbers)', async () => {
+  // the keys and types of a token captured from a real run in a private repository, as a third-party action's README shows it
+  // (andreaso/output-oidc-claims-action, 2026); the values here are made up
+  const { gh, env } = await setup();
+  const iat = Math.floor(Date.now() / 1000);
+  const real = {
+    actor: 'octocat', actor_id: '285964', aud: AUD, base_ref: '', check_run_id: '96193868770', event_name: 'push', exp: iat + 300, head_ref: '', iat, iss: ISSUER,
+    job_workflow_ref: 'octo-org/octo-repo/.github/workflows/claims.yaml@refs/heads/main', job_workflow_sha: 'b8962f4eaff8e14fc646cb22c596c81e67d71362',
+    jti: '1e410ab1-302e-4e33-8c5f-869a4bd12c3b', nbf: iat - 300, ref: 'refs/heads/main', ref_protected: 'false', ref_type: 'branch',
+    repository: 'octo-org/octo-repo', repository_id: '1339936803', repository_owner: 'octo-org', repository_owner_id: '285964', repository_visibility: 'private',
+    run_attempt: '1', run_id: '32291736541', run_number: '1', runner_environment: 'github-hosted', sha: 'b8962f4eaff8e14fc646cb22c596c81e67d71362',
+    sub: 'repo:octo-org@285964/octo-repo@1339936803:ref:refs/heads/main', workflow: 'Claims', workflow_ref: 'octo-org/octo-repo/.github/workflows/claims.yaml@refs/heads/main',
+    workflow_sha: 'b8962f4eaff8e14fc646cb22c596c81e67d71362',
+  };
+  const c = await verify(env, await gh.token(real));
+  assert.equal(c.repository, 'octo-org/octo-repo'); assert.equal(c.repository_id, '1339936803'); assert.equal(c.run_id, '32291736541'); assert.equal(c.check_run_id, '96193868770');
+  assert.equal(c.environment, ''); assert.equal(c.visibility, 'private'); assert.equal(c.runner, 'github-hosted'); assert.equal(c.event_name, 'push');
+  assert.equal(c.job_workflow_ref, c.workflow_ref);
+  // with an environment (the claim is only there when the job names one)
+  assert.equal((await verify(env, await gh.token({ ...real, jti: 'x1', environment: 'production' }))).environment, 'production');
+});
+
 test('forged tokens: alg none, HS256 keyed with the public key, another alg, a key of the attacker\'s own, a tampered payload', async () => {
   const { gh, env } = await setup();
   const good = gh.claims();

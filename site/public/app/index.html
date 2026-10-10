@@ -75,6 +75,7 @@
       <a href="#" data-view="holds" class="on"><span class="ico i-hold"></span>Held<b id="holdCount" class="cnt">0</b></a>
       <a href="#" data-view="vault"><span class="ico i-vault"></span>Vault</a>
       <a href="#" data-view="tokens"><span class="ico i-tok"></span>Agent tokens</a>
+      <a href="#" data-view="gates"><span class="ico i-tok"></span>Deploy gates</a>
       <a href="#" data-view="agentkeys"><span class="ico i-acct"></span>Agent keys</a>
       <a href="#" data-view="receipts"><span class="ico i-log"></span>Receipts</a>
       <a href="#" data-view="audit"><span class="ico i-log"></span>Audit log</a>
@@ -185,6 +186,44 @@
         <div id="newToken" class="reveal-box" hidden>
           <label class="lbl">Your token, shown once</label><div id="newTokenVal" class="secret mono"></div>
           <label class="lbl">Add to your agent (MCP config)</label><div id="newTokenMcp" class="secret mono"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" data-view="gates" hidden>
+      <header class="vh"><div><h1>Deploy gates</h1><p class="dim">Hold a GitHub Actions job until you approve it with a passkey. The approval is bound to the repository, workflow, commit and run in the token GitHub signs for the job.</p></div></header>
+      <div class="panel">
+        <div id="gates" class="list"></div>
+        <p class="empty-row dim" id="noGates">No gates yet.</p>
+      </div>
+      <div class="panel form">
+        <h3>New gate</h3>
+        <p class="dim small">A gate accepts only what you list here: one repository, its workflow files and the branches or tags it deploys from. Nothing is accepted by default, and a gate cannot be edited (make a new one and revoke the old). Making one asks for your passkey, because it decides which repository may ask you to approve deploys. A gate does not use GitHub's required reviewers (GitHub offers those only for public repositories on the Free, Pro and Team plans); it checks the token GitHub signs for the job.</p>
+        <div class="grid">
+          <div><label for="gtLabel" class="lbl">Label</label><input id="gtLabel" maxlength="60" autocomplete="off" placeholder="acme/app production"></div>
+          <div><label for="gtRepo" class="lbl">Repository</label><input id="gtRepo" maxlength="140" autocomplete="off" spellcheck="false" placeholder="owner/name"></div>
+        </div>
+        <div class="grid">
+          <div><label for="gtWorkflows" class="lbl">Workflow files <span class="dim">(one per line)</span></label><textarea id="gtWorkflows" spellcheck="false" placeholder=".github/workflows/deploy.yml"></textarea></div>
+          <div><label for="gtRefs" class="lbl">Branches and tags <span class="dim">(one per line; a trailing * matches a prefix, like refs/heads/release/*)</span></label><textarea id="gtRefs" spellcheck="false" placeholder="refs/heads/main"></textarea></div>
+        </div>
+        <label for="gtEnvs" class="lbl">Environments <span class="dim">(optional, one per line: if you list any, the job must run in one of them)</span></label>
+        <textarea id="gtEnvs" spellcheck="false" placeholder="production"></textarea>
+        <label class="lbl">Triggers it accepts <span class="dim">(pull requests are never offered: they run code from forks)</span></label>
+        <div id="gtEvents" class="checks"></div>
+        <label class="lbl"><input type="checkbox" id="gtPublish"> Show the repository's name in this gate's public receipts. Off by default: the public log then says only DEPLOY, the decision and the rule. Once public, a name stays in the log for good.</label>
+        <h3 class="sub">Hand out a key <span class="dim">(optional: no approval, no key)</span></h3>
+        <p class="dim small">Pick a key from your vault and the job gets no deploy key until you approve. On approval it receives a Counterseal token for that key, valid 15 minutes and limited by the policy below; the real key never leaves the vault. A policy that pre-approves irreversible calls is allowed here only because making the gate takes your passkey.</p>
+        <div class="grid">
+          <div><label for="gtCred" class="lbl">Key from your vault</label><select id="gtCred"><option value="">None</option></select></div>
+          <div></div>
+        </div>
+        <label for="gtPolicy" class="lbl">Policy for that key <span class="dim">(JSON, optional)</span></label>
+        <textarea id="gtPolicy" spellcheck="false" placeholder='{"allow":[{"method":"POST","path":"/repos/acme/app/deployments"}],"readOnly":false}'></textarea>
+        <div class="actions"><button id="gtNew" class="btn pri" type="button">Create gate with passkey</button></div>
+        <div id="newGate" class="reveal-box" hidden>
+          <label class="lbl">Add this step to the job (the gate id is not a secret)</label><pre id="newGateSnippet" class="secret mono snippet"></pre>
+          <div class="actions"><button id="newGateCopy" class="btn sm" type="button">Copy</button></div>
         </div>
       </div>
     </section>

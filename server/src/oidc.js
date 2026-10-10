@@ -5,8 +5,12 @@
 //    sub, jti, exp, iat, nbf, repository, repository_id, repository_owner, repository_owner_id, run_id, run_attempt, actor,
 //    workflow_ref, job_workflow_ref, environment, event_name, ref, ...); the audience defaults to the repository owner's URL
 //    and is set with the "audience" query parameter on ACTIONS_ID_TOKEN_REQUEST_URL (bearer ACTIONS_ID_TOKEN_REQUEST_TOKEN);
-//    the job needs `permissions: id-token: write`; the docs' own example shows the claims repository_id, run_id, run_number
-//    and run_attempt as strings, so numbers here are read from digit strings.
+//    the job needs `permissions: id-token: write`. The reference does not say what type the ids are. A real token shown in a
+//    third-party action's README (andreaso/output-oidc-claims-action, a private repository, 2026) has repository_id,
+//    repository_owner_id, run_id, run_attempt and check_run_id as strings of digits, exp, nbf and iat as numbers (exp 300
+//    seconds after iat), `job_workflow_ref` equal to `workflow_ref` for a job that is not in a reusable workflow, a `sha`, and
+//    no `environment` when the job has none. So ids are read from digit strings (a number is accepted too) and an absent
+//    environment is the empty one. This code has not seen a token from a live run of this product: the first one is the test.
 //  - The discovery document, https://token.actions.githubusercontent.com/.well-known/openid-configuration : issuer
 //    "https://token.actions.githubusercontent.com", jwks_uri ".../.well-known/jwks", id_token_signing_alg_values_supported
 //    ["RS256"] (only), and claims_supported, which includes `sha`, `check_run_id` and `job_workflow_ref`.

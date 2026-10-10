@@ -159,6 +159,10 @@ async function load() {
     tc.append(el('option', { value: x.id, textContent: `${x.label} (${x.provider})` }));
   }
   $('noCreds').hidden = c.credentials.length > 0;
+  // the gates form offers the vault's keys for "no approval, no key"
+  const gc = $('gtCred'), gkeep = gc.value;
+  gc.replaceChildren(el('option', { value: '', textContent: 'None' }), ...c.credentials.map((x) => el('option', { value: x.id, textContent: `${x.label} (${x.provider})` })));
+  gc.value = c.credentials.some((x) => x.id === gkeep) ? gkeep : '';
   // tokens
   const T = $('tokens'); T.replaceChildren();
   for (const x of t.tokens.filter((y) => !y.revoked)) {
@@ -197,6 +201,7 @@ async function load() {
   }
   // the receipts list reads the log's Durable Object, so it is fetched only while that view is open
   if (current === 'receipts') receiptsView(me.receipts).catch(() => {});
+  if (current === 'gates') gatesView().catch(() => {});
   // audit
   const A = $('audit'); A.replaceChildren();
   for (const x of a.entries.slice(0, 40)) A.append(el('div', {}, el('span', { className: 'mono', textContent: `${new Date(x.at).toLocaleString()}  ${x.action}${x.receipt !== null && x.receipt !== undefined ? '  receipt #' + x.receipt : ''}` }), el('span', { className: 'dim mono', textContent: x.detail.path ? `${x.detail.method} ${x.detail.path}` : x.actor })));
@@ -227,6 +232,38 @@ function noSeal(x) {
   if (x.self_approve === false && x.requested_by && x.requested_by === ME.id) return 'Your own token or guard key asked for this, so someone else on your team must seal it.';
   return '';
 }
+
+// A deploy hold (a GitHub Actions job waiting at a deploy gate). Everything in the table is from the token GitHub signed
+// for the job, which Counterseal verified; the workflow's own text is kept apart and says it is not verified. The links
+// were built by the server from checked values, and are only followed if they are plain github.com addresses.
+const GH_LINK = /^https:\/\/github\.com\/[A-Za-z0-9._\/-]{1,250}$/;
+function ghLink(href, text) {
+  if (typeof href !== 'string' || !GH_LINK.test(href)) return el('span', { className: 'mono', textContent: text });
+  const a = el('a', { href, textContent: text, className: 'ul mono', target: '_blank' });
+  a.rel = 'noopener noreferrer';
+  return a;
+}
+function deployFacts(g) {
+  const mono = (t) => el('span', { className: 'mono', textContent: t });
+  const dim = (t) => el('span', { className: 'dim', textContent: t });
+  const row = (k, ...v) => [el('dt', { textContent: k }), el('dd', {}, ...v)];
+  const sha = String(g.sha || '');
+  return el('div', { className: 'deploy' },
+    el('p', { className: 'signed' }, el('span', { className: 'badge ok', textContent: 'Signed by GitHub' }), ' The facts below are from the token GitHub signed for this job. Counterseal checked its signature.'),
+    g.bind ? el('p', { className: 'alert', textContent: `First run of this gate. Approving also binds it to ${g.repository} (GitHub id ${g.repository_id}), so a renamed or re-created repository cannot use it.` }) : null,
+    el('dl', { className: 'facts' },
+      ...row('Repository', mono(g.repository), g.visibility ? dim(` (${g.visibility})`) : null),
+      ...row('Commit', ghLink(g.commit_url, sha.slice(0, 7)), el('span', { className: 'dim mono sha', textContent: '  ' + sha })),
+      ...row('Branch or tag', mono(g.ref)),
+      ...row('Workflow', mono(g.workflow_ref)),
+      ...(g.job_workflow_ref && g.job_workflow_ref !== g.workflow_ref ? row('Job\'s workflow', mono(g.job_workflow_ref)) : []),
+      ...row('Environment', g.environment ? mono(g.environment) : dim('none')),
+      ...row('Started by', g.actor ? mono(g.actor) : dim('unknown'), dim(` (${g.event})`)),
+      ...row('Run', ghLink(g.run_url, `#${g.run_id}, attempt ${g.run_attempt}`)),
+      ...(g.runner ? row('Runner', dim(g.runner)) : [])),
+    g.summary ? el('p', { className: 'unverified' }, el('span', { className: 'badge kind', textContent: 'Not verified' }), ' Text from the workflow: ', el('span', { textContent: g.summary })) : null);
+}
+
 function holdCard(x) {
   const kind = KIND[x.kind] ? x.kind : 'proxy';
   const guard = kind !== 'proxy';
@@ -239,18 +276,18 @@ function holdCard(x) {
   ok.onclick = async () => {
     try {
       const r = await ceremony(`/v1/holds/${x.id}/approve/begin`, `/v1/holds/${x.id}/approve/finish`);
-      toast(!r.approved ? r.note : guard ? 'Approved. The agent can run that exact command once, within 10 minutes.' : 'Approved. The agent can retry that exact request once.');
+      toast(!r.approved ? r.note : kind === 'deploy' ? 'Approved. The job can go on, once, within 10 minutes.' : guard ? 'Approved. The agent can run that exact command once, within 10 minutes.' : 'Approved. The agent can retry that exact request once.');
       load();
     } catch (e) { toast(e.message); }
   };
-  const deny = async (reason) => { try { await api('POST', `/v1/holds/${x.id}/deny`, reason ? { reason } : {}); drafts.delete(x.id); toast(reason ? 'Denied. The agent gets your reason.' : 'Denied.'); load(); } catch (e) { toast(e.message); } };
+  const deny = async (reason) => { try { await api('POST', `/v1/holds/${x.id}/deny`, reason ? { reason } : {}); drafts.delete(x.id); toast(reason ? (kind === 'deploy' ? 'Denied. The job log shows your reason.' : 'Denied. The agent gets your reason.') : 'Denied.'); load(); } catch (e) { toast(e.message); } };
   no.onclick = () => deny(null);
   // deny with a reason: the guard hands it back to the agent (as data), so "not today, use staging" reaches it. The list
   // refreshes every few seconds, so a reason being typed is kept as a draft and the card is rebuilt with it.
   let reasonRow = null, withReason = null;
   if (guard) {
-    const input = el('input', { maxLength: 200, placeholder: 'Reason, shown to the agent (200 characters)', autocomplete: 'off', spellcheck: true });
-    input.setAttribute('aria-label', 'Reason for denying, shown to the agent');
+    const input = el('input', { maxLength: 200, placeholder: kind === 'deploy' ? 'Reason, shown in the job log (200 characters)' : 'Reason, shown to the agent (200 characters)', autocomplete: 'off', spellcheck: true });
+    input.setAttribute('aria-label', kind === 'deploy' ? 'Reason for denying, shown in the job log' : 'Reason for denying, shown to the agent');
     input.dataset.hold = x.id;
     const send = el('button', { className: 'btn dan', type: 'button', textContent: 'Deny with this reason' });
     send.onclick = () => deny(input.value.trim() || null);
@@ -265,20 +302,23 @@ function holdCard(x) {
     };
   }
   const who = x.token_label || x.agent || 'agent';
+  const facts = kind === 'deploy' && x.context && x.context.gate ? deployFacts(x.context.gate) : null;
   const where = x.context && (x.context.cwd || x.context.session)
     ? [x.context.cwd ? `in folder ${x.context.cwd}` : null, x.context.session ? `agent session ${x.context.session}` : null].filter(Boolean).join(', ')
     : null;
   return el('div', { className: 'hold' + (guard ? ' hold-guard' : ''), id: 'hold-' + x.id },
     el('div', { className: 'hold-top' },
       el('span', { className: 'badges' }, el('span', { className: 'badge warn', textContent: HOLD_BADGE[x.rule] || 'Held' }), el('span', { className: 'badge kind', textContent: KIND[kind] })),
-      el('span', { className: 'dim mono', textContent: `${who}${guard && x.agent && x.agent !== who ? ' (' + x.agent + ')' : ''}  ${new Date(x.created_at).toLocaleTimeString()}` })),
+      el('span', { className: 'dim mono', textContent: `${who}${guard && !facts && x.agent && x.agent !== who ? ' (' + x.agent + ')' : ''}  ${new Date(x.created_at).toLocaleTimeString()}` })),
     x.headline ? el('div', { className: 'amount', textContent: x.headline }) : null, // a held Stripe refund or payout: its amount first, in large type
     guard
       ? el('div', { className: 'what' }, el('span', { className: 'agent', textContent: x.agent || 'agent' }), ` ${WANTS[kind]}${where ? ', ' + where : ''}:`)
       : el('div', { className: 'what', textContent: `${x.method} ${x.host}${x.path}` }),
-    x.preview ? el('pre', { className: 'preview mono' + (guard ? ' exact' : ''), textContent: x.preview }) : null,
-    guard ? el('p', { className: 'dim small', textContent: `Summary from the guard: ${x.path}` }) : null,
-    el('p', { className: 'dim', textContent: `${x.why} Rule ${x.rule}.` }),
+    // a deploy: the facts GitHub signed (and apart from them the workflow's own text), not a block of text
+    facts || (x.preview ? el('pre', { className: 'preview mono' + (guard ? ' exact' : ''), textContent: x.preview }) : null),
+    guard && !facts ? el('p', { className: 'dim small', textContent: `Summary from the guard: ${x.path}` }) : null,
+    // (a deploy card's facts already say what the server's reason says; it keeps to the one thing they do not)
+    el('p', { className: 'dim', textContent: facts ? `The job is paused until you decide. Rule ${x.rule}.` : `${x.why} Rule ${x.rule}.` }),
     sealsRow(x),
     el('div', { className: 'row' }, ok, no, withReason),
     why && !frozenNow ? el('p', { className: 'dim small seal-why', textContent: why }) : null,
@@ -347,6 +387,7 @@ function show(view) {
   const changed = current !== view;
   current = view;
   if (changed && view === 'receipts') load().catch(() => {});
+  if (changed && view === 'gates') gatesView().catch(() => {});
   if (changed && view === 'account') { passkeysView().catch(() => {}); cliSessionsView().catch(() => {}); guardKeysView().catch(() => {}); }
   if (changed && view === 'team') teamView().catch((e) => toast(e.message));
   for (const s of document.querySelectorAll('.view')) s.hidden = s.dataset.view !== view;
@@ -469,6 +510,74 @@ $('gkNew').onclick = async () => {
     $('newGk').hidden = false; $('newGkVal').textContent = r.key; $('gkLabel').value = '';
     guardKeysView();
   } catch (e) { toast(e.message); }
+};
+// ---- deploy gates: a GitHub Actions job waits for your passkey. A gate accepts only what is listed here.
+const GATE_EVENTS = [['push', true], ['workflow_dispatch', true], ['release', true], ['deployment', true], ['merge_group', true], ['schedule', false], ['repository_dispatch', false]];
+const lines = (id) => $(id).value.split('\n').map((s) => s.trim()).filter(Boolean);
+/** the step to paste into the job; the gate id is public (it is pasted into workflow files), not a secret */
+function gateSnippet(g) {
+  return [
+    'permissions:',
+    '  id-token: write   # lets the job ask GitHub for the token the gate checks',
+    '  contents: read',
+    ...(g.environments ? ['# the job must run in one of: ' + g.environments.join(', '), 'environment: ' + g.environments[0]] : []),
+    'steps:',
+    '  # copy action/deploy-gate from the Counterseal repository to .github/actions/counterseal-gate',
+    '  - uses: ./.github/actions/counterseal-gate',
+    '    with:',
+    `      gate: ${g.id}`,
+    '      summary: deploy ${{ github.sha }}',
+    ...(g.credential ? ['  # the step\'s outputs token and base-url are the key this gate hands out, after you approve'] : []),
+  ].join('\n');
+}
+const copy = async (text) => { try { await navigator.clipboard.writeText(text); toast('Copied.'); } catch { toast('Select the text and copy it.'); } };
+async function gatesView() {
+  const box = $('gtEvents');
+  if (!box.childElementCount) for (const [name, on] of GATE_EVENTS) box.append(el('label', { className: 'chk' }, el('input', { type: 'checkbox', value: name, checked: on }), name));
+  const { gates } = await api('GET', '/v1/gates');
+  const live = gates.filter((g) => !g.revoked);
+  const L = $('gates'); L.replaceChildren();
+  for (const g of live) {
+    const rv = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Revoke' });
+    rv.onclick = async () => {
+      if (!confirm(`Revoke ${g.label}? Jobs waiting at it are cancelled${g.credential ? ', and the tokens it handed out stop' : ''}.`)) return;
+      try { const r = await api('DELETE', `/v1/gates/${g.id}`); toast(`Revoked.${r.closed ? ` ${r.closed} waiting request(s) closed.` : ''}`); gatesView(); load(); } catch (e) { toast(e.message); }
+    };
+    const cp = el('button', { className: 'btn sm', type: 'button', textContent: 'Copy step' });
+    cp.onclick = () => copy(gateSnippet(g));
+    const line = (t) => el('span', { className: 'dim brk', textContent: t });
+    L.append(el('div', {},
+      el('span', {},
+        el('b', { textContent: g.label }),
+        g.bound ? el('span', { className: 'badge ok', textContent: 'Bound to the repository' }) : el('span', { className: 'badge kind', textContent: 'Binds on its first approved run' }),
+        line(`Repository ${g.repository}${g.bound ? ` (GitHub id ${g.bound.repository_id}, bound ${new Date(g.bound.at).toLocaleDateString()})` : ''}`),
+        line(`Workflows: ${g.workflows.join(', ')}`),
+        line(`Branches and tags: ${g.refs.join(', ')}`),
+        line(g.environments ? `Environments: ${g.environments.join(', ')}` : 'Environments: any, or none'),
+        line(`Triggers: ${g.events.join(', ')}`),
+        line(g.publish_repo ? 'Public receipts name this repository' : 'Public receipts: DEPLOY, the decision and the rule; never the repository'),
+        g.credential ? line(`Hands out a 15 minute token for ${g.credential.label || 'a vault key'} (${g.credential.provider || 'provider'}) after approval${g.credential.preapproved ? `; pre-approves ${g.credential.preapproved} irreversible call pattern(s)` : ''}`) : null,
+        el('span', { className: 'dim brk mono', textContent: `${g.id}${g.last_used ? '  last passed ' + new Date(g.last_used).toLocaleString() : '  never passed'}` })),
+      el('span', { className: 'acts' }, cp, rv)));
+  }
+  $('noGates').hidden = live.length > 0;
+}
+$('gtNew').onclick = async () => {
+  try {
+    const body = { label: $('gtLabel').value.trim(), repository: $('gtRepo').value.trim(), workflows: lines('gtWorkflows'), refs: lines('gtRefs'), events: [...$('gtEvents').querySelectorAll('input')].filter((i) => i.checked).map((i) => i.value) };
+    const envs = lines('gtEnvs');
+    if (envs.length) body.environments = envs;
+    if ($('gtPublish').checked) body.publishRepo = true;
+    const policy = $('gtPolicy').value.trim();
+    if ($('gtCred').value) { body.credentialId = $('gtCred').value; if (policy) body.policy = JSON.parse(policy); }
+    else if (policy) throw new Error('A policy is for the key a gate hands out. Pick a key, or clear the policy.');
+    const g = await ceremony('/v1/gates/passkey/begin', '/v1/gates/passkey/finish', body);
+    $('newGate').hidden = false;
+    $('newGateSnippet').textContent = gateSnippet(g);
+    $('newGateCopy').onclick = () => copy(gateSnippet(g));
+    toast('Gate made. Paste the step into your workflow.');
+    gatesView(); load();
+  } catch (e) { toast(e instanceof SyntaxError ? 'The policy is not valid JSON.' : e.message); }
 };
 async function cliSessionsView() {
   const { sessions } = await api('GET', '/v1/sessions');

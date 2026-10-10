@@ -253,3 +253,17 @@ a.ul{text-decoration:underline;text-underline-offset:3px}
   .hold .seals{align-items:flex-start}
   .who-box{display:none}
 }
+
+/* Deploy Gate: a deploy hold shows the facts GitHub signed, apart from the workflow's own words; the gates list and form */
+.badge.ok{background:rgba(79,211,154,.12);color:var(--ok);border:1px solid rgba(79,211,154,.4)}
+.hold .deploy{margin:8px 0 4px}
+.hold .deploy .signed,.hold .deploy .unverified{font-size:13px;margin:6px 0}
+.hold .deploy .signed .badge,.hold .deploy .unverified .badge{margin-right:6px}
+.hold .deploy .alert{margin:8px 0}
+.hold .deploy .facts{margin-top:8px;font-size:13.5px}
+.hold .deploy .facts dd{min-width:0;word-break:break-all}
+.hold .deploy .unverified{color:var(--dim)}
+.checks{display:flex;flex-wrap:wrap;gap:8px 18px}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-family:var(--mono)}
+.chk input{width:auto;height:auto;margin:0}
+.snippet{white-space:pre-wrap;user-select:text}
