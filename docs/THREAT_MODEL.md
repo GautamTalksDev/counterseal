@@ -26,6 +26,8 @@ can read on the machine it runs on, an attacker who prompt-injects that agent ca
 | A team member with a lower role (member or viewer) | A member: make tokens, guard keys and keys for their agents. A viewer: read and deny | Seal, change roles, invite, remove others, change the quorum, delete vault keys, switch receipts, delete the account (checked on the server on every request) |
 | Someone holding a stolen or forwarded invite link | Join the team once, with the invited role, within the invite's life (2 hours by default, 24 at most), with a passkey of their own | Join twice, join after it was used, revoked or expired or after its owner stopped being an owner, join from the old host, join quietly (every member's devices are woken), have their seal count for 24 hours while two seals are required |
 | A removed team member | Nothing | Sign in (passkeys deleted), use a session or a CLI session (deleted), get alerts (devices deleted), have a seal count, use a token, guard key or receipts key they made (revoked) |
+| Someone who knows a gate's id (it is pasted in workflow files, so it is public) | Ask that gate with a GitHub token from the repository and workflow it accepts | Get a hold from any other repository, workflow, ref or trigger (`403`, nothing written, nobody alerted); learn which repository the gate belongs to; approve anything |
+| A person who can edit the workflow in a repository a gate accepts | Remove the gate step; send any summary text (shown as "not verified"); start runs the gate accepts | Approve; make a run the gate refuses; get the phase 2 token before an approval; use another repository's gate |
 | A device-code phisher (starts `leashcli login` and sends someone the code) | Get a CLI session in that person's account if they sign in, type the code, ignore the country and network shown, confirm they ran it and approve with their passkey | Put the code in a link the app accepts; reuse a code; keep the session past 7 days or past a revoke; act unseen (audit entry and device alert at sign-in) |
 | Someone holding a receipts API key (`lsr_`) | Record receipts within the account's quotas (public, reported, never `source: "broker"`) | Make a broker receipt; record signed receipts without the signer; replay a signed receipt |
 | A phishing site | Ask for a passkey | Get an assertion the service accepts (origin and RP ID are bound into it) |
@@ -176,8 +178,8 @@ per-network limit every proxied call pays, and one note in the owner's audit log
 used yet are voided when the freeze starts, and approving is refused while frozen, so nothing a human said yes to earlier
 fires after the freeze ends. Not covered: calls already in flight when the freeze lands; receipts API keys (`lsr_`),
 which cannot act on a provider. A coding agent's guard is stopped the same way (asking, waiting and using an approval answer
-`423`, so it learns why instead of timing out); a module that decides for an account without an `lsh_` token (a deploy gate
-later) must check `frozen_at` or call `isFrozen` (`src/brakes.js`). Tests: `test/brakes-freeze.test.js`.
+`423`, so it learns why instead of timing out), and so is a deploy gate (H13); a module that decides for an account without an
+`lsh_` token must check `frozen_at` or call `isFrozen` (`src/brakes.js`). Tests: `test/brakes-freeze.test.js`.
 
 ### The joints between the three parts
 
@@ -419,6 +421,92 @@ volume, and calls its rules hold as irreversible still need every seal. Test: *F
 
 **T11. Budgets.** The proxy reads the quorum in the token's query (no extra query); a seal, a join, a removal and
 reading the team each stay well under 50 D1 queries. Test: *budgets*.
+### Deploy gates (GitHub Actions, migration 0007, not yet deployed)
+
+A job asks `POST /v1/gate/request` with the OIDC token GitHub signs for it; the owner approves in the app with a passkey; the
+job's poll spends the approval once (phase 2: and receives a 15 minute token). Usage: [DEPLOY_GATE.md](DEPLOY_GATE.md).
+**A gate is a pause the job asks for, not a lock on the repository:** a person who can edit the workflow can remove the step.
+
+**H1. A forged or substituted token.** `alg: none`, HS256 keyed with the public key, another algorithm, a key of the
+attacker's own under GitHub's `kid`, a key named by the token (`jku`, `jwk`, `x5u`, `x5c`, `crit`), an unknown `kid`, a changed
+payload, a copied signature. RS256 is pinned before anything is read from the token; the key comes only from GitHub's own key
+set; the signature is checked with WebCrypto before any claim is trusted (RFC 8725). The key set is fetched from the fixed URL,
+at most every 10 minutes per isolate (one early refetch a minute for a rotation, so random `kid`s cannot make this Worker
+fetch on every request), no redirects, 64 KB, at most 20 keys, only RSA keys of 2048 bits or more with exponent 65537;
+cached keys outlive an outage by an hour and then nothing verifies (503, never "valid"). Tests: `test/oidc.test.js`.
+
+**H2. A token meant for something else.** The audience must be exactly one string, `<product origin>/gate/<gate id>`, and the
+issuer exactly `https://token.actions.githubusercontent.com`, so a token GitHub issued for another service, another gate, or
+with GitHub's default audience is refused; an array of audiences is refused. `exp`, `nbf` and `iat` are checked with 60
+seconds of skew, and a token valid for more than an hour from now is refused (it bounds the replay record). Tests: *issuer and
+audience*, *time*.
+
+**H3. Replay.** Each token's `jti` is accepted once (a D1 row until the token could no longer verify), recorded only for a
+run the gate accepts, so a refused run costs no write. This matters beyond tidiness: asking again for the same run returns the
+same hold with a new poll secret (a job that lost an answer must be able to retry), so a thief who could replay a leaked token
+could read the decision. Test: *a token is spent by its first use*.
+
+**H4. Binding on mutable names.** A repository can be renamed, or deleted and re-created under the same name by someone
+else. A gate matches the repository by name only until its first approved run; that run binds it to GitHub's repository and
+owner ids (`repository_id`, `repository_owner_id`), and the approval card says so ("First run of this gate: approving also
+binds it to acme/app, GitHub id 1001"). After that a repository with the same name and other ids is refused, and a renamed
+one with the same ids is accepted. If two unbound runs from different repositories share the name, whichever is spent first
+binds and the other is not spent (`409 gate_bound_elsewhere`). Residual: before the first approval the approver is trusted to
+read the id. Tests: *the first approved run binds*, *two unbound runs*.
+
+**H5. A leaked gate id, and strangers.** Gate ids are public. A run from another repository gets `403` with
+`reason: "repository"`, which names nothing of the gate's repository; the check runs before anything is written or anyone is
+alerted. Forks: GitHub gives no OIDC token to a pull request from a fork; `pull_request`, `pull_request_target` and
+`workflow_run` are not offered as triggers; the job's workflow and the top-level workflow must both be listed files of the
+gate's repository (reusable workflows from other repositories are refused), the ref must be listed (no "every branch"), and
+the environment, when the gate lists any. Tests: *every filter*.
+
+**H6. Approval stretching and replay.** The approval is bound to the repository and owner ids, run, attempt, commit, workflow
+and job workflow, ref, environment and check run (a different commit or attempt is a different hold); the poll secret reads one
+hold; the poll that finds it approved spends it in one atomic update (still approved, same hash, in time, gate not revoked and
+still the same repository, account not frozen); before it does, the hold's recorded facts are hashed again and must equal the
+hash that was approved. Tests: *the approval is bound to...*, *a hold whose recorded facts no longer match*.
+
+**H7. The workflow removes the gate.** Anyone who can edit the workflow file can delete the step or add `continue-on-error`.
+Mitigations the owner controls: list only the protected workflow file and branch on the gate; branch protection and CODEOWNERS
+on the workflow file; and phase 2, where the deploy key is not in the repository's secrets at all, so a job with no approval
+has nothing to deploy with. Said plainly in the docs and the app.
+
+**H8. Phase 2: the key handed out.** A token is minted only by the poll that spends an approval (never by the approval itself,
+never for a denied, expired or frozen run), lasts 15 minutes, is an ordinary Counterseal token under the gate's policy (the
+irreversible map applies; a call the policy does not pre-approve is held), is returned once and never written to the audit
+log (its id is), and is revoked with the gate. The gate that hands it out is made only in a passkey ceremony from a web
+session, which is also what allows a policy that pre-approves irreversible calls (a stolen command line session cannot make
+one). If the key is gone or the account has 200 live tokens the approval is not spent. Residual: every step of the approved
+job shares the job's identity, so a malicious step in the same job can ask for the same token. Test: *phase 2*.
+
+**H9. Poll secrets.** `gps_` is 32 random bytes, shown once, stored as SHA-256, good for one hold, with a limit of 30 polls a
+minute in memory. The action masks it in the log before using it. It cannot approve, list or reach anything else; no other
+credential (a guard key, a session, a token) works as one.
+
+**H10. Log injection in the action.** The approver's reason and the server's messages come back to a job's log. They are
+printed after a fixed label, with control, format and line-break characters turned into spaces, so a reason that reads
+`::set-output ...` is text in the middle of a line, not a workflow command. The OIDC token, the poll secret and the phase 2
+token are masked before they are used. Test: *denied* in `test/deploy-action.test.js`.
+
+**H11. Waiting must not cost the free plan.** A refused run writes nothing; a poll writes nothing and is at most 12 reads; a
+frozen account costs the asking route three reads at most; a request makes 12 D1 queries (24 with 10 phone devices; 50 are
+allowed); verifying a token is 0.1 ms of CPU with the key cached (`node bench/cpu.mjs`). Limits: 20 gates per account, 10
+waiting and 30 new requests an hour per gate, 100 waiting per account. Tests: *budgets*, *limits*.
+
+**H12. Privacy.** Public receipts say `DEPLOY github.com`, the decision and the rule; the repository only if the owner opted in
+for that gate (default off). The hold keeps the facts the card shows, including the GitHub login of whoever started the run,
+and its preview, for about a day after it closes; the private audit log keeps the repository, commit and run, never that
+person or the summary. A phone alert can show the gate's label, `repository@commit` and the environment or ref on a lock
+screen. Tests: *public receipts say DEPLOY...*, *the sweep*.
+
+**H13. Freeze.** A frozen account answers a gate's request with `423 account_frozen` (after the run is known to be the gate's,
+before anything is written), ends a wait at its next read, spends no approval and hands out no key; approving waits for the
+unfreeze. Tests: `test/gates-freeze.test.js`.
+
+Residual: the gate has not yet been run against real GitHub tokens (it follows GitHub's documentation, its discovery document
+and a real token shown in a third-party README); the signed facts say what GitHub says, so a compromised workflow in the
+allowed repository gets a real token and asks truthfully; a job that waits uses Actions minutes.
 
 ### The domain move (two hosts)
 
@@ -455,6 +543,9 @@ redirected there.
   one person cannot approve alone, and the authenticator that holds one of the team's passkeys cannot make another. An
   approver added while one seal was enough counts at once if the quorum is raised later (their joining was announced
   then); an owner who wants a second identity can also simply wait 24 hours.
+- A deploy gate is a pause the job asks for: anyone who can edit the workflow file can remove the step (H7). Mitigation: protect
+  the file and list only it on the gate, or hand the deploy key out through the gate (phase 2), so there is nothing to deploy
+  with before an approval.
 - A person approves a CLI sign-in someone sent them (S11). Mitigation: typed codes, context and warnings, 7-day
   sessions, alerts and one-tap revoke of the session and all it made.
 - A compromised agent machine signs for the attacker, and a CLI session on it can mint tokens and register keys. Prove

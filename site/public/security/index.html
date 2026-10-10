@@ -27,6 +27,7 @@
   <a href="#model">The model</a>
   <a href="#keys">How keys are protected</a>
   <a href="#approvals">How approvals work</a>
+  <a href="#deploy-gate">A GitHub Actions deploy</a>
   <a href="#brakes">Caps, breaker and Freeze</a>
   <a href="#receipts">How the public log is protected</a>
   <a href="#agentkeys">How agent keys work</a>
@@ -83,6 +84,14 @@
     <li><strong>Invites are one-time and short-lived.</strong> Made by an owner with a passkey, stored only as a hash, single use, 2 hours by default, sent only in the link's fragment; the page shows who invites you to what before anything is made, and the team is told when someone joins.</li>
     <li><strong>Removal is total and immediate.</strong> Sessions, passkeys, alert devices, the keys and tokens they made, and their seals, in one step. The last owner can never be removed.</li>
     <li><strong>What it does not stop:</strong> two people who agree to act together.</li>
+  <h3 id="deploy-gate">A GitHub Actions deploy</h3>
+  <ul>
+    <li><strong>GitHub signs who is asking.</strong> A deploy gate holds a job until you approve with your passkey. The job sends the OIDC token GitHub signs for it. Counterseal pins the algorithm (RS256), takes the key only from GitHub's own key set, checks the signature before it reads any claim, and checks the issuer, an audience that names the gate, the times (60 seconds of skew) and that the token was not used before.</li>
+    <li><strong>Only what you listed.</strong> A gate accepts one repository, the workflow files, branches or tags, environments and triggers you list when you make it (with your passkey; a command line session cannot). Nothing is accepted by default, and pull requests are never offered. A run that is not what the gate accepts is refused before anything is written or anyone is alerted, and learns nothing about the gate's repository.</li>
+    <li><strong>One run, once, bound to the repository's ids.</strong> The approval covers the repository and owner ids, run, attempt, commit, workflow, ref and environment named in the token, and is spent once. The first approved run binds the gate to GitHub's ids, so a repository deleted and re-created under the same name cannot use it.</li>
+    <li><strong>No approval, no key (optional).</strong> A gate can hand the job a 15 minute Counterseal token for a vaulted key only after you approve; before that the job has no deploy key, and the real key never leaves the vault.</li>
+    <li><strong>A pause the job asks for.</strong> A person who can edit the workflow can remove the step. Protect the workflow file, or use the key option. Every step of an approved job shares the job's identity.</li>
+    <li><strong>Not yet run against real GitHub.</strong> The checks follow GitHub's documentation and are tested with a stand-in that signs like GitHub.</li>
   </ul>
 
   <h2 id="brakes">Money caps, the breaker and Freeze</h2>
@@ -135,7 +144,7 @@
     <tr><td>Sessions</td><td><code>__Host-</code> cookie, HttpOnly, Secure, SameSite=Strict, 12 h; CLI sessions are bearer tokens stored only as SHA-256 hashes, last 7 days, and can be revoked in the app with everything they made</td><td>A07</td></tr>
     <tr><td>CSRF</td><td>Web writes require the same Origin and an <code>x-leash: 1</code> header; CORS only on the public log's read endpoints</td><td>A01</td></tr>
     <tr><td>Authorization</td><td>Every query is scoped by account; another account's holds, tokens, keys, agent keys and receipts return 404 (tested)</td><td>A01, API1</td></tr>
-    <tr><td>Privilege separation</td><td>CLI sessions can mint and revoke tokens, deny holds, make and revoke guard keys, freeze the account, and make agent keys and receipts keys, but cannot approve holds, pre-approve irreversible operations, set money caps, reset a tripped breaker, unfreeze, delete vaulted keys, revoke agent keys, turn public receipts on or off, add alert devices, remove passkeys, or approve or revoke command line sign-ins</td><td>A01, A06</td></tr>
+    <tr><td>Privilege separation</td><td>CLI sessions can mint and revoke tokens, deny holds, make and revoke guard keys, revoke deploy gates, freeze the account, and make agent keys and receipts keys, but cannot approve holds, make a deploy gate, pre-approve irreversible operations, set money caps, reset a tripped breaker, unfreeze, delete vaulted keys, revoke agent keys, turn public receipts on or off, add alert devices, remove passkeys, or approve or revoke command line sign-ins</td><td>A01, A06</td></tr>
     <tr><td>Secrets</td><td>Envelope encryption with AAD per row; no API returns a secret; tokens, sessions and receipts keys stored as hashes</td><td>A04</td></tr>
     <tr><td>Injection</td><td>All SQL is parameterized; request bodies are size-capped while streaming and parsed as JSON only</td><td>A05</td></tr>
     <tr><td>SSRF</td><td>Upstream hosts fixed per provider; no redirects; push endpoints limited to known push services; the checker's directory fetch only reaches https public host names on port 443, the fixed well-known path, no redirects, 5 s, 64 KB</td><td>A01, API7</td></tr>
@@ -154,6 +163,7 @@
     <li><strong>A human approving something they shouldn't.</strong> The approval screen shows exactly what will happen and why. Read it.</li>
     <li><strong>Approving a command line sign-in someone sent you.</strong> The screen shows where it started and asks whether you ran it; the alert and one-tap revoke limit the damage, and the session cannot approve holds, but a person who approves anyway has signed that command line in. Country and network checks can be fooled by a VPN.</li>
     <li><strong>An agent getting around its guard.</strong> The coding-agent guard runs on the agent's machine and matches a map of commands. It does not stop an agent that edits its hook settings, wraps a command in a script, or runs something the map does not know.</li>
+    <li><strong>A workflow that drops its gate.</strong> A deploy gate is a pause the job asks for: a person who can edit the workflow file can remove the step. Protect the file, or hand the deploy key out through the gate so there is nothing to deploy with before an approval.</li>
     <li><strong>An over-scoped key used outside the broker.</strong> Rotate the keys you give the vault and keep them only there.</li>
     <li><strong>Calls the map doesn't know are irreversible.</strong> The map is conservative: every DELETE is held on GitHub, Cloudflare, Stripe, Supabase, Vercel, Neon, Fly.io and Resend, every Railway mutation except redeploy and restart, and SQL unless it is plainly read-only. Management APIs only: SQL sent straight over a database connection string never passes through Counterseal. Add <code>hold</code> rules to your policy for anything else you care about.</li>
     <li><strong>A compromised agent machine.</strong> An agent key on a machine an attacker controls signs for the attacker. Revoke the key; the bound tokens stop at once.</li>

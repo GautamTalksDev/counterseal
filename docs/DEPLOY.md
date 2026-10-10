@@ -6,12 +6,13 @@ Object (`ReceiptLog`, the public log) and static assets. It fits the Workers Fre
 ## Upgrading the live service (from the broker-only version)
 
 The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005_cli_signin.sql`,
-`0006_approvals.sql`, `0008_brakes.sql`, `0009_team.sql` and `0010_provider_host.sql` only add tables, indexes and defaulted or nullable columns, so the code that runs today keeps
+`0006_approvals.sql`, `0007_gates.sql`, `0008_brakes.sql`, `0009_team.sql` and `0010_provider_host.sql` only add tables, indexes and defaulted or nullable columns, so the code that runs today keeps
 working on the migrated database, and the new code keeps working with everything the old code wrote
 (`server/test/migration.test.js` runs the deployed code, migrates, then runs the new code). CLI sessions made before 0005
 keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as `kind: "proxy"` (a brokered API
 call); 0006 adds the guard keys table and the coding-agent approvals (branch `feat/approvals`, not yet deployed). 0010 adds one
 nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0008 (Brakes, branch `feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and `counters`; every existing token and account is not tripped, not frozen and has no caps. 0009 (the two-person seal, branch `feat/two-person`, not yet deployed) adds the tables `members`, `invites` and `hold_votes`, a `member_id` on passkeys, sessions, push devices, device codes, move links, tokens, guard keys, receipts keys and agent keys, the quorum columns on `accounts` (quorum 1, self-approval on) and `needs` and `requested_by` on `holds`; every existing account is one person, its owner, and one seal approves, as before (no row is rewritten: a NULL `member_id` means the account's founder).
+nullable column, the store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0007 (Deploy Gate, branch `feat/deploy-gate`, not yet deployed) adds the tables `gates`, `gate_polls` and `gate_runs`; it changes no existing row, and a hold made before it reads as it did (`kind: "proxy"`, or `shell` and `tool` for a coding agent's approval). Apply every migration before deploying the code (the held list joins `gates`). 0008 (Brakes, branch `feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and `counters`; every existing token and account is not tripped, not frozen and has no caps.
 
 ```bash
 cd server
@@ -21,7 +22,7 @@ npx -y wrangler@4 d1 time-travel info leash
 # 2. new secrets (names only; values never leave your machine)
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK        # the log's Ed25519 signing key; prints the public part to stderr: keep it
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx -y wrangler@4 secret put STATS_TOKEN   # optional: /v1/admin/stats
-# 3. the additive migrations (applies 0004 to 0006 and 0008 to 0010; 0001 to 0003 are already applied)
+# 3. the additive migrations (applies 0004 to 0010; 0001 to 0003 are already applied)
 npx -y wrangler@4 d1 migrations apply leash --remote
 # 4. the code (creates the ReceiptLog Durable Object through the "v1" migration in wrangler.jsonc)
 npx -y wrangler@4 deploy
@@ -73,7 +74,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" |
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))" | npx -y wrangler@4 secret put IP_SALT
 node dev/vapid-keygen.mjs | npx -y wrangler@4 secret put VAPID_PRIVATE_JWK   # phone alerts (Web Push); optional
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK          # the public log
-npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0006, then 0008 to 0010 (0007 is a number another feature will use)
+npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0010
 npx -y wrangler@4 deploy
 ```
 
@@ -94,6 +95,7 @@ Without `VAPID_PRIVATE_JWK`, phone alerts are off. Without `LOG_KEY_JWK`, the br
 | `PUB_DO_RPM` | 120 | public reads that reach the Durable Object (entries, proofs) per IP per minute |
 | `TOOL_RPM` | 10 | Web Bot Auth checker directory lookups per IP per minute |
 | `GUARD_RPM` | 240 | requests with a guard key (`/v1/approvals*`) per IP per minute (in memory per isolate); each key also has 60 new holds an hour (D1) and 30 polls and 30 uses a minute (in memory) |
+| `GATE_RPM` | 600 | requests of a deploy gate (`POST /v1/gate/request`, and separately `/v1/gate/status` and `/v1/gate/cancel`) per IP per minute (in memory per isolate; hosted runners share networks, so it is generous); each gate also has 30 new requests an hour (D1) and 10 waiting, each poll secret 30 polls a minute (in memory) |
 
 Secrets: `LEASH_KEK`, `IP_SALT` (required), `VAPID_PRIVATE_JWK` (phone alerts), `LOG_KEY_JWK` (receipts), `STATS_TOKEN`
 (the private stats endpoint; at least 32 characters, or the endpoint stays 404).
@@ -122,6 +124,11 @@ after sign-ins.
 | Same command asked again while pending or approved | 0 | none |
 | Waiting for a decision (`GET /v1/approvals/<id>?wait=20`) | 0 (at most 12 D1 queries, all reads) | none |
 | Approval used (`POST /v1/approvals/<id>/use`), sealed | about 6 | 1 request, about 7 rows |
+| Deploy gate: a run asks (`POST /v1/gate/request`), new hold, sealed | about 8, plus one per device alerted (at most one alert a minute); 12 D1 queries, 24 with 10 devices | 1 request, about 7 rows |
+| Deploy gate: the same run asks again | 2 (the token's `jti`, a poll secret); 4 queries | none |
+| Deploy gate: a run the gate refuses | 0 (1 read) | none |
+| Deploy gate: waiting (`GET /v1/gate/status/<id>?wait=20`) | 0 (at most 12 D1 queries, all reads) | none |
+| Deploy gate: the poll that spends an approval, sealed | about 6 (about 8 with a key handed out); 9 queries (13) | 1 request, about 7 rows |
 | Brakes: a write on a token with `writesPerHour` | one more (the hour's count) | |
 | Brakes: ... with `repeatsPer5Min` too | two more (a row per distinct request in its 5 minutes, reused for repeats) | |
 | Brakes: a capped Stripe refund or payout | one more (the day's total), plus one lookup at Stripe (a subrequest, no D1) | |
@@ -189,6 +196,22 @@ invocation from `server/test/team.test.js` (budgets) and a counting run with rec
 | Joining a team (registration verify, member and passkey, alert) | 0.7 to 0.9 ms (at most 2.8) | | 15 |
 | A proxied GET on a team account | as on a one-person account (the same query count) | | 6 |
 | Unfreeze / reset a tripped token on a team (passkey verify, plus the 24-hour check) | 1.0 ms (1.2) / 1.1 ms (6.2) | | |
+The Deploy Gate (branch `feat/deploy-gate`), 9 Oct 2026, same method, 60 runs each. Verifying GitHub's OIDC token is
+`crypto.subtle.verify` (RSASSA-PKCS1-v1_5, RSA-2048, SHA-256) plus claim checks; GitHub's key set is fetched at most every 10
+minutes per isolate (a subrequest, not CPU) and the imported key is kept:
+
+| Path | Worker CPU | Durable Object CPU |
+|---|---|---|
+| Verify a GitHub OIDC token (RS256 and claims, key cached) | 0.11 ms (0.81) | |
+| Verify the first token of an isolate (key set parsed, RSA key imported) | 0.25 ms (0.42) | |
+| `crypto.subtle.verify`, RSA-2048, alone | 0.05 ms (0.12) | |
+| `POST /v1/gate/request`, new hold, sealed | 1.05 ms (1.41) | 0.60 ms |
+| `POST /v1/gate/request`, the same run asked again | 0.59 ms (4.72) | |
+| `GET /v1/gate/status/<id>` (no wait) | 0.19 ms (0.36) | |
+| `GET /v1/gate/status/<id>?wait=20` (11 reads; waiting itself is not CPU) | 0.44 ms (4.49) | |
+| `GET /v1/gate/status/<id>`, approved: spend once, bind, sealed | 0.73 ms (1.05) | 0.57 ms |
+| The same, with a 15 minute token handed out (phase 2) | 0.96 ms (2.89) | 0.65 ms |
+| `POST /v1/gate/cancel/<id>` | 0.47 ms (0.89) | |
 
 These are Node numbers, not a load test on Workers. Run one before raising the batch caps in `server/src/receipts.js`.
 

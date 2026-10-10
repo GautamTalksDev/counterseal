@@ -15,7 +15,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const LOCK = join(ROOT, 'brand.lock.json');
 // order matters: longer values first, so "https://x" is replaced before "x"
 export const KEYS = ['origin', 'wordmark', 'tagline', 'recordLine', 'domain', 'sdk', 'cli', 'cliPlanned', 'name', 'repo'];
-const TEXT = /\.(html|js|mjs|md|webmanifest|json|txt)$/;
+const TEXT = /\.(html|js|mjs|md|webmanifest|json|txt|yml)$/;
 const SKIP = new Set(['fonts', 'img', 'node_modules', '.git', 'fixtures']);
 const GENERATED = new Set(['site/public/brand.js', 'site/public/receipts-sdk.js', 'site/public/websig.js', 'brand.lock.json']);
 
@@ -28,7 +28,7 @@ export function files() {
       if (statSync(p).isDirectory()) walk(p); else if (TEXT.test(n)) out.push(p);
     }
   };
-  for (const d of ['site/public', 'docs', 'cli', 'sdk', 'plugins']) walk(join(ROOT, d));
+  for (const d of ['site/public', 'docs', 'cli', 'sdk', 'plugins', 'action']) walk(join(ROOT, d));
   for (const f of ['README.md', 'SECURITY.md']) if (existsSync(join(ROOT, f))) out.push(join(ROOT, f));
   return out.filter((p) => !GENERATED.has(relative(ROOT, p).replaceAll('\\', '/')));
 }

@@ -372,3 +372,23 @@ test('a gate\'s runs never mix with guard approvals or brokered holds: the same 
   assert.deepEqual(kinds, [['shell', 'laptop']]);
   void audienceFor;
 });
+
+test('the operator\'s private numbers count gates, deploys that passed and holds by kind, and never name a repository, run or person', async () => {
+  const { w, gh } = await world();
+  w.env.STATS_TOKEN = 'S'.repeat(40);
+  const u = await w.user();
+  const cred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'github', secret: 'ghp_' + 'D'.repeat(36) } })).body.id;
+  const g = await gateId(w, u, { label: 'Acme Secret Label' });
+  await gateId(w, u, { label: 'with a key', repository: 'acme/web', credentialId: cred });
+  const r = await ask(w, gh, g, { run_id: '7654321' }, { summary: 'ship it' });
+  await approve(w, u, r.body.id); await poll(w, r.body.poll, r.body.id);
+  await ask(w, gh, g, { run_id: '7654322' });
+  const s = await w.req('GET', '/v1/admin/stats', { bearer: w.env.STATS_TOKEN, ...anon });
+  assert.equal(s.status, 200, JSON.stringify(s.body));
+  assert.ok(s.queries <= 12, `${s.queries} queries`); assert.equal(s.writes, 0);
+  assert.deepEqual(s.body.gates, { made: 2, madeLast7d: 2, active: 2, bound: 1, handingOutAKey: 1 });
+  assert.deepEqual(s.body.decisions.deploysPassedAfterApproval, { total: 1, last7d: 1 });
+  assert.equal(s.body.guard.holdsLast7dByKind.deploy, 2);
+  const text = JSON.stringify(s.body);
+  for (const secret of ['acme', 'Acme', 'octocat', '7654321', 'ship it', 'a1b2c3', g]) assert.ok(!text.includes(secret), secret);
+});

@@ -108,6 +108,8 @@ goes for approving holds (a coding agent's commands included), revoking agent ke
 (below): setting money caps, resetting a tripped breaker and unfreezing. Stopping things never needs a passkey. On a team
 that requires two seals, nobody can flip this switch alone: pre-approvals and money caps are paused until the quorum is
 lowered again, which takes 24 hours and tells everyone.
+goes for approving holds (a coding agent's commands and a deploy gate's jobs included), making a deploy gate, revoking agent keys and turning public receipts off, and for everything that loosens a brake
+(below): setting money caps, resetting a tripped breaker and unfreezing. Stopping things never needs a passkey.
 
 ### Brakes
 
@@ -128,7 +130,7 @@ general). They do not cap LLM tokens, and they do not cover SQL sent straight ov
   your devices are told once. `repeatsPer5Min: 3` trips on the fourth identical request (same method, path, query, content
   type and body) within 5 minutes.
 - **Freeze.** One tap in the app, `leashcli freeze`, or the Freeze button on a phone alert stops every agent token
-  (HTTP 423) and every coding-agent approval, voids approvals nobody used yet and pauses approving. Any signed-in session can freeze; only a passkey in the
+  (HTTP 423), every coding-agent approval and every deploy gate, voids approvals nobody used yet and pauses approving. Any signed-in session can freeze; only a passkey in the
   app unfreezes.
 
 A token without `limits` and `money` costs no extra database writes. See the [policy reference](docs/POLICY.md).
@@ -300,6 +302,52 @@ The shell map (`sdk/shellmap.mjs`, tests in `sdk/shellmap.test.mjs` with about a
 `sdk/shellmap.vectors.txt`, and `sdk/shellmap.bash.test.mjs`, which compares it with real bash on generated commands: the words
 a command comes to, and whether a stub `terraform destroy` really runs where the map says "not held") is documented rule by rule in the [docs](https://counterseal.gautamkhosla.com/docs/#guard-cli).
 
+### Deploy Gate for GitHub Actions
+
+Hold any GitHub Actions job until you approve it with a passkey. GitHub's own deployment approvals (required reviewers, wait
+timers, custom protection rules) are available only for public repositories on the Free, Pro and Team plans, GitHub's
+documentation says ([read 9 Oct 2026](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
+A gate does not use them: the job's step sends the OIDC token GitHub signs for it, Counterseal verifies it, and your phone shows
+the repository, workflow, commit, run and who started it, from that token. In this repo, not yet deployed (migration 0007); the
+action is in [`action/deploy-gate`](action/deploy-gate) and is not on the Marketplace.
+
+1. In the app, Deploy gates, **New gate** (it asks for your passkey): the repository, its workflow files and the branches or
+   tags it deploys from. Nothing is accepted by default.
+2. Copy `action/deploy-gate` to `.github/actions/counterseal-gate` in the repository and add the step to a job that has
+   `permissions: id-token: write`:
+
+```yaml
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # lets the job ask GitHub for the token the gate checks
+      contents: read
+    steps:
+      - uses: ./.github/actions/counterseal-gate
+        with:
+          gate: gate_0123456789abcdef01234567      # from the app; not a secret
+          summary: deploy ${{ github.sha }} to production
+          timeout-minutes: 15
+```
+
+3. Run the workflow. The step prints a link and waits; approve with your passkey and the job goes on. It fails if you deny, if
+   nobody decides in time, or if the run is not what the gate accepts. More samples (a deploy job after the gate, and a gate
+   that hands the job a 15 minute token for a vaulted key only after you approve, so there is no deploy key in the repository
+   before then) are in [`action/deploy-gate/examples`](action/deploy-gate/examples).
+
+- The approval covers one run: GitHub's repository and owner ids, run, attempt, commit, workflow, ref and environment. The
+  first approved run binds the gate to the repository's ids, so a repository that is deleted and re-created under the same name
+  cannot use it.
+- **A gate is a pause the job asks for.** A person who can edit the workflow file can remove the step: protect the file, or use
+  the key option above, where the job has nothing to deploy with before an approval.
+- Waiting writes nothing to the database. A job that waits uses Actions minutes (private repositories), so keep the timeout low.
+- Public receipts say `DEPLOY github.com`, the decision and the rule; never the repository unless you opt in for that gate.
+- Not yet run against real GitHub tokens: the tests use a stand-in that signs like GitHub. The first real run is the real test.
+
+Usage, what is checked, limits and errors: [docs/DEPLOY_GATE.md](docs/DEPLOY_GATE.md). The contract is in
+[docs/PROTOCOL.md](docs/PROTOCOL.md#deploy-gates).
+
 ### Any SDK or script
 
 | Provider | Base URL |
@@ -349,9 +397,11 @@ server/        Cloudflare Worker: API, proxy, vault, WebAuthn, policy, audit, th
   src/approvals.js   the Approvals API and guard keys: approvals for a coding agent's commands and tool calls
   src/brakes.js      money caps, the breaker and Freeze (src/money.js: how amounts are read and shown)
   src/team.js        the two-person seal: members, invites, roles, the quorum and seals
+  src/gates.js       Deploy Gate: gates, a job's request, the poll, phase 2 (src/oidc.js verifies GitHub's token; src/gatefacts.js)
   test/              node:test suite: virtual passkeys, fake upstream, migration on data from the live code
   bench/cpu.mjs      CPU of the hot paths
   dev/local.js       full local server on node:sqlite
+action/        GitHub Action (deploy-gate, zero dependencies) and sample workflows; not on the Marketplace
 cli/           leash CLI and MCP server (zero dependencies), sign.mjs for agent keys, guard.mjs (the coding-agent guard)
   test/              the guard against a stand-in and against the real server code over HTTP; the plugin files
 sdk/           receipts (record + verify offline), websig (Web Bot Auth sign + verify) and shellmap (the shell map), zero dependencies
@@ -373,7 +423,7 @@ node dev/local.js 8790                          # http://localhost:8790 (passkey
 
 ## Deploy
 
-See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), six additive migrations (0004, 0005, 0006, 0008, 0009, 0010), `wrangler deploy`.
+See [docs/DEPLOY.md](docs/DEPLOY.md): one new secret (`LOG_KEY_JWK`), seven additive migrations (0004 to 0010), `wrangler deploy`.
 
 ## Status and roadmap
 
@@ -383,6 +433,8 @@ coding agent's commands, `leashcli guard` with its shell map and Claude Code plu
 two-person seal (team members, invites, roles, quorum votes). Next: AWS (SigV4
 re-signing), PlanetScale; break-glass windows and Slack, Discord and Google Chat alerts for teams; SSO for teams; external
 witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
+coding agent's commands, and the Deploy Gate for GitHub Actions. Next: AWS (SigV4 re-signing), PlanetScale; two-person
+approval; SSO for teams; external witness cosigning of checkpoints (C2SP tlog-witness); SCITT-compatible receipts.
 
 Counterseal maps to the proxy-gateway model of the IETF draft
 [Credential Broker for Agents (CB4A)](https://www.ietf.org/archive/id/draft-hartman-credential-broker-4-agents-00.html)

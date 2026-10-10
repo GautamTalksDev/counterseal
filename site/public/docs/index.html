@@ -32,6 +32,7 @@
   <a href="#held">When a call is held</a>
   <a href="#guard">Approvals for commands</a>
   <a href="#guard-cli">Guard your coding agent</a>
+  <a href="#deploy-gate">Deploy gates (GitHub Actions)</a>
   <a href="#policy">Token policies</a>
   <a href="#brakes">Brakes</a>
   <a href="#team">Teams: two seals</a>
@@ -219,6 +220,27 @@ npx leashcli guard install --agents none     # makes the key the plugin's hook u
     <tr><td>Copilot CLI, Gemini CLI, Antigravity</td><td colspan="2">Not supported yet: their hooks have not been tested with the guard.</td></tr>
   </table>
   <p>What leaves your machine: the command text with credentials removed (connection strings, bearer tokens, key-shaped values, <code>PASSWORD=</code> style variables), the rule, why, the name of the folder (not its path) and the session id. Held commands are shown on your devices and may appear on the lock screen.</p>
+  <h2 id="deploy-gate">Deploy gates for GitHub Actions</h2>
+  <p>Hold any GitHub Actions job until you approve it with your passkey. GitHub's own deployment approvals (required reviewers, wait timers, custom protection rules) are available only for public repositories on the Free, Pro and Team plans, according to <a href="https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments">GitHub's documentation</a> (read 9 Oct 2026). A gate does not use them: the job's step sends the OIDC token GitHub signs for it, Counterseal checks the signature and what the token says about the run, and your phone shows the repository, workflow, commit, run and who started it, from that token.</p>
+  <pre>permissions:
+  id-token: write   # lets the job ask GitHub for the token the gate checks
+  contents: read
+steps:
+  - uses: ./.github/actions/counterseal-gate     # action/deploy-gate, copied into your repository
+    with:
+      gate: gate_0123456789abcdef01234567        # from the app, Deploy gates; not a secret
+      summary: deploy ${{ github.sha }} to production
+      timeout-minutes: 15</pre>
+  <ul>
+    <li><strong>Make the gate first.</strong> In the app, Deploy gates, New gate (it asks for your passkey): the repository, its workflow files and the branches or tags it deploys from; optionally environments and triggers. Nothing is accepted by default, pull requests are never offered, and a gate cannot be edited (make a new one and revoke the old).</li>
+    <li><strong>One run, once.</strong> The approval is bound to GitHub's repository and owner ids, run, attempt, commit, workflow, ref and environment. The step fails if you deny, if nobody decides within <code>timeout-minutes</code>, or if the run is not what the gate accepts. A cancelled job withdraws its request.</li>
+    <li><strong>The first approved run binds the gate</strong> to the repository's GitHub ids, so a repository deleted and re-created under the same name cannot use it.</li>
+    <li><strong>No approval, no key.</strong> A gate can name a key in your vault and a policy. The job then has no deploy key until you approve; on approval it gets a Counterseal token for that key (15 minutes, under the policy; the real key never leaves the vault) in the step's <code>token</code> output.</li>
+    <li><strong>A pause the job asks for.</strong> A person who can edit the workflow file can remove the step. Protect the file (branch protection, CODEOWNERS), or use the key option.</li>
+    <li><strong>Receipts.</strong> A gate decision's public receipt says only <code>DEPLOY github.com</code>, the decision and the rule; never the repository unless you chose that for the gate.</li>
+    <li><strong>Not yet run against real GitHub tokens.</strong> The action is in the Counterseal repository (<code>action/deploy-gate</code>), not on the Marketplace, and its tests use a stand-in that signs like GitHub.</li>
+  </ul>
+  <p>Usage, what is checked, limits and errors: <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/DEPLOY_GATE.md">docs/DEPLOY_GATE.md</a>. The contract is in <a href="https://github.com/GautamTalksDev/leash/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
 
   <h2 id="policy">Token policies</h2>
   <p>Each token can carry a policy that narrows what its key can do. A policy can never widen it.</p>
@@ -374,6 +396,8 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>POST /v1/holds/:id/deny</code></td><td>Deny a hold. Optional <code>{"reason"}</code> (200 characters), handed back to a guard.</td></tr>
     <tr><td><code>GET, POST /v1/guard/keys</code>, <code>DELETE /v1/guard/keys/:id</code></td><td>Guard keys (<code>lsg_</code>, shown once). Revoking one closes its open approvals.</td></tr>
     <tr><td><code>POST /v1/approvals</code>, <code>GET /v1/approvals/:id?wait=</code>, <code>POST /v1/approvals/:id/use</code></td><td>Ask for, wait for (up to 20 s) and use an approval for a coding agent's command. Bearer <code>lsg_</code> guard key.</td></tr>
+    <tr><td><code>GET /v1/gates</code>, <code>POST /v1/gates/passkey/begin, /finish</code>, <code>DELETE /v1/gates/:id</code></td><td>Deploy gates: list, make (passkey, web only) and revoke (any session; it closes the gate's waiting requests and revokes the tokens it handed out).</td></tr>
+    <tr><td><code>POST /v1/gate/request</code>, <code>GET /v1/gate/status/:id?wait=</code>, <code>POST /v1/gate/cancel/:id</code></td><td>A GitHub Actions job asks for, waits for (up to 20 s) and withdraws a deploy approval. The first is authenticated by GitHub's OIDC token, the others by the poll secret (<code>gps_</code>) it returns. Used by <code>action/deploy-gate</code>.</td></tr>
     <tr><td><code>GET /v1/audit</code>, <code>GET /v1/audit/verify</code></td><td>Read your audit log (with the receipt index of each sealed entry); check the hash chain.</td></tr>
     <tr><td><code>GET /v1/agent-keys</code>, <code>POST /v1/agent-keys/begin</code>, <code>POST /v1/agent-keys</code></td><td>List agent keys; register one with a proof of possession over the text from <code>begin</code>.</td></tr>
     <tr><td><code>DELETE /v1/agent-keys/:id</code></td><td>Revoke an agent key. Web only.</td></tr>
@@ -402,6 +426,9 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td>401</td><td><code>agent_signature_required</code>, <code>bad_agent_signature</code>, <code>agent_signature_replayed</code>, <code>agent_key_revoked</code></td><td>The token is bound to an agent key and the request was not signed by it, was signed wrongly (the <code>reason</code> says how), reused a nonce, or the key was revoked.</td></tr>
     <tr><td>401</td><td><code>api_key_required</code>, <code>api_key_invalid</code></td><td>Missing, revoked or expired receipts API key.</td></tr>
     <tr><td>401</td><td><code>guard_key_required</code>, <code>guard_key_invalid</code></td><td>Missing, revoked or ended guard key (a key made by a command line sign-in ends with it).</td></tr>
+    <tr><td>401</td><td><code>oidc_required</code>, <code>oidc_malformed</code>, <code>oidc_alg</code>, <code>oidc_bad_signature</code>, <code>oidc_issuer</code>, <code>oidc_audience</code>, <code>oidc_expired</code>, <code>oidc_not_yet_valid</code>, <code>oidc_lifetime</code>, <code>oidc_claims</code>, <code>oidc_replayed</code>, <code>oidc_unknown_kid</code></td><td>A deploy gate's request without a valid GitHub OIDC token: missing (the job lacks <code>id-token: write</code>), not signed by GitHub, made for another audience, expired, a claim missing or odd, or already used. The message says which.</td></tr>
+    <tr><td>403</td><td><code>gate_refused</code></td><td>The run is not what the gate accepts. <code>reason</code> is <code>repository</code>, <code>workflow</code>, <code>ref</code>, <code>environment</code> or <code>event</code>.</td></tr>
+    <tr><td>503</td><td><code>oidc_keys_unavailable</code></td><td>GitHub's signing keys could not be fetched; the action retries.</td></tr>
     <tr><td>403</td><td><code>denied</code></td><td>You denied this command; <code>deny_reason</code> carries your reason.</td></tr>
     <tr><td>409</td><td><code>hash_mismatch</code>, <code>not_approved</code>, <code>already_used</code></td><td>The approval is for a different command, is still waiting, or was used.</td></tr>
     <tr><td>410</td><td><code>expired</code></td><td>The approval was not used within 10 minutes, or nobody decided within 30. Ask again.</td></tr>

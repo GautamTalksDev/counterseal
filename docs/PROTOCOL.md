@@ -340,6 +340,99 @@ members' devices (at most once a minute per account, shared with hold alerts).
   devices no longer in the account); team events for the
   phone come from audit actions listed in `Team.recentEvents`. A channel message can say "n of m seals" from
   `holds.needs` and the hold's `votes`.
+## Deploy gates
+
+A GitHub Actions job waits for a passkey approval, bound to the claims in GitHub's signed OIDC token. The holds table,
+alerts, approve and deny routes and receipts are the same as for brokered calls and commands (hold kind `deploy`). In this
+repo, not yet deployed (migration 0007). How to use it: [DEPLOY_GATE.md](DEPLOY_GATE.md). The action that speaks this
+protocol is `action/deploy-gate`.
+
+### Gates (the app)
+
+- `GET /v1/gates` (any session): `{gates: [{id, label, repository, workflows, refs, environments, events, bound, publish_repo,
+  credential, created_at, last_used, revoked}], server}`. `bound` is `null` or `{repository_id, repository_owner_id, at}`;
+  `credential` is `null` or `{id, provider, label, preapproved}`.
+- `POST /v1/gates/passkey/begin` then `POST /v1/gates/passkey/finish` (web session with CSRF, a passkey ceremony; a command
+  line session gets `403 passkey_required`). The finish body is `{challengeId, credential, label, repository, workflows, refs,
+  environments?, events?, publishRepo?, credentialId?, policy?}` and returns the gate (`id` is `gate_` and 24 hex
+  characters; it is public, pasted in workflow files). Unknown fields are refused (`400 bad_field`).
+
+| Field | Rule |
+|---|---|
+| `label` | 1 to 60 characters of letters, digits, space and `._:/()-` |
+| `repository` | `owner/name`: owner `[A-Za-z0-9-]{1,39}`, name `[A-Za-z0-9._-]{1,100}`, not `.` or `..`. No wildcard |
+| `workflows` | 1 to 5 workflow files of that repository, `.github/workflows/<name>.yml` or `.yaml`. No wildcard |
+| `refs` | 1 to 10 refs: `refs/heads/...` or `refs/tags/...` of `[A-Za-z0-9._/-]` (150 at most), exact, or with one trailing `*` for a prefix. No `//` or `..`; a bare `refs/heads/*` is refused |
+| `environments` | optional, up to 10 names, `^[A-Za-z0-9][A-Za-z0-9 ._:/()-]{0,99}$`; if given, the job must run in one of them |
+| `events` | from `push`, `workflow_dispatch`, `release`, `deployment`, `merge_group`, `schedule`, `repository_dispatch`; default the first five |
+| `publishRepo` | boolean, default false: the repository name goes in this gate's public receipts |
+| `credentialId`, `policy` | phase 2: a vault key of this account and the policy of the token handed out (as for a token made with a passkey, so it may pre-approve irreversible calls). `policy` needs `credentialId` (`400 policy_needs_credential`) |
+
+  Errors: `400 bad_label|bad_repository|bad_workflows|bad_refs|bad_environments|bad_events|bad_publishRepo|bad_policy`,
+  `404 not_found` (a key that is not this account's), `409 too_many_gates` (20 active).
+- `DELETE /v1/gates/<id>` (any session with CSRF; revoking only tightens): `{ok, closed, tokens}`: its waiting and approved
+  requests are closed and the tokens it handed out are revoked.
+
+### Ask: `POST /v1/gate/request`
+
+`Authorization: Bearer <GitHub OIDC token>`, body `{"gate": "gate_...", "summary"?: "...", "timeout_minutes"?: 15}`. `summary` is up
+to 120 characters after control, format and line-break characters become spaces; `timeout_minutes` is a whole number from
+1 to 60 (default 15) and is how long the request lives. The token's audience must be exactly
+`<product origin>/gate/<gate id>` (the action asks GitHub for it with the `audience` query parameter on
+`ACTIONS_ID_TOKEN_REQUEST_URL`). Checks, in order: the token (`oidc_*` below), the gate exists and is not revoked, the run fits
+the gate (`gate_refused`), the account is not frozen, the token's `jti` is unused, then the limits.
+
+Answers:
+- `202 {id, status: "pending" | "approved", poll, approve_url, expires_at, rule, created}`. `poll` is the poll secret
+  (`gps_` and 43 base64url characters), shown once. `created: false` when the same run (same hash) already had a request
+  pending or approved: the same hold, no second alert, a new poll secret. `rule` is `gate.bind` on a gate's first run and
+  `gate.deploy` after.
+- `401 oidc_required` (no bearer), `oidc_malformed`, `oidc_alg`, `oidc_unknown_kid`, `oidc_bad_signature`, `oidc_issuer`,
+  `oidc_audience`, `oidc_expired`, `oidc_not_yet_valid`, `oidc_lifetime`, `oidc_claims`, `oidc_replayed`;
+  `503 oidc_keys_unavailable` (GitHub's key set could not be had).
+- `403 gate_refused {reason}` with `reason` one of `repository`, `workflow`, `ref`, `environment`, `event`; `404 gate_not_found`;
+  `423 account_frozen`; `429 too_many_holds` (10 waiting per gate, 100 per account) or `slow_down` (30 new requests an hour
+  per gate); `409 try_again`; `400 bad_gate|bad_summary|bad_timeout|bad_field`.
+
+The hold is bound to
+
+```
+hash = hex(SHA-256(JSON.stringify(["v1", "deploy", gate, repository_id, repository_owner_id, run_id, run_attempt, sha,
+                                   workflow_ref, job_workflow_ref, ref, environment, check_run_id])))
+```
+
+(ids as digit strings; `environment` and `check_run_id` are `""` when absent). Its method word is `DEPLOY`, its host word
+`github.com`, its agent `github-actions`, its path `<repository>@<sha7> <environment or ref>`. `GET /v1/holds` returns, for
+`kind: "deploy"`, `token_label` (the gate's label) and `context.gate`: `{repository, repository_id, ref, sha, workflow_ref,
+job_workflow_ref, environment, event, actor, run_id, run_attempt, visibility, runner, bind, summary, run_url, commit_url}`,
+all from the verified token except `summary`, which is the workflow's own text. The context and the preview are dropped
+about a day after the hold closes.
+
+### Wait: `GET /v1/gate/status/<id>?wait=<0..20>`
+
+`Authorization: Bearer gps_...` (the poll secret; it reads that one hold). `{id, status, deny_reason, expires_at}` with `status`
+`pending`, `approved`, `denied`, `expired` or `used`. With `wait` the server re-reads every 2 seconds until the status is not
+`pending` or the wait is over: no D1 writes, at most 12 reads, the limit (30 a minute per secret) in memory. The poll that
+finds the hold `approved` spends it in one atomic update (still approved, same hash, in time, the gate not revoked and, if
+bound, still the same repository and owner ids, the account not frozen), binds the gate on its first approved run, and returns
+`approved`; the next poll reads `used`. For a gate that names a key the same answer carries `token` (`lsh_...`, 15 minutes),
+`provider`, `base_url` and `token_expires_at`, once. Errors: `401 poll_secret_required`, `404 not_found`,
+`409 hash_mismatch|gate_revoked|gate_bound_elsewhere|credential_gone|too_many_tokens` (the last two leave the approval
+unspent), `423 account_frozen`, `400 bad_wait`, `429 slow_down`.
+
+### Cancel: `POST /v1/gate/cancel/<id>`
+
+`Authorization: Bearer gps_...`, body `{}`: `{ok: true, cancelled: boolean}`. Closes the request if it is still pending or approved
+(the job gave up). It also works while the account is frozen.
+
+### Receipts
+
+Sealed like any hold, with fixed words only: `{"action": "DEPLOY github.com", "decision": "held" | "approved" | "denied" |
+"executed", "meta": {"map": ..., "rule": "gate.deploy" | "gate.bind", "passkey": true}}` (`passkey` on `approved`; `executed` is
+the poll that spent the approval, audit action `gate_passed`). `meta.repo` carries `owner/name` only when the gate was made
+with `publishRepo`. Never the commit, workflow, run, person, label, summary or deny reason. The private audit log has `hold`
+(repository, commit, ref, run, attempt, environment, gate), `approve`, `deny`, `gate_passed`, `gate_cancelled`,
+`gate_created` and `gate_revoked`.
 
 ## Web Bot Auth
 

@@ -340,7 +340,7 @@ test('the action has no dependencies, no package, no dash in user-facing text, a
   assert.match(yml, /using: node24\n\s+main: index\.mjs/);
   for (const f of ['action.yml', 'index.mjs', 'examples/deploy.yml', 'examples/deploy-with-key.yml']) {
     const text = readFileSync(new URL('../../action/deploy-gate/' + f, import.meta.url), 'utf8');
-    assert.ok(!/[–—]/.test(text), f + ' has an en or em dash');
+    assert.ok(!new RegExp('[' + String.fromCharCode(0x2013, 0x2014) + ']').test(text), f + ' has an en or em dash');
     assert.ok(!/\b(LEASH|WITNESS|SIGIL|Leash|Witness|Sigil)\b(?![_-])/.test(text.replace(/GautamTalksDev\/leash/g, '')), f + ' has an old product name');
   }
   const wf = readFileSync(new URL('../../action/deploy-gate/examples/deploy.yml', import.meta.url), 'utf8');

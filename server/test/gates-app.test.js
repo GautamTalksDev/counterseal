@@ -232,7 +232,7 @@ test('the page and its styles name the gate\'s parts: the nav entry, the form fi
   for (const id of ['gates', 'noGates', 'gtLabel', 'gtRepo', 'gtWorkflows', 'gtRefs', 'gtEnvs', 'gtEvents', 'gtPublish', 'gtCred', 'gtPolicy', 'gtNew', 'newGate', 'newGateSnippet', 'newGateCopy']) assert.ok(html.includes(`id="${id}"`), id);
   assert.match(html, /<a href="#" data-view="gates">[^<]*<span[^>]*><\/span>Deploy gates<\/a>/);
   assert.match(html, /<section class="view" data-view="gates" hidden>/);
-  assert.ok(!/[–—]/.test(html));
+  assert.ok(!new RegExp('[' + String.fromCharCode(0x2013, 0x2014) + ']').test(html), 'no en or em dash in the page');
   assert.match(readFileSync(new URL('../../site/public/styles.css', import.meta.url), 'utf8'), /\.badge\.ok\{/);
   const sw = readFileSync(new URL('../../site/public/sw.js', import.meta.url), 'utf8');
   assert.match(sw, /h\.kind === 'deploy' \? `\$\{who\} wants to deploy`/);

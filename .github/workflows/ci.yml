@@ -15,7 +15,7 @@ jobs:
       - name: Server, SDK and CLI tests
         run: cd server && node --test test/*.test.js ../sdk/*.test.mjs ../cli/test/*.test.mjs
       - name: CLI and SDK parse
-        run: for f in cli/*.mjs sdk/*.mjs scripts/*.mjs plugins/*/scripts/*.mjs; do node --check "$f"; done
+        run: for f in cli/*.mjs sdk/*.mjs scripts/*.mjs plugins/*/scripts/*.mjs action/deploy-gate/*.mjs; do node --check "$f"; done
       - name: Site scripts parse
         run: find site/public -name '*.js' -not -path '*/fonts/*' -print0 | xargs -0 -n1 node --check
       - name: Site copies of the SDK are current
@@ -28,7 +28,7 @@ jobs:
         run: if node sdk/receipts.mjs; then exit 1; fi
       - name: No em or en dashes in user-facing text
         run: |
-          if grep -rnP "[\x{2013}\x{2014}]" site/public README.md SECURITY.md docs cli/*.mjs cli/test scripts sdk/shellmap.mjs sdk/shellmap.test.mjs sdk/shellmap.vectors.txt plugins .claude-plugin --include=*.html --include=*.js --include=*.md --include=*.mjs --include=*.css --include=*.webmanifest --include=*.json --include=*.txt | grep -v 'receipts-sdk.js' | grep -v "DASH = "; then echo "Use a period, colon or comma instead."; exit 1; fi
+          if grep -rnP "[\x{2013}\x{2014}]" site/public README.md SECURITY.md docs cli/*.mjs cli/test scripts sdk/shellmap.mjs sdk/shellmap.test.mjs sdk/shellmap.vectors.txt plugins .claude-plugin action --include=*.yml --include=*.html --include=*.js --include=*.md --include=*.mjs --include=*.css --include=*.webmanifest --include=*.json --include=*.txt | grep -v 'receipts-sdk.js' | grep -v "DASH = "; then echo "Use a period, colon or comma instead."; exit 1; fi
       - name: No innerHTML (Trusted Types)
         run: |
           if grep -rnE "\.(innerHTML|outerHTML)\s*=|insertAdjacentHTML\(|document\.write\(" site/public --include=*.js; then exit 1; fi
