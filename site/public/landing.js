@@ -312,7 +312,7 @@ function pick(i, btn) {
   btn.setAttribute('aria-pressed', 'true');
   current = TRIES[i];
   const t = current, id = hex(crypto.getRandomValues(new Uint8Array(12)));
-  $('phRes').hidden = true;
+  phReset();
   if (!t.rule) {
     $('phCard').hidden = true; $('phIdle').hidden = false;
     out($('apOut'), [`${t.m} /p/${t.p}${t.path === '/' ? '/' : t.path}\n\n`, ['s2', 'HTTP 200'], `  x-leash-decision: allowed\n\nThe call went straight through with the real key, injected by the broker. ${t.m === 'GET' ? 'Reads are not recorded.' : 'A write: its "allowed" decision becomes a receipt.'}`]);
@@ -327,16 +327,31 @@ function pick(i, btn) {
   out($('apOut'), [`${t.m} /p/${t.p}${t.path === '/' ? '/' : t.path}\n\n`, ['s4', 'HTTP 428'], '\n' + pretty({ error: 'held_for_approval', hold_id: id, approve_url: approveUrl, rule: t.rule, map_version: META ? META.mapVersion : MAP_VERSION, message: `Counterseal held this request because it cannot be undone: ${why} Stop and ask your human to approve it at ${approveUrl} . After they approve, retry the exact same request once.` })]);
   $('phCard').classList.remove('in'); void $('phCard').offsetWidth;
 }
+function phReset() {
+  $('phToast').hidden = true; $('phRcpt').hidden = true; $('phStamp').hidden = true;
+  $('phActs').hidden = false; $('phCard').classList.remove('ok', 'no');
+  $('phLbl').textContent = 'Held for you';
+}
+function phDecide(ok) {
+  const t = current;
+  $('phActs').hidden = true; $('phCard').classList.add(ok ? 'ok' : 'no');
+  $('phLbl').textContent = ok ? 'Approved' : 'Denied';
+  $('phStamp').hidden = false;
+  $('phStamp').textContent = ok ? 'Countersealed by you' : 'A denied call never runs.';
+  $('phToastH').textContent = ok ? 'Approved.' : 'Denied.';
+  $('phToastT').textContent = ok ? 'The agent can retry that exact request once.' : 'The agent was told no.';
+  $('phToast').hidden = false;
+  $('phRcpt').textContent = `receipt · decision ${ok ? 'approved' : 'denied'} · rule ${t.rule}`;
+  $('phRcpt').hidden = false;
+}
 $('phOk').addEventListener('click', () => {
-  if (!current) return;
-  $('phCard').hidden = true; $('phRes').hidden = false;
-  $('phRes').replaceChildren(el('b', { text: 'Approved.' }), 'The agent can retry that exact request once.');
+  if (!current || !current.rule) return;
+  phDecide(true);
   const pre = $('apOut'); pre.append('\n\n', 'retry, same request → ', el('span', { class: 's2', text: 'HTTP 200' }), '  x-leash-decision: approved\nThe approval is used up. One more retry would be held again.');
 });
 $('phNo').addEventListener('click', () => {
-  if (!current) return;
-  $('phCard').hidden = true; $('phRes').hidden = false;
-  $('phRes').replaceChildren(el('b', { text: 'Denied.' }), 'The agent was told no.');
+  if (!current || !current.rule) return;
+  phDecide(false);
   const pre = $('apOut'); pre.append('\n\n', 'retry, same request → ', el('span', { class: 's4', text: 'HTTP 428' }), '  held again\nA denied call never runs.');
 });
 

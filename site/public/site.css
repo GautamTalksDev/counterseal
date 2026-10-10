@@ -612,3 +612,72 @@ body.frozen-demo .brakes{box-shadow:0 0 0 1px rgba(240,98,114,.35);border-radius
 .window.flash{box-shadow:0 0 0 2px rgba(200,245,96,.6),0 40px 120px -40px rgba(0,0,0,.9)}
 @media (max-width:900px){.custody,.limits ul{grid-template-columns:minmax(0,1fr)}}
 #demo{scroll-margin-top:96px}
+
+/* ---------------------------------------------------------------- polish: one vertical rhythm */
+:root{
+  --sec-y:clamp(72px,9vh + 24px,140px);  /* section top padding */
+  --blk:clamp(28px,2.4vw,44px);          /* heading block to the demo or cards */
+  --note:18px;                           /* demo or buttons to the fine print */
+  --measure:64ch;                        /* body copy line length */
+}
+.sec{padding-top:var(--sec-y)}
+.kicker{margin:0 0 12px}
+.h2{font-size:clamp(30px,2.3vw + 21px,72px);line-height:1.04;letter-spacing:-.04em;margin:0 0 16px;max-width:20ch}
+.sub{max-width:var(--measure);line-height:1.62}
+.keyring,.cards4,.cards3,.race,.desk,.shellbox,.mcpbox,.gate,.brakes,.tamper,.ledger,.map,.price,.custody,.setup,.setup.three{margin-top:var(--blk)}
+.part-head + .desk,.part-head + .phones,.part-head + .tamper{margin-top:var(--blk)}
+.setup{margin-bottom:0}
+.cards2,.limits,.reallog{margin-top:16px}
+.phones{margin-top:16px}
+.wrap > .fine{margin-top:var(--note);max-width:var(--measure)}
+.wrap > .fine.center{margin-left:auto;margin-right:auto}
+.cta + .fine{margin-top:var(--note);max-width:var(--measure)}
+.cta{margin-top:28px}
+.stat{margin-top:var(--note)}
+.card > h3:first-child{margin-top:0}
+.card h3{line-height:1.3;margin-bottom:8px}
+.card p{line-height:1.6}
+.card.link{padding:22px 22px 24px}
+.limits ul,.facts{max-width:none}
+.part-head .sub{max-width:58ch}
+.final .h1{font-size:clamp(38px,3.6vw + 20px,112px)}
+.final-copy p{margin:0 0 28px}
+.p-sub{margin-bottom:24px}
+
+/* the Approve phone: a lock screen in every state */
+.phone.lock{display:flex;flex-direction:column;min-height:0;height:600px;padding:14px 14px 10px;align-self:start;position:sticky;top:96px}
+.phone.lock .ph-time{margin:48px 0 0;font-size:52px;line-height:1}
+.phone.lock .ph-screen{flex:1;display:flex;flex-direction:column;justify-content:center;gap:10px;padding:16px 6px;min-height:0}
+.ph-home{flex:none;width:112px;height:4px;border-radius:9px;background:rgba(255,255,255,.35);margin:6px auto 4px}
+.ph-idle{margin:0;justify-items:center;gap:6px}
+.ph-ring{width:46px;height:46px;border-radius:50%;margin-bottom:8px;border:1.5px dashed rgba(200,245,96,.45);box-shadow:inset 0 0 0 9px rgba(200,245,96,.06)}
+.ph-toast{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:16px;background:rgba(40,41,48,.85);border:1px solid var(--line2);animation:drop .45s cubic-bezier(.2,.9,.3,1.2)}
+.ph-toast .t-ico{width:28px;height:28px;border-radius:8px}
+.ph-toast .t-msg{font-size:13px}
+.ph-toast .t-sub{display:block;font-size:12px;line-height:1.45}
+.ph-app{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:10.5px;letter-spacing:.06em;color:var(--mute)}
+.ph-app .t-ico{width:20px;height:20px;border-radius:6px}
+.ph-app .t-ico svg{width:14px;height:14px}
+.ph-app b{font-weight:600}
+.ph-app span:last-child{margin-left:auto}
+.phone.lock .ph-what{font-size:15.5px;line-height:1.35}
+.phone.lock .ph-why{line-height:1.5}
+.ph-card.ok{border-color:rgba(200,245,96,.4)}.ph-card.ok .ph-lbl{color:var(--acc)}
+.ph-card.no{border-color:rgba(240,98,114,.4)}.ph-card.no .ph-lbl{color:var(--danger)}
+.ph-stamp{margin:0;padding-top:10px;border-top:1px dashed var(--line2);font-size:13px;font-weight:600}
+.ph-card.ok .ph-stamp{color:var(--acc)}.ph-card.no .ph-stamp{color:var(--danger)}
+.ph-rcpt{margin:0;text-align:center;font-size:10.5px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gate-phone{display:flex;flex-direction:column}
+.gate-phone .ph-screen{flex:1;display:flex;flex-direction:column;justify-content:center;padding-top:44px}
+.gate-phone .ph-idle{margin:0}
+@media (max-width:900px){.phone.lock{position:relative;top:auto;height:auto;min-height:540px;max-width:340px}}
+@media (max-width:560px){.phone.lock{min-height:520px}.phone.lock .ph-time{margin-top:44px;font-size:46px}.wrap > .fine.center{text-align:left}}
+@media (prefers-reduced-motion:reduce){.ph-toast{animation:none}}
+/* inner pages, same rhythm */
+.prose h1{font-size:clamp(34px,2.6vw + 22px,64px);line-height:1.04;margin:.1em 0 .35em}
+.prose .lead{max-width:var(--measure);line-height:1.6;margin-bottom:32px}
+.prose h2{margin:52px 0 14px;line-height:1.15}
+.prose h3{margin:30px 0 8px;line-height:1.3}
+.prose p,.prose li{line-height:1.65}
+.prose p{margin:0 0 14px}
+.prose pre,.prose .callout,.prose details,.prose .tool{margin:16px 0 20px}

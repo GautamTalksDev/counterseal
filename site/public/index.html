@@ -218,21 +218,28 @@
         <p class="desk-h">The agent tries to</p>
         <div id="tries" class="tries"></div>
       </div>
-      <div class="phone" aria-live="polite">
+      <div class="phone lock" aria-live="polite">
         <div class="ph-notch" aria-hidden="true"></div>
         <div class="ph-time" aria-hidden="true">9:41</div>
         <div class="ph-screen" id="phScreen">
-          <div class="ph-idle" id="phIdle"><b>All clear</b><span>No calls waiting</span></div>
+          <div class="ph-toast" id="phToast" hidden>
+            <span class="t-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg></span>
+            <div><div class="t-top"><b>COUNTERSEAL</b><span>now</span></div><b class="t-msg" id="phToastH"></b><span class="t-sub" id="phToastT"></span></div>
+          </div>
+          <div class="ph-idle" id="phIdle"><span class="ph-ring" aria-hidden="true"></span><b>All clear</b><span>No calls waiting</span></div>
           <div class="ph-card" id="phCard" hidden>
-            <p class="ph-lbl">Held for you</p>
+            <div class="ph-app" aria-hidden="true"><span class="t-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" class="ring"/><circle cx="12" cy="12" r="3" class="dot"/></svg></span><b>COUNTERSEAL</b><span>now</span></div>
+            <p class="ph-lbl" id="phLbl">Held for you</p>
             <b class="ph-what" id="phWhat"></b>
             <code class="ph-path" id="phPath"></code>
             <p class="ph-why" id="phWhy"></p>
             <p class="ph-rule mono" id="phRule"></p>
-            <div class="ph-acts"><button class="btn btn-pri sm" type="button" id="phOk">Approve with passkey</button><button class="btn btn-ghost sm" type="button" id="phNo">Deny</button></div>
+            <div class="ph-acts" id="phActs"><button class="btn btn-pri sm" type="button" id="phOk">Approve with passkey</button><button class="btn btn-ghost sm" type="button" id="phNo">Deny</button></div>
+            <p class="ph-stamp" id="phStamp" hidden></p>
           </div>
-          <div class="ph-res" id="phRes" hidden></div>
+          <p class="ph-rcpt mono" id="phRcpt" hidden></p>
         </div>
+        <div class="ph-home" aria-hidden="true"></div>
       </div>
       <div class="console" aria-live="polite"><p class="desk-h">What the agent gets back</p><pre id="apOut" class="mono">Pick a call.</pre></div>
     </div>
