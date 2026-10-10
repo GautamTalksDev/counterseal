@@ -435,7 +435,11 @@ not count yet; 5 to 60 minutes, one at a time, 3 a day, never extended; the whol
 once, with no rate limit; any member can close it; the calls it lets through are in the owner's log with the window's id and in
 the public receipt as `breakglass`. It never lifts a freeze, a tripped breaker, a rate limit or a money cap, is never read for a
 deploy gate, does not approve what was already waiting, does not cover the opener's own token when self-approval is off, and
-ends when its opener stops being an owner or approver. Residual, said plainly: for up to an hour a leaked token in the window's
+ends when its opener stops being an owner or approver. It lets through only a hold of the irreversible map, and only when the
+rest of the token's own policy (its hold rules, allow list and default) would allow the call, as for a money cap: a token's
+own `hold` rule or `default: hold` is never lifted. A freeze closes it (an unfreeze never brings it back; to go on, open a
+new one, which tells the team again). Tests: *a freeze closes an open break-glass window*, *break glass never lifts a token's
+own hold rules* (`test/final-gate.test.js`). Residual, said plainly: for up to an hour a leaked token in the window's
 scope can do what the map would hold, with no second seal; and an approver who opens three windows a day is an insider the
 product reports, not one it stops. Tests: `test/breakglass.test.js`, `test/bg-app.test.js`.
 
@@ -657,7 +661,7 @@ the operator never rewrote the whole private chain and its receipts' parents tog
 witness cosigning would). Tests: *the evidence pack*.
 
 **P7. Idle sessions.** A web session ends after an hour without an action of the person (any write, or a read the app
-marks with `x-leash-active: 1`); the app's 5-second refresh and the worker's alert fetch do not count. It still ends after
+marks with `x-leash-active: 1`); the app's background refresh and the worker's alert fetch do not count. It still ends after
 12 hours at most. Command line sessions keep their 7 days. Test: *a web session ends after an hour without an action*.
 
 **P8. Retention.** An owner chooses 30, 90 or 365 days for closed holds (default 365); the cleanup deletes closed ones past
@@ -670,6 +674,48 @@ markers are times on the account row, written once. Test: *the launch funnel*.
 **P10. The install line names a package that does not exist yet.** Every install line names `BRAND.cliInstall`; publish
 `counterseal` before deploying a site that says it, or switch the lines to `leashcli` (docs/DEPLOY.md). Someone could
 register a look-alike package name: the docs give only the two exact names.
+
+### The final security gate (9 Oct 2026, branch feat/final-gate)
+
+An independent pass over the joints between features built in parallel. Each fix has a test that failed before it
+(`server/test/final-gate.test.js`, `cli/test/final-gate.test.mjs`).
+
+**F1. A freeze left a break-glass window open.** Freezing voided approvals and seals but not an open window, so an unfreeze
+brought the window back. A freeze now closes it (T12).
+
+**F2. Break glass lifted a token's own rules.** A window let through any hold that was not a brake's, including a token's own
+`hold` rules, `default: hold` and calls off its allow list. Now only a map hold the rest of the policy would allow (T12).
+
+**F3. Reported receipts could crowd out the broker's own.** An agent with a receipts key (or a command line session, which
+can make one) could fill its account's quota with junk, so the account's real decisions were skipped from the public log:
+receipts off without the passkey ceremony that switch needs. A few new accounts could fill the log's 10,000 a day for every
+tenant. Now the broker's own decisions get twice an account's quotas, and reported receipts may use at most
+`REPORTED_DAILY_CAP` (5,000) of the day's capacity across all accounts, counted on the same row in the same statement
+(migration 0013).
+
+**F4. Unbounded reads.** `GET /v1/audit/verify` read and hashed an account's whole log in one request (over the CPU limit for a
+long log, and repeatable by any member to spend the day's D1 read budget for everyone); it is now 100 entries a page
+(`?after=`), and the app walks the pages. `GET /v1/export/evidence` with a range that matched nothing scanned the whole log;
+a page now looks at 1,000 entries at most and says where to go on.
+
+**F5. The dashboard spent the service's request budget.** Its refresh made six requests every 5 seconds, hidden or not:
+one dashboard left open for a day was about 100,000 requests, the whole Workers Free allowance of the account. It now asks
+nothing while hidden, one request (`/v1/alerts`) every 5 seconds while shown, and the full load only when that changed or
+once a minute.
+
+**F6. Smaller ones.** A member's refused revoke of someone else's gate still closed its holds and revoked its tokens (now only
+a revoke that happened does). A token label that reads like a web address is shown in code formatting in Slack, Discord and
+Google Chat, never as a link next to the real approve link. A guard hold's rule comes from the agent's machine: a public
+receipt names it only if it is a rule Counterseal ships (`server/src/guardrules.js`, generated by `scripts/sync-guard.mjs`),
+so an agent cannot write text of its choosing into the permanent log.
+
+**F7. The command line.** Redaction swallowed command substitutions (`X_TOKEN="$(curl ... | sh)" git push --force` read like
+`X_TOKEN="a" ...`), so one approval covered another command and the approver never saw the payload: a value that runs a
+command is no longer redacted. Hook input cut at 256 KB passed when the part read looked harmless: a cut shell command now
+always waits for a person, and a cut call that is not a recognisable command is refused. The MCP wrapper's approvals now name
+the server (`mcp__<server>__<tool>`), so a yes for staging's `drop_table` does not run prod's. `login --server` drops the old
+session before talking to the new server, the CLI refuses a server that is not https (http only for localhost), and a session
+is sent only to the server it was made on.
 
 ## Residual risks
 
@@ -698,3 +744,22 @@ register a look-alike package name: the docs give only the two exact names.
 - Durable Object and D1 daily budgets on Workers Free: a flood from many networks can use up the day's budget and stop
   receipts (not decisions) until 00:00 UTC. A Workers Rate Limiting binding and a WAF rule reduce it (docs/DEPLOY.md).
 - Master key or log key compromise via the Cloudflare account. Mitigation: hardware-key 2FA on the account.
+- Workers Free counts every request, even one the Worker refuses at once, against 100,000 a day for the whole Cloudflare
+  account (this Worker and every other one on it). One network can send that many; so can one signed-in member (reads are
+  limited to 300 a minute per account, per isolate, in memory). Then every agent's calls fail until 00:00 UTC. Nothing in the
+  Worker can prevent it: a Cloudflare WAF rate limiting rule on `/v1/*` and `/p/*` (one rule is included on Free), the
+  `READ_LIMITER` binding, or the paid plan do. The proxy's per-network limit is a D1 write before the token is checked.
+- Any member can read the whole audit log and hold list, page by page, as often as the read limit allows; a few such loops
+  can use a large share of the day's 5 million D1 rows read. Mitigation: pages are bounded (F4); per-account daily read
+  budgets are not built.
+- The coding-agent guard (G-section, final gate F7): it does not hold commands that disable the guard itself (editing the
+  agents' hook settings, `guard.json`, the guard's own script, `guard uninstall`, `mcp pin --yes`); a `server` written into
+  `guard.json` receives the guard key and can answer "approved". Not covered by the map: `git -c alias.*` and `git config
+  alias.*`, a program word from `"$@"`, an array or a changed `IFS`, `find -exec rm` and `xargs rm` on unknown files, `> file`
+  and `truncate`, `kubectl exec ... rm`, `curl` to an IP with a `Host` header, `gh pr merge --admin`, `npm publish`; the
+  Claude Code PowerShell tool (Windows) is not hooked; an approval is bound to the folder's name, not its full path; the
+  hook's MCP SQL check reads only `query` and `sql` (the wrapper reads more); `curl -u user:pass` and `X-Api-Key` headers
+  are not redacted. An agent can read the CLI's session file. All are on the agent's machine: a seatbelt, not a sandbox.
+- The public log's capacity: reported receipts are capped below the day's total (F3), but the broker's own decisions of all
+  accounts share the rest; an account with a busy agent can still use a large share of the day (2,000 decisions a day per
+  account by default: twice its 2,000 for reported receipts), up to the log's 10,000 a day.

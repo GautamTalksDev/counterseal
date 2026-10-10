@@ -339,7 +339,7 @@ while two seals may be required, so it is small and loud.
 - `GET /v1/team` and `GET /v1/me` carry the open window: `windows: [{id, opened_by, opened_by_name, reason, opened_at,
   expires_at, scope}]` (`scope` is `null` or `{token_id, label}`). `GET /v1/team` also has `breakglass: {minMinutes, maxMinutes,
   perDay}`.
-- What it does. In `broker.proxy`, after the brakes have had their say, when the map still holds a call (and the rule is not a brake's: `brake.*`) and a window is open
+- What it does. In `broker.proxy`, after the brakes have had their say, when the map still holds a call (and the rule is neither a brake's, `brake.*`, nor the token's own, `policy.*`), the rest of the token's own policy (hold rules, allow list, default) would allow it, and a window is open
   for the token, the call is allowed with the rule's id plus `:breakglass` (and counted against the breaker like any allowed write); the private log's `proxy` entry carries
   `breakglass: <window id>` and the public receipt `meta.breakglass: true`, nothing else about the window. In
   `approvals.create`, a hold for a guard key that a window covers is inserted already approved (use once within 10 minutes,
@@ -348,7 +348,8 @@ while two seals may be required, so it is small and loud.
 - What it never does. It is not read for a deploy gate. It does not lift a freeze (423 comes first), a tripped breaker, a rate
   limit or a money cap (`brake.*` rules), or what was already waiting before it opened. With self-approval off it does not
   cover what the opener's own token or guard key asks. It stops applying when its opener is no longer an owner or approver, and
-  when it expires or is closed.
+  when it expires or is closed. A freeze closes it (`closed_by` is whoever froze; the `freeze` audit entry has `closed_windows`),
+  so an unfreeze never brings it back.
 - Opening one writes `breakglass_opened` (the opener, minutes, scope and reason, owner-visible only) and wakes every other member's
   devices and every channel at once, with no rate limit (each took a passkey; 3 a day bounds them); closing writes
   `breakglass_closed` and does the same.
@@ -513,7 +514,7 @@ to the host and `x-leash: 1`).
 | `POST /v1/me/retention` `{"holdDays": 30 \| 90 \| 365}` | owner, browser session | How long closed holds are kept. Audited (`retention_changed`). |
 | `POST /v1/me/export/begin`, `/finish` | owner, browser session, passkey ceremony | Everything kept about the account as JSON (`format: "counterseal-data-export/1"`), without secrets (see `never_included` in the answer). 3 an hour; audited (`data_export`). Its `holds` and `audit` are filled by paging the two routes below. |
 | `GET /v1/export/holds?after=<n>` | owner, browser session | 200 holds a page, oldest first: `{entries, done, next_after}`. |
-| `GET /v1/export/evidence?from=<ms>&to=<ms>&after=<seq>` | any member (as `GET /v1/audit`) | 250 audit entries a page, oldest first, exactly as stored (`detail` is the JSON text the hash covers): `{account_id, entries, done, next_after}`; the first page also has `from_start`, `map_version`, `range` and `log: {origin, verifier_key, checkpoint, tree_size}`. Writes nothing. |
+| `GET /v1/export/evidence?from=<ms>&to=<ms>&after=<seq>` | any member (as `GET /v1/audit`) | 250 audit entries a page, oldest first, exactly as stored (`detail` is the JSON text the hash covers): `{account_id, entries, done, next_after}` (a page looks at 1,000 entries at most, so a range that matches few can come back short or empty with `done: false`: go on with `after=next_after`); the first page also has `from_start`, `map_version`, `range` and `log: {origin, verifier_key, checkpoint, tree_size}`. Writes nothing. |
 
 `GET /v1/me` also returns `progress: {token, call, demo, installed, alerts}` (first times, or null) and `retention: {holdDays,
 choices, rules}`. A web session ends after an hour without an action: a write, or a read sent with `x-leash-active: 1`;

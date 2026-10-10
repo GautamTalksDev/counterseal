@@ -6,7 +6,7 @@ Object (`ReceiptLog`, the public log) and static assets. It fits the Workers Fre
 ## Upgrading the live service (from the broker-only version)
 
 The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005_cli_signin.sql`, `0006_approvals.sql`,
-`0007_gates.sql`, `0008_brakes.sql`, `0009_team.sql`, `0010_provider_host.sql`, `0011_breakglass.sql` and `0012_app_trust.sql` only add tables, indexes
+`0007_gates.sql`, `0008_brakes.sql`, `0009_team.sql`, `0010_provider_host.sql`, `0011_breakglass.sql`, `0012_app_trust.sql` and `0013_reported_share.sql` only add tables, indexes
 and defaulted or nullable columns, so the code that runs today keeps working on the migrated database, and the new code keeps
 working with everything the old code wrote (`server/test/migration.test.js` runs the deployed code, migrates, then runs the new
 code). CLI sessions made before 0005 keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as
@@ -26,7 +26,9 @@ with no window and no channel nothing behaves differently. 0012 (the installable
 branch `feat/app-trust`, not yet deployed) adds nullable columns only: five first-time markers and `hold_days` on `accounts`,
 and `seen_at` on `sessions`. A web session made before it counts its idle hour from when it was made, so the first deploy
 signs out browsers that have been idle for an hour; command line sessions are unaffected. Closed holds older than 365 days are
-deleted by the cleanup from then on (none exist yet).
+deleted by the cleanup from then on (none exist yet). 0013 (the final security gate, branch `feat/final-gate`) adds one
+column, `global_usage.reported` (default 0): the day's receipts that agents reported, so they can be held to their share of the
+day (`REPORTED_DAILY_CAP`) while the broker's own decisions keep the rest.
 
 ```bash
 cd server
@@ -36,7 +38,7 @@ npx -y wrangler@4 d1 time-travel info leash
 # 2. new secrets (names only; values never leave your machine)
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK        # the log's Ed25519 signing key; prints the public part to stderr: keep it
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx -y wrangler@4 secret put STATS_TOKEN   # optional: /v1/admin/stats
-# 3. the additive migrations (applies 0004 to 0012; 0001 to 0003 are already applied)
+# 3. the additive migrations (applies 0004 to 0013; 0001 to 0003 are already applied)
 npx -y wrangler@4 d1 migrations apply leash --remote
 # 4. the code (creates the ReceiptLog Durable Object through the "v1" migration in wrangler.jsonc)
 npx -y wrangler@4 deploy
@@ -88,7 +90,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" |
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))" | npx -y wrangler@4 secret put IP_SALT
 node dev/vapid-keygen.mjs | npx -y wrangler@4 secret put VAPID_PRIVATE_JWK   # phone alerts (Web Push); optional
 node dev/log-keygen.mjs | npx -y wrangler@4 secret put LOG_KEY_JWK          # the public log
-npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0012
+npx -y wrangler@4 d1 migrations apply leash --remote   # 0001 to 0013
 npx -y wrangler@4 deploy
 ```
 
@@ -101,9 +103,10 @@ Without `VAPID_PRIVATE_JWK`, phone alerts are off. Without `LOG_KEY_JWK`, the br
 | Var | Default | What |
 |---|---|---|
 | `LOG_ORIGIN` | counterseal.gautamkhosla.com/log | the log's name, signed into checkpoints; never change once the log has an entry |
-| `FREE_LIMIT` | 10000 | receipts per account per month |
-| `ACCOUNT_DAILY_CAP` | 2000 | receipts per account per UTC day |
+| `FREE_LIMIT` | 10000 | receipts per account per month (the broker's own decisions may use twice this) |
+| `ACCOUNT_DAILY_CAP` | 2000 | receipts per account per UTC day (the broker's own decisions may use twice this) |
 | `GLOBAL_DAILY_CAP` | 10000 | appends per UTC day across all accounts (`503 log_at_capacity` above it) |
+| `REPORTED_DAILY_CAP` | 5000 | of those, at most this many reported through `POST /v1/receipts` (the rest is kept for decisions) |
 | `REG_PER_IP_DAY` | 5 | new accounts per IP (salted hash, IPv6 /64) per day |
 | `PUB_RPM` | 600 | public log reads per IP per minute (in memory per isolate) |
 | `PUB_DO_RPM` | 120 | public reads that reach the Durable Object (entries, proofs) per IP per minute |
@@ -159,9 +162,10 @@ after sign-ins.
 | First run: "Try a held call" (`POST /v1/demo/call`) | about 4 (limit, hold, audit, the demo marker once), plus one per device alerted (at most one alert a minute) | none (never sealed) |
 | The demo agent's retry after approval | about 3 (the hold used, audit, limit) | none |
 | Launch funnel markers (first token, first protected call, alerts, installed) | at most 1, once per account per isolate; never on a poll | none |
-| Web session activity (the idle hour) | at most 1 a minute per active browser session; the 5-second refresh writes nothing | none |
+| Web session activity (the idle hour) | at most 1 a minute per active browser session; the background refresh writes nothing | none |
+| The dashboard's background refresh | 0 (one request, `/v1/alerts`, every 5 seconds while the page is shown; the six-request full load when that changed or once a minute; nothing while hidden) | none |
 | Data export (`POST /v1/me/export/begin` and `finish`) | about 5 (limit, challenge, passkey counter, audit); 21 D1 queries; then pages of 200 holds and 250 audit entries, 0 writes each | none |
-| Evidence pack, one page of 250 audit entries (`GET /v1/export/evidence`) | 0 (at most 3 D1 queries) | 1 request on the first page, within the 60 a minute per account |
+| Evidence pack, one page of 250 audit entries (`GET /v1/export/evidence`; a page looks at 1,000 entries at most) | 0 (at most 4 D1 queries) | 1 request on the first page, within the 60 a minute per account |
 | Retention cleanup (part of the sweep) | the closed holds it deletes | none |
 | Receipts API, one unsigned receipt | about 3 | 1 request |
 | Public log read (stats, checkpoint, key) | 0 | 0 within 10 s of the last head read per isolate |
