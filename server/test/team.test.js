@@ -186,6 +186,29 @@ test('invites: an owner with a passkey makes one; single use, stored hashed, in 
   assert.deepEqual([...new Set(actions(w).filter((x) => /^invite_|^member_joined$/.test(x)))].sort(), ['invite_created', 'invite_revoked', 'member_joined']);
 });
 
+test('an invite token never reaches a log line, an audit entry or an error message, even when it is refused', async () => {
+  const w = new World();
+  const u = await founder(w);
+  const lines = [];
+  const keep = { log: console.log, warn: console.warn, error: console.error };
+  for (const k of Object.keys(keep)) console[k] = (...a) => { lines.push(a.map(String).join(' ')); };
+  let token;
+  try {
+    const r = await invite(w, u, { role: 'approver', label: 'logged (yes)' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    token = tokenOf(r);
+    const outs = [await w.req('POST', '/v1/invites/lookup', { body: { token } }), await w.req('POST', '/v1/invites/lookup', { body: { token }, origin: 'https://evil.test' }),
+      await w.req('POST', '/v1/invites/begin', { body: { token, name: '<bad>' } })];
+    const m = await join(w, token, 'Asha');
+    outs.push(await w.req('POST', '/v1/invites/lookup', { body: { token } }), await w.req('POST', '/v1/invites/begin', { body: { token, name: 'Again' } }));
+    for (const o of outs) assert.ok(!JSON.stringify(o.body).includes(token), 'not echoed in an answer');
+    assert.equal(m.status, 200);
+  } finally { Object.assign(console, keep); }
+  assert.ok(lines.length > 0, 'refusals were logged as security events');
+  assert.ok(!lines.join('\n').includes(token), 'no log line carries the token');
+  assert.ok(!JSON.stringify(w.env.DB.raw.prepare('SELECT * FROM audit').all()).includes(token));
+});
+
 test('invites are limited: 10 people a team counting open invites, and 10 invites an hour per account', async () => {
   assert.equal(MAX_MEMBERS, 10); assert.equal(INVITES_PER_HOUR, 10);
   const w = new World();
