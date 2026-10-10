@@ -159,10 +159,12 @@ export function globMatch(g, path) {
 
 // ---------------------------------------------------------------- redaction
 // What is sent to the server and shown on your phone is the command with credentials removed. The approval is bound to
-// that text, so two commands that differ only in a secret are the same request.
+// that text, so two commands that differ only in a secret are the same request. A value that runs a command (a "$(...)",
+// "${...}" or backtick inside it) is never redacted: it is code, not a secret, and the approver must see it, and it must
+// not let one approval cover another command (X_TOKEN="$(curl ... | sh)" would otherwise read like X_TOKEN="a").
 const REDACTIONS = [
-  [/(\b[a-z][a-z0-9+.-]*:\/\/)([^\s/@:'"]*):([^\s/@'"]+)@/gi, '$1$2:[redacted]@'],
-  [/(\b[a-z][a-z0-9+.-]*:\/\/)([^\s/@:'"]{8,})@/gi, '$1[redacted]@'],
+  [/(\b[a-z][a-z0-9+.-]*:\/\/)([^\s/@:'"]*):([^\s/@'"$`]+)@/gi, '$1$2:[redacted]@'],
+  [/(\b[a-z][a-z0-9+.-]*:\/\/)([^\s/@:'"$`]{8,})@/gi, '$1[redacted]@'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]'],
   [/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}/g, '$1 [redacted]'],
   [/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g, '[redacted]'],
@@ -174,9 +176,9 @@ const REDACTIONS = [
   [/\b(?:sbp|shpat|shpca|shppa|re)_[A-Za-z0-9]{16,}/g, '[redacted]'],
   [/\bAIza[A-Za-z0-9_-]{30,}/g, '[redacted]'],
   [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '[redacted]'],
-  [/(\b[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIALS?)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|[^\s;&|]+)/gi, '$1=[redacted]'],
-  [/(--?(?:password|passwd|pwd|token|secret|api-?key|auth|access-?key|client-secret)(?:=|\s+))("[^"]*"|'[^']*'|[^\s;&|]+)/gi, '$1[redacted]'],
-  [/(\bmysql(?:admin|dump)?\b[^|;&\n]*?\s-p)(?!\d+(?:\s|$))(\S+)/g, '$1[redacted]'],
+  [/(\b[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIALS?)[A-Za-z0-9_]*)=("[^"$`]*"|'[^']*'|[^\s;&|$`'"]+)/gi, '$1=[redacted]'],
+  [/(--?(?:password|passwd|pwd|token|secret|api-?key|auth|access-?key|client-secret)(?:=|\s+))("[^"$`]*"|'[^']*'|[^\s;&|$`'"]+)/gi, '$1[redacted]'],
+  [/(\bmysql(?:admin|dump)?\b[^|;&\n]*?\s-p)(?!\d+(?:\s|$))([^\s$`]+)/g, '$1[redacted]'],
 ];
 export function redact(text) {
   let s = String(text ?? '');

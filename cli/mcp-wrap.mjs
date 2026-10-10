@@ -358,7 +358,9 @@ export class Gateway {
 
   async #hold({ name, args, params, verdict }) {
     const tool = safeName(name);
-    const det = detailOf(name, args, params);
+    // the approval names the server too (as the guard's hook does, mcp__<server>__<tool>): a yes for staging's drop_table
+    // must not run prod's
+    const det = detailOf(this.name ? `mcp__${this.name}__${name}` : name, args, params);
     const key = det.text;
     const d = this.denied.get(key);
     if (d && d.until > this.clock()) return { text: deniedText(tool, d.reason) };

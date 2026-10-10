@@ -374,8 +374,9 @@ test('hook input over 256 KB: the command is looked for in what was read', async
   const r = await hook(t, 'claude-code', cut, { over: true });
   assert.match(denied(r), /Counterseal held this command/);
   assert.match(t.stub.state.log[0].body.detail, /the hook input was cut at 256 KB/);
+  // what was read looks harmless, but the rest was never read: it waits for a person (final security gate, 9 Oct 2026)
   const clean = await hook(t, 'claude-code', claude('echo ' + 'x'.repeat(300000)).slice(0, 256 * 1024), { over: true });
-  assert.equal(clean.stdout, '');
+  assert.match(denied(clean), /longer than the guard reads/);
 });
 
 test('MCP tool calls: held by name or by SQL, with the arguments sorted and redacted; the policy file can hold or allow', async () => {

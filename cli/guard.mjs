@@ -263,7 +263,8 @@ export async function runHook({ agent, mode, input, over = false, env = process.
       const c = /"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(input);
       if (c) { try { call0.cwd = JSON.parse(`"${c[1]}"`); } catch { /* no cwd */ } }
     }
-    if (!call0.kind) return pass();
+    // input past the cap that is not even a recognisable command: nothing can be checked, so nothing is let through
+    if (!call0.kind) return over ? deny('Counterseal could not check this call: the hook input is over 256 KB. Split it into smaller steps.') : pass();
   }
   let verdict;
   try { verdict = classifyCall(call0, cfg, io, env); } catch (e) {
@@ -271,6 +272,11 @@ export async function runHook({ agent, mode, input, over = false, env = process.
   }
   if (!verdict.hits.length && verdict.unreadable && cfg.unreadable === 'hold' && call0.kind === 'shell') {
     verdict.hits = [{ rule: 'sh.unreadable', why: 'The guard could not read this command, and your settings say to hold what it cannot read.', text: clean(call0.command, 200) }];
+  }
+  // a command cut at 256 KB was only read in part (padding can push the dangerous part past the cut): it always waits
+  // for a person, whatever the part that was read says
+  if (!verdict.hits.length && over && call0.kind === 'shell') {
+    verdict.hits = [{ rule: 'sh.unreadable', why: 'This command is longer than the guard reads (256 KB), so it could not be checked in full.', text: clean(call0.command, 200) }];
   }
   if (!verdict.hits.length) return pass();
   const hit = verdict.hits[0];

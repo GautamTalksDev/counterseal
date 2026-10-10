@@ -28,8 +28,18 @@ const PKG = 'counterseal';
 const CFG_DIR = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'leash');
 const CFG = join(CFG_DIR, 'config.json');
 const cfg = () => (existsSync(CFG) ? JSON.parse(readFileSync(CFG, 'utf8')) : {});
-const server = () => (process.env.LEASH_URL || cfg().server || 'https://counterseal.gautamkhosla.com').replace(/\/+$/, '');
 const die = (m, code = 1) => { process.stderr.write(m + '\n'); process.exit(code); };
+/** a server address the session token may be sent to: https, or http only to this machine (local development) */
+const safeUrl = (u) => {
+  let x; try { x = new URL(u); } catch { return false; }
+  if (x.username || x.password || x.search || x.hash) return false;
+  return x.protocol === 'https:' || (x.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(x.hostname));
+};
+const server = () => {
+  const s = (process.env.LEASH_URL || cfg().server || 'https://counterseal.gautamkhosla.com').replace(/\/+$/, '');
+  if (!safeUrl(s)) die(`Refusing to talk to ${s}: the server must be an https address (http only for localhost).`);
+  return s;
+};
 
 function save(c) {
   mkdirSync(CFG_DIR, { recursive: true, mode: 0o700 });
@@ -39,7 +49,13 @@ function save(c) {
 
 async function api(method, path, body, auth = true) {
   const headers = { accept: 'application/json', 'user-agent': `leash-cli/${VERSION}` };
-  if (auth) { const t = cfg().token; if (!t) die('Not signed in. Run: leash login'); headers.authorization = `Bearer ${t}`; }
+  if (auth) {
+    const c = cfg(), t = c.token;
+    if (!t) die('Not signed in. Run: leash login');
+    // the session is sent only to the server that made it (a changed --server or LEASH_URL never receives it)
+    if (c.tokenServer && c.tokenServer !== server()) die(`This command line is signed in to ${c.tokenServer}, not ${server()}. Run: leash login`);
+    headers.authorization = `Bearer ${t}`;
+  }
   if (body !== undefined) headers['content-type'] = 'application/json';
   const r = await fetch(server() + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error' });
   const j = await r.json().catch(() => ({}));
@@ -157,7 +173,14 @@ const [cmd, ...args] = process.argv.slice(2);
 try {
   switch (cmd) {
     case 'login': {
-      const s = flag(args, '--server'); if (s) save({ ...cfg(), server: s.replace(/\/+$/, '') });
+      // another server: the old session is dropped, never sent there
+      const s = flag(args, '--server');
+      if (s) {
+        const to = s.replace(/\/+$/, '');
+        if (!safeUrl(to)) die(`Refusing ${to}: the server must be an https address (http only for localhost).`);
+        const c = cfg();
+        save(c.server === to ? c : { server: to });
+      }
       const d = await api('POST', '/v1/device/start', {}, false);
       // the code is typed in the browser, never sent as a link: nobody else should ever see it or ask you for it
       process.stderr.write(`\nTo sign in this computer:\n  1. Open ${d.verification_uri} in your browser and sign in.\n  2. Type this code: ${d.user_code}\n  3. Check where the sign-in started, then approve with your passkey.\n\nThe code works once, for ${Math.round(d.expires_in / 60)} minutes. Never send it to anyone, and never type a code\nsomeone sent you: whoever approves a code gives that command line their account.\n\n`);
@@ -167,7 +190,7 @@ try {
         await new Promise((r) => setTimeout(r, interval * 1000));
         try {
           const t = await api('POST', '/v1/device/poll', { device_code: d.device_code }, false);
-          save({ ...cfg(), token: t.access_token });
+          save({ ...cfg(), token: t.access_token, tokenServer: server() });
           // say whose account this is, so a code approved by someone else (their account, not yours) is noticed at once
           const me = await api('GET', '/v1/me').catch(() => null);
           console.log(`Signed in${me?.account?.name ? ` to the account of ${me.account.name}` : ''}, for ${Math.round(t.expires_in / 86400)} days.${me?.account?.name ? ' If that is not your account, run leash logout now.' : ''}`);
