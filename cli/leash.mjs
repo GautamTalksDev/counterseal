@@ -224,8 +224,23 @@ try {
     case 'creds': table((await api('GET', '/v1/credentials')).credentials, ['id', 'provider', 'label', 'hint', 'host']); break;
     case 'tokens': table((await api('GET', '/v1/tokens')).tokens.filter((t) => !t.revoked), ['id', 'provider', 'label', 'minted_by']); break;
     case 'token': {
+      for (const [i, arg] of args.entries()) {
+        if (['--label', '--policy', '--ttl', '--agent-key'].includes(arg) && (!args[i + 1] || args[i + 1].startsWith('--'))) {
+          die(`${arg} requires a value.`);
+        }
+      }
       const p = flag(args, '--policy');
       const ak = flag(args, '--agent-key');
+      const label = flag(args, '--label');
+      const ttl = flag(args, '--ttl');
+      const ttlHours = ttl === undefined ? undefined : Number(ttl);
+      if (ttlHours !== undefined && (!Number.isFinite(ttlHours) || ttlHours <= 0)) die('--ttl must be a positive number of hours.');
+      let policy;
+      if (p !== undefined) {
+        let text;
+        try { text = readFileSync(p, 'utf8'); } catch { die(`--policy: cannot read ${JSON.stringify(p)}.`); }
+        try { policy = JSON.parse(text); } catch { die(`--policy: ${JSON.stringify(p)} is not valid JSON.`); }
+      }
       let credentialId = args[0] && !args[0].startsWith('--') ? args[0] : null;
       if (!credentialId) {
         const cs = (await api('GET', '/v1/credentials')).credentials;
@@ -233,7 +248,7 @@ try {
         credentialId = cs[0].id;
         process.stderr.write(`Using your only key: ${cs[0].label} (${cs[0].provider}).\n`);
       }
-      const r = await api('POST', '/v1/tokens', { credentialId, label: flag(args, '--label'), ttlHours: flag(args, '--ttl') ? Number(flag(args, '--ttl')) : undefined, policy: p ? JSON.parse(readFileSync(p, 'utf8')) : undefined, agentKeyId: ak });
+      const r = await api('POST', '/v1/tokens', { credentialId, label, ttlHours, policy, agentKeyId: ak });
       const env = { LEASH_TOKENS: `${r.provider}=${r.token}`, ...(ak ? { LEASH_AGENT_KEY: '<path to your agent key file>' } : {}) };
       console.log(`${r.token}\n\nBase URL: ${r.baseUrl}\nExpires:  ${new Date(r.expiresAt).toISOString()}${r.agentKey ? `\nBound to agent key ${r.agentKey}: every request must be signed with it.` : ''}\n${r.note}\n\nMCP server config for your agent:
 ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp'], env } } }, null, 2)}`);
