@@ -35,6 +35,8 @@ const paths = (env = process.env) => {
   const d = cfgDir(env);
   return { dir: d, guard: env.LEASH_GUARD_CONFIG || join(d, 'guard.json'), session: join(d, 'config.json'), map: join(d, 'guard-map.json'), scripts: join(d, 'guard'), mcp: join(d, 'mcp') };
 };
+/** s without its trailing slashes, in linear time (a /\/+$/ regex backtracks quadratically on many slashes) */
+const noTrailingSlash = (s) => { let i = s.length; while (i > 0 && s.charCodeAt(i - 1) === 47) i--; return s.slice(0, i); };
 const homeDir = (env = process.env) => env.HOME || env.USERPROFILE || homedir();
 
 function writeAtomic(path, data, mode = 0o644) {
@@ -64,7 +66,7 @@ export function loadConfig(env = process.env, io = null) {
   if (e('LEASH_GUARD_ON_UNAVAILABLE') === 'allow' || e('LEASH_GUARD_ON_UNAVAILABLE') === 'deny') c.onUnavailable = e('LEASH_GUARD_ON_UNAVAILABLE');
   if (e('LEASH_GUARD_WAIT') && /^\d{1,3}$/.test(e('LEASH_GUARD_WAIT'))) c.waitSeconds = Number(e('LEASH_GUARD_WAIT'));
   if (e('LEASH_URL')) c.server = e('LEASH_URL');
-  c.server = String(c.server || 'https://counterseal.gautamkhosla.com').replace(/\/+$/, '');
+  c.server = noTrailingSlash(String(c.server || 'https://counterseal.gautamkhosla.com'));
   c.waitSeconds = Math.max(0, Math.min(590, Number(c.waitSeconds) || 0));
   c.requestTimeoutMs = Math.max(200, Math.min(30000, Number(e('LEASH_GUARD_TIMEOUT_MS')) || Number(c.requestTimeoutMs) || 10000)); // one request; the long poll adds its own wait
   if (!['deny', 'allow'].includes(c.onUnavailable)) c.onUnavailable = 'deny';
@@ -225,7 +227,7 @@ export function makeIO(env = process.env) {
 export function posixPath(p) {
   const s = typeof p === 'string' ? p : '';
   const m = /^([A-Za-z]):[\\/](.*)$/.exec(s);
-  if (m) return `/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`.replace(/\/+$/, '') || '/';
+  if (m) return noTrailingSlash(`/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`) || '/';
   return s.startsWith('/') ? s : null;
 }
 function classifyCall(call, cfg, io, env) {
@@ -484,7 +486,7 @@ function parseAgents(a, env) {
 async function sessionApi(env, method, path, body) {
   const p = paths(env);
   const c = readJson(p.session) || {};
-  const server = String(env.LEASH_URL || c.server || 'https://counterseal.gautamkhosla.com').replace(/\/+$/, '');
+  const server = noTrailingSlash(String(env.LEASH_URL || c.server || 'https://counterseal.gautamkhosla.com'));
   if (!c.token) return { status: 401, body: { error: 'not_signed_in', message: 'Not signed in. Run: counterseal login' } };
   if (!safeServer(server)) return { status: 0, body: { message: `will not send a sign-in to ${server}` } };
   try {
@@ -512,7 +514,7 @@ async function hidden(prompt) {
 async function fetchMap(env) {
   const p = paths(env);
   const c = readJson(p.session) || {};
-  const server = String(env.LEASH_URL || readJson(p.guard)?.server || c.server || 'https://counterseal.gautamkhosla.com').replace(/\/+$/, '');
+  const server = noTrailingSlash(String(env.LEASH_URL || readJson(p.guard)?.server || c.server || 'https://counterseal.gautamkhosla.com'));
   if (!safeServer(server)) return { ok: false, why: `will not fetch from ${server}` };
   try {
     const r = await fetch(server + '/v1/meta', { redirect: 'error', headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
@@ -579,7 +581,7 @@ async function install(a, env, cwd) {
   const prev = readJson(p.guard);
   const hooked = list.length ? list : (prev?.agents ?? []);
   const sums = list.length ? installScripts(env) : (prev?.files ?? {});
-  const server = String(env.LEASH_URL || (readJson(p.session) || {}).server || prev?.server || 'https://counterseal.gautamkhosla.com').replace(/\/+$/, '');
+  const server = noTrailingSlash(String(env.LEASH_URL || (readJson(p.session) || {}).server || prev?.server || 'https://counterseal.gautamkhosla.com'));
   const cfg = { version: 1, server, key, keyId: id ?? null, label, expiresAt, installed: new Date().toISOString(), node: nodeCmd(), files: sums, agents: hooked, keyOnly: !hooked.length, onUnavailable: prev?.onUnavailable ?? DEFAULTS.onUnavailable, waitSeconds: prev?.waitSeconds ?? DEFAULTS.waitSeconds, disableRules: prev?.disableRules ?? [], mode: prev?.mode ?? DEFAULTS.mode, unreadable: prev?.unreadable ?? DEFAULTS.unreadable, cursorPassThrough: prev?.cursorPassThrough ?? DEFAULTS.cursorPassThrough };
   writeAtomic(p.guard, JSON.stringify(cfg, null, 2) + '\n', 0o600);
   const m = await fetchMap(env);

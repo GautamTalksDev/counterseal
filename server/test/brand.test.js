@@ -24,7 +24,7 @@ test('the rebrand script is in step with brand.js', () => {
 test('the server takes its names from brand.js', () => {
   assert.equal(rp({}).name, BRAND.name);
   assert.match(LOG_ORIGIN_DEFAULT, /^[\x21-\x7e]+\/log$/);
-  assert.match(read('server/wrangler.jsonc'), new RegExp(`"LOG_ORIGIN": "${LOG_ORIGIN_DEFAULT.replace(/\./g, '\\.')}"`), 'the deployed log name matches the frozen default');
+  assert.ok(read('server/wrangler.jsonc').includes(`"LOG_ORIGIN": "${LOG_ORIGIN_DEFAULT}"`),'the deployed log name matches the frozen default');
 });
 
 test('user-facing text carries the brand and none of the three old product names', () => {

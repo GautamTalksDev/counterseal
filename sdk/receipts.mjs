@@ -172,7 +172,7 @@ export async function verifyExtends(oldNote, newNote, proofB64, verifierKey) {
 export class Receipts {
   constructor({ key, url = 'https://counterseal.gautamkhosla.com', signer, keepOpening = false } = {}) {
     if (!key || !/^lsr_/.test(key)) throw new Error('a receipts API key (lsr_...) is required');
-    this.key = key; this.url = url.replace(/\/+$/, ''); this.signer = signer; // signer: CryptoKey (Ed25519 private) if the key requires signatures
+    this.key = key; this.url = String(url); while (this.url.endsWith('/')) this.url = this.url.slice(0, -1); this.signer = signer; // signer: CryptoKey (Ed25519 private) if the key requires signatures
     this.keepOpening = keepOpening; // true keeps the owner opening in returned bundles (do not share those)
   }
   async record(...receipts) {

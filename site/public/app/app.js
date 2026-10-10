@@ -17,7 +17,10 @@ function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = fals
 // A web session ends after an hour without an action of yours (server/src/auth.js). Everything you do sends
 // x-leash-active: 1; the 5-second background refresh is sent with {quiet: true} and does not keep the session alive.
 let signedInNow = false, quietUntil = 0;
+// only this origin's own API paths: never another host, a protocol-relative URL or a ../ walk out of /v1/
+const apiPath = (p) => (typeof p === 'string' && p.startsWith('/v1/') && !/\.\.|\/\/|\\|[\0-\x1f]/.test(p) ? p : null);
 async function api(method, path, body, { quiet = method === 'GET' && Date.now() < quietUntil } = {}) {
+  if (apiPath(path) === null) throw Object.assign(new Error('Not an API path.'), { code: 'bad_path' });
   let r;
   try {
     r = await fetch(path, { method, credentials: 'same-origin', headers: { 'x-leash': '1', ...(quiet ? {} : { 'x-leash-active': '1' }), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });

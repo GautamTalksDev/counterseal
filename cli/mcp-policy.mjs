@@ -101,9 +101,37 @@ const COMMAND_TOOLS = new Set(['apply_migration', 'run_command', 'execute_comman
 const SQL_TOOLS = new Set(['execute_sql', 'run_sql']);
 // words in a tool name that say its text arguments are SQL
 const SQLISH = new Set(['sql', 'db', 'database', 'postgres', 'postgresql', 'pg', 'mysql', 'mariadb', 'sqlite', 'supabase', 'neon', 'd1', 'sqlserver', 'mssql', 'oracle', 'redshift', 'bigquery', 'snowflake', 'clickhouse', 'duckdb']);
-const SQL_START = /^(?:\s+|\/\*[\s\S]*?\*\/|--[^\n]*(?:\n|$)|\()*(select|with|insert|update|delete|drop|create|alter|truncate|grant|revoke|merge|replace|upsert|call|do|exec|execute|copy|vacuum|reindex|analyze|set|reset|begin|commit|rollback|savepoint|pragma|attach|detach|lock|show|explain|values|table|use|load|import|refresh|cluster|comment|notify|listen|prepare|deallocate)\b/i;
+// The former single regex, ^(?:\s+|\/\*[\s\S]*?\*\/|--[^\n]*(?:\n|$)|\()*keyword\b, backtracked exponentially on long runs
+// of space. It is now one left-to-right pass over the positions the prefix can reach, then a sticky keyword test at each:
+// linear time on any input, and exactly the same answers. That includes the old regex's lenient reading of a block
+// comment, which may end at ANY later "*/" (so "/* /* */ */ drop" counts as SQL, as nested comments do in PostgreSQL):
+// a text that may be SQL is treated as SQL, never the other way round.
+const SQL_KEYWORD = /(?:select|with|insert|update|delete|drop|create|alter|truncate|grant|revoke|merge|replace|upsert|call|do|exec|execute|copy|vacuum|reindex|analyze|set|reset|begin|commit|rollback|savepoint|pragma|attach|detach|lock|show|explain|values|table|use|load|import|refresh|cluster|comment|notify|listen|prepare|deallocate)\b/iy;
+const SPACE = /\s/;
 /** does this text start like a SQL statement? Free text under a "query" argument (a search, say) does not, and is not SQL. */
-export const looksLikeSql = (text) => SQL_START.test(String(text));
+export const looksLikeSql = (text) => {
+  const s = String(text), n = s.length;
+  const reach = new Uint8Array(n + 1); // reach[i]: the prefix can end at i
+  reach[0] = 1;
+  let nl = -1; // the first newline at or after the last line comment's text (n when there is none)
+  let open = Infinity; // the earliest position after a reachable "/*": any "*/" starting there or later closes a comment
+  for (let i = 0; i <= n; i++) {
+    if (!reach[i] && i >= 2 && s[i - 2] === '*' && s[i - 1] === '/' && i - 2 >= open) reach[i] = 1;
+    if (!reach[i]) continue;
+    SQL_KEYWORD.lastIndex = i;
+    if (SQL_KEYWORD.test(s)) return true;
+    if (i === n) break;
+    const c = s[i];
+    if (c === '(' || SPACE.test(c)) reach[i + 1] = 1;
+    if (c === '/' && s[i + 1] === '*' && i + 2 < open) open = i + 2;
+    if (c === '-' && s[i + 1] === '-') {
+      // a line comment runs to its newline (or the end). nl only moves forward, so all the scans together are linear.
+      if (nl < i + 2) { nl = i + 2; while (nl < n && s[nl] !== '\n') nl++; }
+      reach[nl < n ? nl + 1 : n] = 1;
+    }
+  }
+  return false;
+};
 const COMPACT = ['delete', 'destroy', 'remove', 'truncate', 'refund', 'transfer', 'payout', 'publish', 'deploy', 'revoke', 'cancel', 'archive', 'terminate', 'purge', 'wipe'];
 
 /** the words of a tool name: split on anything that is not a letter or digit and on camelCase, lower case */

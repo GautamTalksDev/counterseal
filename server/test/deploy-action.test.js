@@ -242,7 +242,7 @@ test('the summary is trimmed to 120 characters and cleaned; the default server i
     await done;
   } finally { r.close(); }
   assert.equal(DEFAULT_SERVER, BRAND.origin);
-  assert.match(readFileSync(new URL('../../action/deploy-gate/action.yml', import.meta.url), 'utf8'), new RegExp(`default: '${BRAND.origin.replace(/\./g, '\\.')}'`));
+  assert.ok(readFileSync(new URL('../../action/deploy-gate/action.yml', import.meta.url), 'utf8').includes(`default: '${BRAND.origin}'`), 'the action defaults to the product origin');
   const ok = readInputs({ INPUT_GATE: 'gate_' + 'a'.repeat(24) });
   assert.deepEqual(ok, { gate: 'gate_' + 'a'.repeat(24), origin: BRAND.origin, minutes: 15, summary: '' });
   assert.equal(readInputs({ INPUT_GATE: 'gate_' + 'a'.repeat(24), INPUT_SERVER: 'https://counterseal.example/' }).origin, 'https://counterseal.example');

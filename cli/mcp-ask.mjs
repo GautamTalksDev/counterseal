@@ -17,6 +17,8 @@ const safeServer = (url) => /^https:\/\/[^/?#\s]+$/i.test(url) || /^http:\/\/(lo
  * @param {object} env
  * @param {(path: string) => string|null} [readText]
  */
+/** s without its trailing slashes, in linear time (a /\/+$/ regex backtracks quadratically on many slashes) */
+const noTrailingSlash = (s) => { let i = s.length; while (i > 0 && s.charCodeAt(i - 1) === 47) i--; return s.slice(0, i); };
 export function loadGuard(env = process.env, readText = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : null)) {
   const file = env.LEASH_GUARD_CONFIG || join(cfgDir(env), 'guard.json');
   let cfg = {};
@@ -24,7 +26,7 @@ export function loadGuard(env = process.env, readText = (p) => (existsSync(p) ? 
   if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) cfg = {};
   const key = env.LEASH_GUARD_KEY || cfg.key;
   if (typeof key !== 'string' || !KEY_RE.test(key)) return { problem: 'No guard key is set up, so nothing can be approved. Make one in the app (Account, Guard keys) and put it in LEASH_GUARD_KEY, or in ' + file + ' as {"key": "lsg_..."}.' };
-  const server = String(env.LEASH_URL || cfg.server || DEFAULT_SERVER).replace(/\/+$/, '');
+  const server = noTrailingSlash(String(env.LEASH_URL || cfg.server || DEFAULT_SERVER));
   if (!safeServer(server)) return { problem: `The server address (${server.slice(0, 80)}) must be https, or http on this machine.` };
   return { key, server };
 }

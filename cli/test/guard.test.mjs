@@ -91,7 +91,7 @@ test('retry mode: deny now with the link, then the same command goes through onc
   const first = await hook(t, 'claude-code', claude('kubectl delete ns prod'));
   const reason = denied(first);
   assert.match(reason, /Counterseal held this command: /);
-  assert.match(reason, new RegExp(`approve it at ${t.stub.url.replace(/[.]/g, '\\.')}/app#hold=[0-9a-f]{24}, then run exactly the same command again`));
+  assert.match(reason, new RegExp(`approve it at ${t.stub.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/app#hold=[0-9a-f]{24}, then run exactly the same command again`));
   const second = await hook(t, 'claude-code', claude('kubectl delete ns prod')); // not approved yet: the same hold, no second one
   denied(second);
   assert.equal(t.stub.holds().length, 1, 'asking again does not make a second hold');

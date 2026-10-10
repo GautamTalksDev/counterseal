@@ -123,7 +123,17 @@ export function sqlGuard(sql, { remote = false } = {}) {
 }
 
 // ---------------------------------------------------------------- small path and text helpers (POSIX, lexical)
-const trimSlash = (p) => (p.length > 1 ? p.replace(/\/+$/, '') || '/' : p);
+/** s without its trailing slashes, in linear time (a /\/+$/ regex backtracks quadratically on many slashes) */
+const noTrailingSlash = (s) => { let i = s.length; while (i > 0 && s.charCodeAt(i - 1) === 47) i--; return s.slice(0, i); };
+/** the directory in front of a trailing "*", "**"... or ".*" and the slashes before it, or null when there is none */
+const trailingGlobDir = (s) => {
+  if (s.endsWith('.*')) return noTrailingSlash(s.slice(0, -2));
+  if (!s.endsWith('*')) return null;
+  let t = s.length;
+  while (t > 0 && s.charCodeAt(t - 1) === 42) t--;
+  return noTrailingSlash(s.slice(0, t));
+};
+const trimSlash = (p) => (p.length > 1 ? noTrailingSlash(p) || '/' : p);
 /** lexical normalisation of an absolute path: no symlink lookups */
 export function normPath(p) {
   const out = [];
@@ -135,7 +145,7 @@ export function normPath(p) {
   return '/' + out.join('/');
 }
 const isInside = (p, root) => p === root || p.startsWith(root === '/' ? '/' : root + '/');
-const base = (p) => String(p).replace(/\/+$/, '').split('/').pop();
+const base = (p) => noTrailingSlash(String(p)).split('/').pop();
 const lc = (s) => String(s).toLowerCase();
 
 /** tiny glob as in the server map: * = one segment, ** = any depth, {a,b} alternatives */
@@ -967,7 +977,7 @@ function expandWord(w, st, plain = false) {
 const one = (w, st) => expandWord(w, st, true)[0];
 
 // ---- the program name
-const progName = (s) => lc(String(s).replace(/\/+$/, '').split('/').pop()).replace(/\.(exe|cmd|bat|ps1)$/, '');
+const progName = (s) => lc(noTrailingSlash(String(s)).split('/').pop()).replace(/\.(exe|cmd|bat|ps1)$/, '');
 
 // ---- known output of a command (only what can be told from its words)
 function printfText(fmt, args) {
@@ -998,7 +1008,7 @@ function knownOutput(argv, stdin, st) {
     case 'mktemp': return '/tmp/mktemp.XXXXXX\n';
     case 'cat': return !args.length && stdin?.kind === 'heredoc' && !stdin.hasSubs ? stdin.text : (!args.length && stdin?.kind === 'here' ? stdin.text : null);
     case 'basename': return allLit && args[0] ? base(args[0].s) + '\n' : null;
-    case 'dirname': return allLit && args[0] ? (args[0].s.replace(/\/+$/, '').replace(/\/[^/]*$/, '') || (args[0].s.startsWith('/') ? '/' : '.')) + '\n' : null;
+    case 'dirname': return allLit && args[0] ? (noTrailingSlash(args[0].s).replace(/\/[^/]*$/, '') || (args[0].s.startsWith('/') ? '/' : '.')) + '\n' : null;
     case 'git': return args.length === 2 && args[0].s === 'rev-parse' && args[1].s === '--show-toplevel' && st.o.root ? st.o.root + '\n' : null;
     default: return null;
   }
@@ -1294,7 +1304,7 @@ function pipeItems(stdin, st) {
   if (['ls', 'tree', 'du', 'stat', 'readlink', 'realpath'].includes(prog)) { // lists everything in the directory
     if (args.some((a) => !a.lit)) return null;
     const ds = args.filter((a) => !a.s.startsWith('-')).map((a) => a.s);
-    return (ds.length ? ds : ['.']).map((d) => ({ s: d.replace(/\/+$/, '') + '/*', lit: true, glob: true, raw: d + '/*' }));
+    return (ds.length ? ds : ['.']).map((d) => ({ s: noTrailingSlash(d) + '/*', lit: true, glob: true, raw: d + '/*' }));
   }
   if (['locate', 'fd', 'fdfind', 'grep', 'rg', 'ag'].includes(prog) || (prog === 'git' && ['ls-files', 'ls-tree', 'status', 'diff', 'clean'].includes(args.find((a) => !a.s.startsWith('-'))?.s))) {
     if (args.some((a) => !a.lit)) return null;
@@ -1352,8 +1362,9 @@ function pathRisk(w, st) {
   if (s === '') return null;
   if (/(^|\/)\.\*$/.test(s)) return 'everything that starts with a dot, which includes the parent directory';
   // a trailing * means everything inside the directory in front of it
-  const m = /^(.*?)\/*(\*+|\.\*)$/.exec(s);
-  const dir = m ? (m[1] === '' ? (s.startsWith('/') ? '/' : '.') : m[1]) : s;
+  // (what /^(.*?)\/*(\*+|\.\*)$/ captured, without its quadratic backtracking on long runs of slashes)
+  const front = trailingGlobDir(s);
+  const dir = front !== null ? (front === '' ? (s.startsWith('/') ? '/' : '.') : front) : s;
   let n;
   if (dir.startsWith('/')) n = normPath(dir);
   else if (cwd) n = normPath(cwd + '/' + dir);
@@ -2148,7 +2159,7 @@ function sqlClient(cx, conf) {
   }
   const s = stdinSql(cx.stdin);
   if (s?.unknown) return why(s.unknown);
-  if (s?.text != null) { const r = sqlGuard(s.text.replace(conf.meta ? /^\s*\\[a-zA-Z+]+.*$/gm : /$^/g, ''), { remote }); if (r) return why(r); }
+  if (s?.text != null) { const r = sqlGuard(conf.meta ? s.text.replace(/^\s*\\[a-zA-Z+]+.*$/gm, '') : s.text, { remote }); if (r) return why(r); }
   return null;
 }
 const SQLC = {

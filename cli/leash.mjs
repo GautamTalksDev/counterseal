@@ -35,8 +35,10 @@ const safeUrl = (u) => {
   if (x.username || x.password || x.search || x.hash) return false;
   return x.protocol === 'https:' || (x.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(x.hostname));
 };
+/** s without its trailing slashes, in linear time (a /\/+$/ regex backtracks quadratically on many slashes) */
+const noTrailingSlash = (s) => { let i = s.length; while (i > 0 && s.charCodeAt(i - 1) === 47) i--; return s.slice(0, i); };
 const server = () => {
-  const s = (process.env.LEASH_URL || cfg().server || 'https://counterseal.gautamkhosla.com').replace(/\/+$/, '');
+  const s = noTrailingSlash(String(process.env.LEASH_URL || cfg().server || 'https://counterseal.gautamkhosla.com'));
   if (!safeUrl(s)) die(`Refusing to talk to ${s}: the server must be an https address (http only for localhost).`);
   return s;
 };
@@ -176,7 +178,7 @@ try {
       // another server: the old session is dropped, never sent there
       const s = flag(args, '--server');
       if (s) {
-        const to = s.replace(/\/+$/, '');
+        const to = noTrailingSlash(String(s));
         if (!safeUrl(to)) die(`Refusing ${to}: the server must be an https address (http only for localhost).`);
         const c = cfg();
         save(c.server === to ? c : { server: to });
@@ -256,9 +258,9 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp
     }
     case 'agent-key': {
       const file = args.find((x, i) => !x.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--'))) || 'agent-key.json';
-      if (existsSync(file)) die(`${file} exists; refusing to overwrite a key.`);
       const jwk = await generateAgentKey();
-      writeFileSync(file, JSON.stringify(jwk, null, 2), { mode: 0o600 });
+      // 'wx': created only if absent, in one step (no check-then-write race that could overwrite a key)
+      try { writeFileSync(file, JSON.stringify(jwk, null, 2), { mode: 0o600, flag: 'wx' }); } catch (e) { die(e?.code === 'EEXIST' ? `${file} exists; refusing to overwrite a key.` : `cannot write ${file}: ${e?.message}`); }
       try { chmodSync(file, 0o600); } catch {}
       const b = await api('POST', '/v1/agent-keys/begin', { publicKey: jwk.x });
       process.stderr.write(`Registering Ed25519 public key ${jwk.x}\nwith account ${b.account} on ${b.origin}.\n`);
