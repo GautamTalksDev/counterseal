@@ -237,6 +237,8 @@ a.ul{text-decoration:underline;text-underline-offset:3px}
 .facts.roles dd{color:var(--dim)}
 .banner.lowering{border-color:rgba(245,183,72,.5);background:linear-gradient(180deg,rgba(245,183,72,.10),var(--bg2))}
 .banner.lowering h3{color:var(--warn)}
+.banner.glass{border-color:rgba(228,87,87,.55);background:linear-gradient(180deg,rgba(228,87,87,.12),var(--bg2))}
+.banner.glass h3{color:#f08a8a}
 .invite-card{margin:18px 0 6px;padding:22px;border:1px solid rgba(63,154,114,.45);border-radius:16px;background:linear-gradient(180deg,rgba(29,94,67,.16),var(--bg2) 70%)}
 .invite-card h2{font-size:22px;line-height:1.2;letter-spacing:-.02em;font-weight:600;margin-top:14px}
 .invite-card .inv-seal{display:flex;gap:8px}

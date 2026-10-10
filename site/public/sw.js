@@ -43,7 +43,13 @@ self.addEventListener('push', (e) => {
           else if (t.kind === 'quorum_lowering' && t.to && Number.isFinite(t.effective_at)) {
             title = 'Counterseal: protection will be lowered';
             body = `From ${new Date(t.effective_at).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}, held actions will need ${seals(t.to.quorum, t.to.selfApprove)}. Not expected? Tap to cancel it with your passkey.`;
-          } else { title = 'Counterseal: the lowering of protection was cancelled'; body = 'Nothing changes.'; actions = undefined; }
+          } else if (t.kind === 'breakglass_opened') {
+            title = 'Counterseal: break glass is open';
+            body = `Held actions are being let through${Number.isFinite(t.minutes) ? ` for up to ${t.minutes} minutes` : ''}, and every call is on the record. Not expected? Tap to close it.`;
+            tag = 'leash-breakglass'; actions = undefined;
+          } else if (t.kind === 'breakglass_closed') { title = 'Counterseal: break glass was closed'; body = 'Held actions wait for approval again.'; actions = undefined; }
+          else if (t.kind === 'channel_added') { title = 'A channel now hears your Counterseal alerts'; body = `${t.channel === 'slack' ? 'Slack' : t.channel === 'discord' ? 'Discord' : t.channel === 'gchat' ? 'Google Chat' : 'A chat service'} was connected. It is only told: nobody can approve from it. Not expected? Tap to review.`; actions = undefined; }
+          else { title = 'Counterseal: the lowering of protection was cancelled'; body = 'Nothing changes.'; actions = undefined; }
         } else if (s && /^[0-9a-f]{24}$/.test(String(s.id)) && at(s) >= heldAt(h0) && at(s) >= at(k)) {
           const where = [s.country, s.network].filter((x) => typeof x === 'string' && x).join(', ');
           title = 'A command line was signed in to your Counterseal account';

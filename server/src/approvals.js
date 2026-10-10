@@ -21,6 +21,8 @@ import { frozenError } from './brakes.js';
 import { int } from './ledger.js';
 import { BRAND } from './brand.js';
 import * as Team from './team.js';
+import * as Windows from './windows.js';
+import * as Channels from './channels.js';
 
 export const AGENTS = ['claude-code', 'codex', 'cursor', 'copilot', 'gemini', 'antigravity', 'mcp'];
 /** the kinds a guard key may ask for, and the method word their holds and public receipts carry */
@@ -95,7 +97,7 @@ export async function revokeKey(env, sess, id) {
 export async function guardKey(env, request) {
   const m = (request.headers.get('authorization') || '').match(KEY);
   if (!m) throw new HttpError(401, 'guard_key_required', `Send your ${BRAND.name} guard key as: Authorization: Bearer lsg_...`);
-  const k = await env.DB.prepare('SELECT g.id, g.account_id, g.revoked, g.expires_at, g.last_used, g.member_id, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at FROM guard_keys g JOIN accounts a ON a.id = g.account_id WHERE g.hash = ?')
+  const k = await env.DB.prepare('SELECT g.id, g.account_id, g.revoked, g.expires_at, g.last_used, g.member_id, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at, EXISTS (SELECT 1 FROM windows w WHERE w.account_id = g.account_id AND w.closed_at IS NULL AND w.expires_at > ' + Date.now() + ') AS window_open FROM guard_keys g JOIN accounts a ON a.id = g.account_id WHERE g.hash = ?')
     .bind(await sha256hex(m[1])).first();
   if (!k || k.revoked || (k.expires_at !== null && k.expires_at <= now())) throw new HttpError(401, 'guard_key_invalid', 'This guard key was revoked or has ended. Make a new one in the app, or run leashcli guard install again.');
   return k;
@@ -164,27 +166,37 @@ export async function create(c) {
   if (n.mine >= PENDING_PER_KEY || n.acct >= PENDING_PER_ACCOUNT) {
     throw new HttpError(429, 'too_many_holds', `${n.mine >= PENDING_PER_KEY ? `${n.mine} approvals from this guard key are` : `${n.acct} requests are`} already waiting, so this one was not held or sent. Stop and ask your human to review the waiting ones first.`);
   }
-  const id = randomId(), expiresAt = t + HOLD_TTL, method = KINDS[r.kind];
-  const context = JSON.stringify({ ...(r.cwd ? { cwd: r.cwd } : {}), ...(r.session ? { session: r.session } : {}), ...(r.map ? { map: r.map } : {}) });
+  // Break-glass (src/windows.js): while a window is open for this key, what the map holds is approved at once (one use, within
+  // 10 minutes, like any approval), on the record with the window's id; with self-approval off, never for the opener's own key.
+  const bg = k.window_open ? await Windows.matching(env, k.account_id, tokenId, Team.memberOf(k), Team.effective(k, t).selfApprove, t) : null;
+  const id = randomId(), expiresAt = t + (bg ? Team.GRANT_TTL : HOLD_TTL), method = KINDS[r.kind];
+  const context = JSON.stringify({ ...(r.cwd ? { cwd: r.cwd } : {}), ...(r.session ? { session: r.session } : {}), ...(r.map ? { map: r.map } : {}), ...(bg ? { breakglass: bg.id } : {}) });
   // the seals the team requires now (two-person seal), and who made this guard key (separation of duties)
   const needs = Team.effective(k, t).quorum, requestedBy = Team.memberOf(k);
   // one statement: two hooks asking for the same command at the same moment make one hold, not two
-  const ins = await env.DB.prepare(`INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview, kind, agent, context, needs, requested_by)
-    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17 WHERE NOT EXISTS (SELECT 1 FROM holds WHERE token_id = ?3 AND req_hash = ?4 AND status = 'pending' AND expires_at > ?10)`)
-    .bind(id, k.account_id, tokenId, hash, method, r.agent, r.summary, r.rule, r.why, t, expiresAt, pv, r.kind, r.agent, context === '{}' ? null : context, needs, requestedBy).run();
+  const ins = await env.DB.prepare(`INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview, kind, agent, context, needs, requested_by, status, decided_at)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19 WHERE NOT EXISTS (SELECT 1 FROM holds WHERE token_id = ?3 AND req_hash = ?4 AND status = 'pending' AND expires_at > ?10)`)
+    .bind(id, k.account_id, tokenId, hash, method, r.agent, r.summary, r.rule, r.why, t, expiresAt, pv, r.kind, r.agent, context === '{}' ? null : context, needs, requestedBy, bg ? 'approved' : 'pending', bg ? t : null).run();
   if (!ins.meta.changes) {
     const p = await env.DB.prepare("SELECT id, expires_at FROM holds WHERE token_id = ? AND req_hash = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1").bind(tokenId, hash).first();
     if (p) return json({ id: p.id, status: 'pending', hash, approve_url: await url(p.id), expires_at: p.expires_at, created: false }, 202);
     throw new HttpError(409, 'try_again', 'Another request for the same command was decided just now. Ask again.');
   }
-  await audit(env, k.account_id, 'guard:' + k.id, 'hold', { method, host: r.agent, rule: r.rule, hold: id, kind: r.kind, agent: r.agent, preview_sha256: await sha256hex(pv || ''), ...(r.map ? { map: r.map } : {}) }, { receipts: !!k.receipts_on });
+  await audit(env, k.account_id, 'guard:' + k.id, 'hold', { method, host: r.agent, rule: r.rule, hold: id, kind: r.kind, agent: r.agent, preview_sha256: await sha256hex(pv || ''), ...(r.map ? { map: r.map } : {}), ...(bg ? { breakglass: bg.id } : {}) }, { receipts: !!k.receipts_on && !bg });
   touch(env, k, t, c.waitUntil);
   const seen = markSeen(env, k.account_id);
   if (seen) c.waitUntil(seen);
+  // a window approved it: nobody is asked (the team was told when the window opened), and the answer is the approval
+  if (bg) return json({ id, status: 'approved', hash, approve_url: await url(id), expires_at: expiresAt, created: true, breakglass: true }, 200);
   // wake the owner's devices after responding; the push carries nothing. At most one alert a minute per account for
   // held requests (the alert says how many are waiting), so a flood of holds is one buzz, not hundreds.
   // (the same bucket as held API calls, so a guard and a token together still make one buzz a minute)
-  c.waitUntil((async () => { if (await allow(env.DB, 'pushhold:' + k.account_id, 1, 60_000, now())) await notify(env, k.account_id, env.__pushFetch || fetch); })());
+  c.waitUntil((async () => {
+    if (await allow(env.DB, 'pushhold:' + k.account_id, 1, 60_000, now())) {
+      await notify(env, k.account_id, env.__pushFetch || fetch);
+      await Channels.holdAlert(env, k.account_id, { who: r.agent, rule: r.rule, needs, holdId: id });
+    }
+  })());
   return json({ id, status: 'pending', hash, approve_url: await url(id), expires_at: expiresAt, created: true }, 202);
 }
 
@@ -229,9 +241,15 @@ export async function use(c, id) {
     throw new HttpError(409, 'hash_mismatch', 'This approval is for a different command. Ask again for this one.');
   }
   const map = mapOf(u.context);
-  await audit(env, k.account_id, 'guard:' + k.id, 'run_approved', { method: u.method, host: u.host, rule: u.rule, hold: id, kind: u.kind, ...(map ? { map } : {}) }, { receipts: !!k.receipts_on });
+  await audit(env, k.account_id, 'guard:' + k.id, 'run_approved', { method: u.method, host: u.host, rule: u.rule, hold: id, kind: u.kind, ...(map ? { map } : {}), ...(breakglassOf(u.context) ? { breakglass: breakglassOf(u.context) } : {}) }, { receipts: !!k.receipts_on });
   touch(env, k, t, c.waitUntil);
   return { ok: true, id, status: 'used' };
+}
+
+/** the break-glass window that approved a guard hold, from its context */
+export function breakglassOf(context) {
+  if (!context) return null;
+  try { const b = JSON.parse(context).breakglass; return typeof b === 'string' && /^[0-9a-f]{24}$/.test(b) ? b : null; } catch { return null; }
 }
 
 /** the shell map version a guard hold was made under (for its receipts), from the hold's context */

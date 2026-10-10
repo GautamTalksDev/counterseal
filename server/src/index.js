@@ -20,6 +20,8 @@ import { stats, checkStatsToken, markSeen } from './admin.js';
 import * as Move from './move.js';
 import * as Brakes from './brakes.js';
 import * as Team from './team.js';
+import * as Win from './windows.js';
+import * as Ch from './channels.js';
 import { BRAND } from './brand.js';
 export { ReceiptLog } from './log.js';
 
@@ -112,6 +114,8 @@ const ROUTES = [
       member: { id: c.s.memberId, role: c.s.role, name: c.s.memberName || account?.name || null, founder: c.s.memberId === c.s.accountId },
       // the seals a held action needs now, and a lowering that is waiting (the app shows it on every page)
       team: Team.effective({ quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at }),
+      // a break-glass window that is open (the app shows a banner with a countdown on every page)
+      breakglass: await Win.listOpen(c.env, c.s.accountId),
       // which host this is, and where the product lives (the app offers "Move to Counterseal" on the old host)
       host: { here: A.rp(c.env).origin, legacy: A.rp(c.env).legacy, primary: A.hosts(c.env)[0].origin },
       // receipts numbers at the top level as well, as the receipts API always had them
@@ -176,7 +180,20 @@ const ROUTES = [
   // The team (two-person seal, src/team.js). Every change that adds people or changes what they may do needs an owner
   // and a fresh passkey ceremony; revoking an invite only tightens. Joining is public, on the product's host, with the
   // invite's token in the POST body.
-  ['GET', /^\/v1\/team$/, 'session', (c) => Team.getTeam(c.env, c.s)],
+  // the team page also carries the open break-glass window and the alert channels (the channels' addresses are secrets and never
+  // come back: a label, a host and whether it works)
+  ['GET', /^\/v1\/team$/, 'session', async (c) => ({ ...(await Team.getTeam(c.env, c.s)), windows: await Win.listOpen(c.env, c.s.accountId), breakglass: { minMinutes: Win.MIN_MINUTES, maxMinutes: Win.MAX_MINUTES, perDay: Win.PER_DAY }, channels: await Ch.listChannels(c.env, c.s.accountId) })],
+  // Break-glass (src/windows.js): an owner or approver, a web session and a fresh passkey ceremony; closing only tightens, so any
+  // member in any session may.
+  ['POST', /^\/v1\/team\/breakglass\/begin$/, 'webw', (c) => Win.openBegin(c.env, c.s, c.body), APPROVER],
+  ['POST', /^\/v1\/team\/breakglass\/finish$/, 'webw', (c) => Win.openFinish(c.env, c.s, c.body), APPROVER],
+  ['DELETE', new RegExp(`^/v1/team/breakglass/${ID}$`), 'write', (c) => Win.close(c.env, c.s, c.m[1]), ANY],
+  // Alert channels (src/channels.js): an owner. Adding one sends team information out, so it needs a passkey ceremony; removing only
+  // tightens; a test is a web session.
+  ['POST', /^\/v1\/team\/channels\/begin$/, 'webw', (c) => Ch.addBegin(c.env, c.s, c.body), OWNER],
+  ['POST', /^\/v1\/team\/channels\/finish$/, 'webw', (c) => Ch.addFinish(c.env, c.s, c.body), OWNER],
+  ['DELETE', new RegExp(`^/v1/team/channels/${ID}$`), 'write', (c) => Ch.remove(c.env, c.s, c.m[1]), OWNER],
+  ['POST', new RegExp(`^/v1/team/channels/${ID}/test$`), 'webw', (c) => Ch.test(c.env, c.s, c.m[1]), OWNER],
   ['POST', /^\/v1\/team\/invites\/begin$/, 'webw', (c) => Team.inviteBegin(c.env, c.s, c.body), OWNER],
   ['POST', /^\/v1\/team\/invites\/finish$/, 'webw', (c) => Team.inviteFinish(c.env, c.s, c.body), OWNER],
   ['DELETE', new RegExp(`^/v1/team/invites/${ID}$`), 'write', (c) => Team.revokeInvite(c.env, c.s, c.m[1]), OWNER],
@@ -248,7 +265,8 @@ async function deleteAccount(env, s, body) {
   await env.DB.batch([
     ...deleteStatements(env.DB, id),
     ...Brakes.deleteStatements(env.DB, id), // their tokens' daily totals and breaker windows, before the tokens go
-    ...['push_subs', 'hold_votes', 'holds', 'guard_keys', 'gate_polls', 'gate_runs', 'gates', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes', 'invites', 'members'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
+    // (gate_polls, gate_runs, windows and channels go with the account by their foreign keys: ON DELETE CASCADE)
+    ...['push_subs', 'hold_votes', 'holds', 'guard_keys', 'gates', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes', 'invites', 'members'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
     env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id),
   ]);
   return { body: { deleted: true, note: 'Account deleted. Receipts already in the public log stay there by design; they are no longer linked to you on our side.' }, cookie: '__Host-leash=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0' };
@@ -374,7 +392,7 @@ export async function handle(request, rawEnv, opts = {}) {
 
 // Expired rows are always rejected at read time; this only tidies them away. There is no cron (the account's five cron
 // triggers are used by other Workers): it runs on about 1 in 50 requests, and after sign-ins and sign-ups at most every
-// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 18 statements (D1 allows 50).
+// 10 minutes per isolate, always after the response, so no request waits for it. One batch, 19 statements (D1 allows 50).
 export async function sweep(env, t = Date.now()) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM challenges WHERE expires_at < ?').bind(t),
@@ -394,6 +412,8 @@ export async function sweep(env, t = Date.now()) {
     // audit log keeps the repository, commit and run, never that name.
     env.DB.prepare("UPDATE holds SET context = NULL WHERE kind = 'deploy' AND context IS NOT NULL AND status NOT IN ('pending','approved') AND expires_at < ?").bind(t - 86400_000),
     env.DB.prepare('DELETE FROM gate_polls WHERE expires_at < ?').bind(t),
+    // break-glass windows are kept a week (the daily limit needs one day; the private log keeps every one)
+    env.DB.prepare('DELETE FROM windows WHERE expires_at < ?').bind(t - 7 * 86400_000),
     ...cleanupStatements(env.DB, t),
     ...Brakes.sweepStatements(env.DB, t), // breaker windows that ended, daily money totals older than 35 days
   ]);

@@ -230,6 +230,8 @@ export function brokerReceipt({ action, detail, auditHash, at, mapVersion }) {
   }
   // a deploy gate's repository name is public only if its owner opted in for that gate (it is permanent in the log)
   if (typeof detail.public_repo === 'string' && REPO.test(detail.public_repo)) meta.repo = detail.public_repo;
+  // a call let through by a break-glass window says so, and nothing else about the window
+  if (typeof detail.breakglass === 'string' && /^[0-9a-f]{24}$/.test(detail.breakglass)) meta.breakglass = true;
   return { agent: 'broker', action: method && host ? `${method} ${host}` : action === 'approve' ? 'approve' : 'decision', decision: DECISION[action], parent: auditHash, ts: at, meta };
 }
 

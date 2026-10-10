@@ -29,7 +29,7 @@ export async function stats(env, head) {
     one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last7d, SUM(revoked = 0) AS active FROM guard_keys', d7),
     env.DB.prepare('SELECT kind, COUNT(*) AS n FROM holds WHERE created_at > ? GROUP BY kind').bind(d7).all(),
     // two-person seal: accounts with more than one person, the people on them, and accounts that require two seals
-    one('SELECT (SELECT COUNT(DISTINCT account_id) FROM members WHERE removed_at IS NULL AND id != account_id) AS teams, (SELECT COUNT(*) FROM members WHERE removed_at IS NULL) AS members, (SELECT COUNT(*) FROM accounts WHERE quorum >= 2) AS quorum2'),
+    one('SELECT (SELECT COUNT(DISTINCT account_id) FROM members WHERE removed_at IS NULL AND id != account_id) AS teams, (SELECT COUNT(*) FROM members WHERE removed_at IS NULL) AS members, (SELECT COUNT(*) FROM accounts WHERE quorum >= 2) AS quorum2, (SELECT COUNT(*) FROM windows WHERE opened_at > ?) AS windows7d, (SELECT COUNT(*) FROM channels) AS channels', d7),
     one('SELECT COUNT(*) AS total, SUM(created_at > ?) AS last7d, SUM(revoked = 0) AS active, SUM(repository_id IS NOT NULL) AS bound, SUM(credential_id IS NOT NULL) AS withKey FROM gates', d7),
   ]);
   const a = Object.fromEntries(audit.results.map((r) => [r.action, { total: r.total, last7d: r.last7d || 0 }]));
@@ -44,7 +44,7 @@ export async function stats(env, head) {
     decisions: { holds: pick('hold'), approvals: pick('approve'), denials: pick('deny'), allowedWrites: pick('proxy'), executedAfterApproval: pick('proxy_approved'), commandsRunAfterApproval: pick('run_approved'), deploysPassedAfterApproval: pick('gate_passed'), pendingNow: n(holds.pending), unsignedUseOfBoundTokens: pick('agent_signature_failed') },
     // coding-agent approvals (guard keys): keys made, and the last 7 days' holds by kind (proxy, shell, tool, deploy)
     guard: { keys: n(guardKeys.total), activeKeys: n(guardKeys.active), keysLast7d: n(guardKeys.last7d), holdsLast7dByKind: Object.fromEntries(kinds.results.map((r) => [r.kind, r.n])) },
-    team: { accountsWithTeams: n(teams.teams), people: n(teams.members), accountsRequiringTwoSeals: n(teams.quorum2) },
+    team: { accountsWithTeams: n(teams.teams), people: n(teams.members), accountsRequiringTwoSeals: n(teams.quorum2), breakGlassWindowsLast7d: n(teams.windows7d), alertChannels: n(teams.channels) },
     // deploy gates (GitHub Actions): gates made, still active, bound to a repository, handing out a key; counts only
     gates: { made: n(gates.total), madeLast7d: n(gates.last7d), active: n(gates.active), bound: n(gates.bound), handingOutAKey: n(gates.withKey) },
     pushSubscriptions: n(push.total),

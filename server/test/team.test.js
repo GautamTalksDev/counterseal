@@ -1001,7 +1001,7 @@ test('budgets: sealing, joining, removing and reading the team stay well under 5
   assert.equal(jf.status, 200); assert.ok(jf.queries <= 35, `${jf.queries} queries to join (and alert 8 devices)`);
   const vic = { member: (await w.req('GET', '/v1/me', { cookie: jf.headers.get('set-cookie').split(';')[0] })).body.member.id };
   const rm = await remove(w, u, vic);
-  assert.equal(rm.status, 200); assert.ok(rm.queries <= 30, `${rm.queries} queries to remove someone`);
+  assert.equal(rm.status, 200); assert.ok(rm.queries <= 32, `${rm.queries} queries to remove someone`);
   w.env.DB.cap = 0;
   // the proxy's query count is the same for a team as for one person
   const w2 = new World();

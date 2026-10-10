@@ -128,6 +128,18 @@ const cancelLowering = async () => {
 };
 $('qbCancel').onclick = cancelLowering;
 $('qbOpen').onclick = () => show('team');
+/** the banner on every page while a break-glass window is open: who, until when, and a way to close it (any member) */
+let bgWindow = null;
+function breakGlassBanner(list) {
+  bgWindow = Array.isArray(list) && list[0] ? list[0] : null;
+  $('bgBanner').hidden = !bgWindow;
+  if (!bgWindow) return;
+  $('bgTitle').textContent = `Break glass is open for ${left(bgWindow.expires_at)}`;
+  $('bgText').textContent = `${bgWindow.opened_by_name || 'A teammate'} opened it${bgWindow.scope ? ` for ${bgWindow.scope.label || 'one token'}` : ' for every token and guard key'}: ${bgWindow.reason || 'no reason given'}. Held actions it covers go through and are on the record. Not expected? Close it.`;
+}
+$('bgOpen').onclick = () => show('team');
+const closeBreakGlass = async (id) => { try { await api('DELETE', `/v1/team/breakglass/${id}`); toast('Closed. Held actions wait for approval again.'); load(); if (current === 'team') teamView(); } catch (e) { toast(e.message); } };
+$('bgClose').onclick = () => { if (bgWindow) closeBreakGlass(bgWindow.id); };
 
 // ---- data
 let meta;
@@ -139,6 +151,7 @@ async function load() {
   $('preNote').hidden = SEALS.quorum <= 1 && SEALS.selfApprove;
   $('mintPre').disabled = !$('preNote').hidden;
   loweringBanner(SEALS.pending);
+  breakGlassBanner(me.breakglass);
   if (current === 'team') teamView().catch(() => {});
   freezeBar(me.account.frozen_at);
   // holds
@@ -654,7 +667,58 @@ async function teamView() {
     I.append(el('div', {}, el('span', {}, el('b', { textContent: i.label }), el('span', { className: 'dim', textContent: `  ${ROLE_TEXT[i.role]}, works until ${when(i.expires_at)}, made by ${NAMES.get(i.created_by) || 'an owner'}` })), rv));
   }
   $('noInvites').hidden = t.invites.length > 0;
+  breakGlassBanner(t.windows);
+  // break glass: the open window, and the tokens and guard keys it can be limited to
+  const W = $('bgOpenNow'); W.replaceChildren();
+  for (const x of t.windows || []) {
+    const cl = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Close now' });
+    cl.onclick = () => closeBreakGlass(x.id);
+    W.append(el('div', {}, el('span', {}, el('b', { textContent: `Open until ${when(x.expires_at)}` }), el('span', { className: 'dim brk', textContent: `  ${x.opened_by_name || 'a teammate'}: ${x.reason || ''}  (${x.scope ? x.scope.label || 'one token' : 'every token and guard key'})` })), cl));
+  }
+  const sc = $('bgScope'), keep = sc.value;
+  const [tk, gk] = can('approver') ? await Promise.all([api('GET', '/v1/tokens'), api('GET', '/v1/guard/keys')]) : [{ tokens: [] }, { keys: [] }];
+  sc.replaceChildren(el('option', { value: '', textContent: 'Every token and guard key' }),
+    ...tk.tokens.filter((x) => !x.revoked && x.expires_at > Date.now()).map((x) => el('option', { value: x.id, textContent: `Token: ${x.label}` })),
+    ...gk.keys.filter((x) => !x.revoked && (!x.expires_at || x.expires_at > Date.now())).map((x) => el('option', { value: x.id, textContent: `Guard key: ${x.label}` })));
+  sc.value = [...sc.options].some((o) => o.value === keep) ? keep : '';
+  $('bgNew').disabled = !!(t.windows && t.windows.length);
+  // alert channels
+  const C = $('channels'); C.replaceChildren();
+  for (const c of t.channels || []) {
+    const acts = el('span', { className: 'acts' });
+    if (can('owner')) {
+      const tst = el('button', { className: 'btn sm', type: 'button', textContent: 'Send a test' });
+      tst.onclick = async () => { try { const r = await api('POST', `/v1/team/channels/${c.id}/test`, {}); toast(r.ok ? 'Sent. Look in the channel.' : 'The service did not accept it. Check the address.'); teamView(); } catch (e) { toast(e.message); } };
+      const rm = el('button', { className: 'btn sm dan', type: 'button', textContent: 'Remove' });
+      rm.onclick = async () => { if (!confirm(`Remove ${c.label}? It hears nothing more.`)) return; try { await api('DELETE', `/v1/team/channels/${c.id}`); toast('Removed.'); teamView(); } catch (e) { toast(e.message); } };
+      acts.append(tst, rm);
+    }
+    C.append(el('div', {}, el('span', {}, el('b', { textContent: c.label }), el('span', { className: 'badge kind', textContent: c.name }),
+      el('span', { className: 'dim brk', textContent: `  ${c.host}, ${c.disabled ? 'stopped after repeated failures: send a test to turn it back on' : c.last_ok_at ? `last worked ${new Date(c.last_ok_at).toLocaleString()}` : c.failures ? `${c.failures} failure(s)` : 'not used yet'}` })), acts));
+  }
+  $('noChannels').hidden = (t.channels || []).length > 0;
 }
+$('bgNew').onclick = async () => {
+  try {
+    const reason = $('bgReason').value.trim();
+    if (reason.length < 3) return toast('Say why, in a few words. The whole team is told.');
+    if (!confirm('Open break glass? Held actions it covers will go through without a second approver, every member and channel is told, and every call is on the record.')) return;
+    const body = { minutes: Number($('bgMinutes').value), reason };
+    if ($('bgScope').value) body.tokenId = $('bgScope').value;
+    await ceremony('/v1/team/breakglass/begin', '/v1/team/breakglass/finish', body);
+    $('bgReason').value = '';
+    toast('Break glass is open. Everyone was told.'); teamView(); load();
+  } catch (e) { toast(e.message); }
+};
+$('chNew').onclick = async () => {
+  try {
+    const label = $('chLabel').value.trim(), url = $('chUrl').value.trim();
+    if (!label || !url) return toast('Give it a name and paste the webhook address.');
+    await ceremony('/v1/team/channels/begin', '/v1/team/channels/finish', { kind: $('chKind').value, label, url });
+    $('chUrl').value = ''; $('chLabel').value = '';
+    toast('Added. Send a test to see it arrive.'); teamView();
+  } catch (e) { toast(e.message); }
+};
 $('qPendingCancel').onclick = cancelLowering;
 $('qSave').onclick = async () => {
   try {

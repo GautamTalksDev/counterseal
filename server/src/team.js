@@ -41,6 +41,7 @@ import { audit } from './audit.js';
 import { limit, allow } from './ratelimit.js';
 import { notify } from './push.js';
 import { BRAND } from './brand.js';
+import * as Channels from './channels.js';
 
 export const ROLES = ['owner', 'approver', 'member', 'viewer'];
 export const LEVEL = { viewer: 0, member: 1, approver: 2, owner: 3 };
@@ -48,6 +49,7 @@ export const INVITE_ROLES = ['approver', 'member', 'viewer'];
 export const MAX_MEMBERS = 10, MAX_OPEN_INVITES = 10, MAX_QUORUM = 2, INVITES_PER_HOUR = 10;
 export const LOWER_DELAY = 24 * 3600_000, VOTE_DELAY = 24 * 3600_000, INVITE_HOURS = 2, INVITE_MAX_HOURS = 24;
 export const GRANT_TTL = 10 * 60_000; // an approved hold is used once within 10 minutes (as in broker.js)
+const TEAM_CHANGED = 'Counterseal: the team or its approval rules changed. Review it in the app.';
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const NAME = /^[\p{L}\p{N} ._'-]+$/u;
 const LABEL = /^[\p{L}\p{N} ._:/()',-]+$/u; // what an invite is for ("Asha, platform team"); shown with textContent only
@@ -111,13 +113,13 @@ export function requireLevel(sess, need) {
   throw new HttpError(403, 'role_required', `This needs ${want} of this ${BRAND.name} account. Your role is ${sess.role}.`, { role: sess.role });
 }
 
-const ceremony = async (env, kind, accountId, name = null) => {
+export const ceremony = async (env, kind, accountId, name = null) => {
   const { id, challenge } = await newChallenge(env, kind, accountId, name);
   return { challengeId: id, options: { challenge, rpId: rp(env).rpId, userVerification: 'required', timeout: 300000 } };
 };
 /** the passkey ceremony's second half for a team change: the challenge was issued for this kind and account, and the
  *  passkey is the signed-in member's own */
-async function confirm(env, sess, body, kind) {
+export async function confirm(env, sess, body, kind) {
   const ch = await takeChallenge(env, body.challengeId, kind);
   if (ch.account_id !== sess.accountId) throw new HttpError(403, 'forbidden');
   await checkAssertion(env, body.credential, ch.challenge, sess);
@@ -129,8 +131,14 @@ const founderRow = (db, accountId) => db.prepare("INSERT OR IGNORE INTO members 
  *  optionally some devices already gone from the account (a removed person's); after the response on Workers
  *  (ctx.waitUntil), so nobody waits for the push services. A change to the team or the quorum is never rate limited:
  *  each one took a passkey, and none can be hidden behind another. Only the nudge after a partial seal is (`bucket`). */
-function alertTeam(env, accountId, exceptMember, { bucket = null, extra = [] } = {}) {
-  const p = (async () => { if (!bucket || await allow(env.DB, bucket + accountId, 1, 60_000, now())) await notify(env, accountId, env.__pushFetch || fetch, { exceptMember, extra }); })().catch(() => {});
+export function alertTeam(env, accountId, exceptMember, { bucket = null, extra = [], channel = TEAM_CHANGED } = {}) {
+  const p = (async () => {
+    if (!bucket || await allow(env.DB, bucket + accountId, 1, 60_000, now())) {
+      await notify(env, accountId, env.__pushFetch || fetch, { exceptMember, extra });
+      // the team's channels (Slack, Discord, Google Chat) hear it too, in words that carry no name, role or reason
+      if (channel) await Channels.announce(env, accountId, channel);
+    }
+  })().catch(() => {});
   if (env.__ctx && env.__ctx.waitUntil) { env.__ctx.waitUntil(p); return undefined; }
   return p;
 }
@@ -597,7 +605,7 @@ export async function sealFinish(env, sess, holdId, body) {
 
 /** after a seal that did not complete the quorum: wake the other members' devices (at most once a minute per account,
  *  shared with hold alerts) so a second approver looks */
-export const nudge = (env, accountId, exceptMember) => alertTeam(env, accountId, exceptMember, { bucket: 'pushhold:' });
+export const nudge = (env, accountId, exceptMember, channel = null) => alertTeam(env, accountId, exceptMember, { bucket: 'pushhold:', channel });
 
 /** the seals from a VOTES_JSON column, oldest first */
 export const sealsOf = (json) => JSON.parse(json || '[]').sort((a, b) => a.at - b.at || String(a.member).localeCompare(String(b.member)));
@@ -608,7 +616,7 @@ export const VOTES_JSON = (H, T) => `(SELECT json_group_array(json_object('membe
 
 /** team events of the last 15 minutes, for the alert a phone shows (from the audit log, like CLI sign-ins) */
 export async function recentEvents(env, accountId) {
-  const rows = (await env.DB.prepare("SELECT at, action, detail FROM audit WHERE account_id = ? AND action IN ('member_joined','member_role_changed','member_removed','quorum_changed','quorum_change_cancelled') AND at > ? ORDER BY seq DESC LIMIT 5").bind(accountId, now() - 15 * 60_000).all()).results;
+  const rows = (await env.DB.prepare("SELECT at, action, detail FROM audit WHERE account_id = ? AND action IN ('member_joined','member_role_changed','member_removed','quorum_changed','quorum_change_cancelled','breakglass_opened','breakglass_closed','channel_added') AND at > ? ORDER BY seq DESC LIMIT 5").bind(accountId, now() - 15 * 60_000).all()).results;
   const out = [];
   const name = (d) => cleanText(d.name || '').slice(0, 60);
   const role = (r) => (ROLES.includes(r) ? r : null);
@@ -619,6 +627,9 @@ export async function recentEvents(env, accountId) {
     else if (r.action === 'member_removed') out.push({ kind: 'member_removed', at: r.at, name: name(d), role: role(d.role) });
     else if (r.action === 'quorum_changed' && d.pending) out.push({ kind: 'quorum_lowering', at: r.at, from: d.from, to: { quorum: d.pending.quorum, selfApprove: d.pending.selfApprove }, effective_at: d.pending.effectiveAt });
     else if (r.action === 'quorum_change_cancelled') out.push({ kind: 'quorum_lowering_cancelled', at: r.at });
+    else if (r.action === 'breakglass_opened') out.push({ kind: 'breakglass_opened', at: r.at, minutes: Number.isInteger(d.minutes) ? d.minutes : null });
+    else if (r.action === 'breakglass_closed') out.push({ kind: 'breakglass_closed', at: r.at });
+    else if (r.action === 'channel_added') out.push({ kind: 'channel_added', at: r.at, channel: ['slack', 'discord', 'gchat'].includes(d.kind) ? d.kind : null });
   }
   return out;
 }

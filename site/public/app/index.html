@@ -97,6 +97,11 @@
       <div class="row"><button id="qbCancel" class="btn" type="button" data-need="approver">Cancel with passkey</button><button id="qbOpen" class="btn" type="button">Open Team</button></div>
     </section>
 
+    <section class="banner glass" id="bgBanner" role="region" aria-label="Break glass is open" hidden>
+      <div><h3 id="bgTitle">Break glass is open</h3><p class="dim" id="bgText"></p></div>
+      <div class="row"><button id="bgClose" class="btn" type="button">Close it now</button><button id="bgOpen" class="btn" type="button">Open Team</button></div>
+    </section>
+
     <section class="banner stack" id="devicePanel" hidden>
       <div id="devEnter">
         <h3>Sign in a command line</h3>
@@ -308,6 +313,33 @@
         <h3 class="sub">Open invites</h3>
         <div id="invites" class="list"></div>
         <p class="empty-row dim" id="noInvites">No open invites.</p>
+      </div>
+      <div class="panel form" id="bgPanel">
+        <h3>Break glass</h3>
+        <p class="dim small">For the night the second approver cannot be reached. An owner or approver opens a window of 5 to 60 minutes with a passkey; while it is open, what Counterseal would hold for the tokens and guard keys you pick goes through, every call is on the record and in its public receipt as a break-glass call, and every member and channel is told at once. It cannot be extended, three a day at most. It never lifts a freeze, a tripped breaker or a money cap, and never applies to deploy gates.</p>
+        <div id="bgOpenNow" class="list"></div>
+        <div id="bgForm" data-need="approver">
+          <div class="grid3">
+            <div><label for="bgMinutes" class="lbl">For</label><select id="bgMinutes"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30" selected>30 minutes</option><option value="60">60 minutes</option></select></div>
+            <div><label for="bgScope" class="lbl">Covers</label><select id="bgScope"><option value="">Every token and guard key</option></select></div>
+            <div><label for="bgReason" class="lbl">Why <span class="dim">(the team reads this)</span></label><input id="bgReason" maxlength="200" placeholder="Prod is down; second approver asleep"></div>
+          </div>
+          <div class="actions"><button id="bgNew" class="btn dan" type="button">Open with passkey</button></div>
+        </div>
+      </div>
+      <div class="panel form" id="chPanel">
+        <h3>Alert channels</h3>
+        <p class="dim small">Slack, Discord or Google Chat also get told when something is held, partly sealed, or the team changes. They are only told: nobody can approve from a channel, approving always needs a passkey in this app. A message says who asked, the rule, how many seals and the link; never the path, command, body, amount, a name or a reason. The webhook address is kept encrypted and is not shown again.</p>
+        <div id="channels" class="list"></div>
+        <p class="empty-row dim" id="noChannels">No channels yet.</p>
+        <div id="chForm" data-need="owner">
+          <div class="grid3">
+            <div><label for="chKind" class="lbl">Service</label><select id="chKind"><option value="slack">Slack</option><option value="discord">Discord</option><option value="gchat">Google Chat</option></select></div>
+            <div><label for="chLabel" class="lbl">Name</label><input id="chLabel" maxlength="60" placeholder="ops room"></div>
+            <div><label for="chUrl" class="lbl">Webhook address</label><input id="chUrl" type="password" autocomplete="off" spellcheck="false" placeholder="https://..."></div>
+          </div>
+          <div class="actions"><button id="chNew" class="btn pri" type="button">Add with passkey</button></div>
+        </div>
       </div>
       <div class="panel form">
         <h3>Roles</h3>

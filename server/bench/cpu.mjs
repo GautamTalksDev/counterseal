@@ -265,3 +265,26 @@ await measure('join a team (registration verify, invite used, member + passkey, 
   const j = await inviteFor('Joiner ' + i);
   return request('POST', '/v1/invites/finish', { body: { token: j.token, challengeId: j.jb.body.challengeId, credential: await j.auth.create(j.jb.body.options) }, headers: { origin: 'https://leash.test' } });
 });
+
+// break glass and alert channels (two-person seal, part 2b). The stand-in for the chat services answers at once, so this is
+// our own CPU (building the message, unsealing the address, checking it), not the services' time.
+w.env.__channelFetch = async () => new Response('ok');
+await measure('open a break-glass window (passkey verify, insert, team alert)', async () => {
+  clearLimits(); w.env.DB.raw.prepare('DELETE FROM windows').run();
+  const b = await w.req('POST', '/v1/team/breakglass/begin', { cookie: u.cookie, body: { minutes: 30, reason: 'bench' } });
+  return request('POST', '/v1/team/breakglass/finish', { cookie: u.cookie, body: { minutes: 30, reason: 'bench', challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) } });
+});
+await measure('proxy DELETE the map would hold, let through by an open window (+ sealed)', async (i) => { clearLimits(); return request('DELETE', url('/repos/bg/r' + i), { bearer: plain }); });
+w.env.DB.raw.prepare('UPDATE windows SET closed_at = 1').run();
+const chAdd = await ceremony('/v1/team/channels/begin', '/v1/team/channels/finish', { kind: 'slack', label: 'bench', url: 'https://hooks.slack.com/services/T0123ABCD/B0456EFGH/abcdEFGH1234ijklMNOP5678' });
+if (chAdd.status !== 200) throw new Error('channel: ' + JSON.stringify(chAdd.body));
+await measure('add an alert channel (passkey verify, seal the address, insert)', async () => {
+  clearLimits(); w.env.DB.raw.prepare('DELETE FROM channels').run();
+  const body = { kind: 'slack', label: 'bench', url: 'https://hooks.slack.com/services/T0123ABCD/B0456EFGH/abcdEFGH1234ijklMNOP5678' };
+  const b = await w.req('POST', '/v1/team/channels/begin', { cookie: u.cookie, body });
+  return request('POST', '/v1/team/channels/finish', { cookie: u.cookie, body: { ...body, challengeId: b.body.challengeId, credential: await u.auth.get(b.body.options) } });
+});
+await measure('proxy DELETE held, with one alert channel (hold + push check + unseal + post stubbed)', async (i) => {
+  clearLimits(); w.env.DB.raw.prepare("UPDATE holds SET status = 'denied' WHERE status = 'pending'").run();
+  return request('DELETE', url('/repos/bg/h' + i), { bearer: plain });
+}, (s) => s === 428);

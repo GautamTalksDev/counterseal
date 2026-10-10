@@ -14,6 +14,8 @@ import { BRAND } from './brand.js';
 import { markSeen } from './admin.js';
 import * as Brakes from './brakes.js';
 import * as Team from './team.js';
+import * as Windows from './windows.js';
+import * as Channels from './channels.js';
 
 const HOLD_TTL = 30 * 60_000, MAX_BODY = 1_048_576, MAX_RESP = 10 * 1_048_576;
 export const PENDING_PER_TOKEN = 20, PENDING_PER_ACCOUNT = 100, MAX_CREDENTIALS = 50, MAX_LIVE_TOKENS = 200, LIST_TOKENS = 500;
@@ -174,7 +176,7 @@ export async function approveFinish(env, sess, holdId, body) {
     await audit(env, sess.accountId, 'web', 'approve_vote', { ...base, seals: s.votes.length, needs: s.need });
     // another approver's seal may have completed it in between (two people confirming at the same moment)
     if (s.status === 'approved') return { ok: true, approved: true, seals: s.votes.length, needs: s.need, note: 'Your seal is on, and the seals are complete: the agent can go ahead once, within 10 minutes.' };
-    Team.nudge(env, sess.accountId, sess.memberId);
+    Team.nudge(env, sess.accountId, sess.memberId, Channels.sealText({ seals: s.votes.length, needs: s.need, url: `${await appOrigin(env, sess.accountId)}/app#hold=${holdId}` }));
     return { ok: true, approved: false, seals: s.votes.length, needs: s.need, note: `Your seal is on (${s.votes.length} of ${s.need}). It needs ${s.need - s.votes.length} more from a different approver before the agent can go ahead.` };
   }
   await audit(env, sess.accountId, 'web', 'approve', { ...base, ...(s.need > 1 ? { quorum: s.need, votes: s.votes } : {}) }, { receipts: s.receipts });
@@ -272,7 +274,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   if (!m) throw new HttpError(401, 'leash_token_required', `Send your ${BRAND.name} token as: Authorization: Bearer lsh_...`);
   // one query: the token, whether its account has public receipts on and is frozen, its quorum settings (two-person
   // seal), and the agent key it is bound to (if any)
-  const tok = await env.DB.prepare(`SELECT t.*, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at, ${Team.ROLE_OF('COALESCE(t.member_id, t.account_id)', 't.account_id')} AS maker_role, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM passkeys p WHERE p.account_id = t.account_id AND p.rp_id = ?) AS has_new_passkey FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?`).bind(hosts(env)[0].rpId, await sha256hex(m[1])).first();
+  const tok = await env.DB.prepare(`SELECT t.*, a.receipts AS receipts_on, a.frozen_at, a.quorum, a.self_approve, a.quorum_pending, a.self_approve_pending, a.quorum_effective_at, ${Team.ROLE_OF('COALESCE(t.member_id, t.account_id)', 't.account_id')} AS maker_role, k.keyid AS agent_keyid, k.x AS agent_x, k.revoked_at AS agent_revoked, k.last_used AS agent_last_used, EXISTS (SELECT 1 FROM passkeys p WHERE p.account_id = t.account_id AND p.rp_id = ?) AS has_new_passkey, EXISTS (SELECT 1 FROM windows w WHERE w.account_id = t.account_id AND w.closed_at IS NULL AND w.expires_at > ${Date.now()}) AS window_open FROM tokens t JOIN accounts a ON a.id = t.account_id LEFT JOIN agent_keys k ON k.id = t.agent_key_id AND k.account_id = t.account_id WHERE t.hash = ?`).bind(hosts(env)[0].rpId, await sha256hex(m[1])).first();
   if (!tok || tok.revoked || tok.expires_at < now()) throw new HttpError(401, 'token_invalid');
   // a token bound to an agent key whose key is gone or revoked never works again (fails closed)
   if (tok.agent_key_id && (!tok.agent_keyid || tok.agent_revoked)) throw new HttpError(401, 'agent_key_revoked', 'The agent key this token is bound to was revoked.');
@@ -328,6 +330,13 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   const team = Team.effective(tok);
   const solo = Team.oneSealEnough(team) && (tok.maker_role === 'owner' || tok.maker_role === 'approver');
   if (!solo && d.decision === 'allow' && d.rule.endsWith(':preapproved')) d = { decision: 'hold', rule: d.rule.slice(0, -':preapproved'.length), why: d.why };
+  // Break-glass (src/windows.js): while a window is open for this token, what the irreversible map would hold goes through,
+  // sealed in the log with the window's id. Never what a brake holds, and with self-approval off never the opener's own token.
+  let breakglass = null;
+  if (tok.window_open && d.decision === 'hold' && !d.rule.startsWith('brake.')) {
+    const w = await Windows.matching(env, tok.account_id, tok.id, Team.memberOf(tok), team.selfApprove, now());
+    if (w) { breakglass = w.id; d = { decision: 'allow', rule: d.rule + ':breakglass', why: d.why }; }
+  }
   // An approval binds the exact bytes sent upstream, and the content-type that tells the upstream how to read them.
   const bodyHash = body ? b64u(new Uint8Array(await crypto.subtle.digest('SHA-256', body))) : '';
   const reqHash = await sha256hex(JSON.stringify([method, upHost, path, url.search, request.headers.get('content-type') || '', bodyHash]));
@@ -372,7 +381,12 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
         // A tripped token's later holds stay quiet altogether: the call that tripped it already woke them, and the rest
         // wait in the list (they do not even spend the minute's alert).
         if (d.rule !== 'brake.tripped' || brake.tripped) {
-          const p = (async () => { if (await allow(env.DB, 'pushhold:' + tok.account_id, 1, 60_000, now())) await notify(env, tok.account_id, env.__pushFetch || fetch); })().catch(() => {});
+          const p = (async () => {
+            if (await allow(env.DB, 'pushhold:' + tok.account_id, 1, 60_000, now())) {
+              await notify(env, tok.account_id, env.__pushFetch || fetch);
+              await Channels.holdAlert(env, tok.account_id, { who: tok.label, rule: d.rule, needs: team.quorum, holdId: h.id });
+            }
+          })().catch(() => {});
           if (env.__ctx) env.__ctx.waitUntil(p); else await p;
         }
       }
@@ -426,6 +440,6 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   if (agentKey && !(tok.agent_last_used > now() - 60_000)) await env.DB.prepare('UPDATE agent_keys SET last_used = ? WHERE id = ?').bind(now(), tok.agent_key_id).run();
   // writes are on the record; an approved call was already sealed as "executed", so its result is not sealed twice
   // (a call a money cap let through also records what it was, for the owner: never in the public receipt)
-  if (method !== 'GET' && method !== 'HEAD') await audit(env, tok.account_id, 'token:' + tok.id, 'proxy', { ...where, status: res.status, rule: d.rule, ...(brake.money ? { money: brake.money, ...(released ? { released: true } : {}) } : {}) }, d.decision === 'hold' ? { receipts: false } : seal);
+  if (method !== 'GET' && method !== 'HEAD') await audit(env, tok.account_id, 'token:' + tok.id, 'proxy', { ...where, status: res.status, rule: d.rule, ...(breakglass && d.rule.endsWith(':breakglass') ? { breakglass } : {}), ...(brake.money ? { money: brake.money, ...(released ? { released: true } : {}) } : {}) }, d.decision === 'hold' ? { receipts: false } : seal);
   return new Response(res.body, { status: res.status, headers: out });
 }
