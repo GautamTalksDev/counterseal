@@ -273,7 +273,10 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp
     case 'guard': await (await import('./guard.mjs')).main(args); break;
     case '--version': case '-v': console.log(VERSION); break;
     default:
-      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token [credentialId] [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | mcp wrap|pin|unpin|status --name <id> | guard install|uninstall|status|check|map');
+      /* A command that is not in the list is a mistake, not a request for help, so the usage goes to
+       * stderr and the exit code is 1. Printing it on stdout with exit 0 let `leash bogus && deploy`
+       * run the deploy, and no script could tell a successful run from a typo. */
+      die('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token [credentialId] [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | mcp wrap|pin|unpin|status --name <id> | guard install|uninstall|status|check|map');
   }
 } catch (e) {
   die(`leash: ${e.message}`);

@@ -739,7 +739,9 @@ export async function main(argv, env = process.env, cwd = process.cwd()) {
     case 'map': return showMap(a);
     case 'update-map': { const m = await fetchMap(env); out(m.ok ? `API map updated: ${m.providers} providers, version ${m.version}.` : `Could not update the API map: ${m.why}`); process.exitCode = m.ok ? 0 : 1; return; }
     default:
-      out(`counterseal guard ${GUARD_VERSION}\n\n  install [--agents claude-code,codex,cursor|none] [--scope user|project] [--paste-key] [--label x] [--dry-run]\n           (--agents none: a key only, for the Claude Code plugin)\n  uninstall [--agents ...] [--scope ...] [--keep-key] [--revoke-key]\n  status\n  check [--cwd dir] [--json] -- <command>\n  map [--json]\n  update-map\n  hook --agent <claude-code|codex|cursor> [--mode wait|retry]   (what the agent calls)`);
+      /* Same as the top level list: an unknown subcommand is an error, so it goes to stderr with
+       * exit 1 instead of stdout with exit 0. */
+      fail(`counterseal guard ${GUARD_VERSION}\n\n  install [--agents claude-code,codex,cursor|none] [--scope user|project] [--paste-key] [--label x] [--dry-run]\n           (--agents none: a key only, for the Claude Code plugin)\n  uninstall [--agents ...] [--scope ...] [--keep-key] [--revoke-key]\n  status\n  check [--cwd dir] [--json] -- <command>\n  map [--json]\n  update-map\n  hook --agent <claude-code|codex|cursor> [--mode wait|retry]   (what the agent calls)`);
   }
 }
 
