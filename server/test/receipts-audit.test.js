@@ -134,10 +134,14 @@ test('M2: small-order and non-canonical Ed25519 public keys cannot be bound as s
     const r = await w.req('POST', '/v1/keys/signer/begin', { cookie: u.cookie, body: { signerPublicKey: pub } });
     assert.equal(r.status, 400, pub); assert.equal(r.body.error, 'bad_signerPublicKey', pub);
   }
-  // the PoC: with the identity key, R = identity and s = 0 "verifies" over any message in plain WebCrypto
+  // the PoC: with the identity key, R = identity and s = 0 "verifies" over any message in WebCrypto on Node 22 (OpenSSL
+  // 3.0); Node 24 refuses it (or the key) itself. The server must refuse the key either way, so the platform's answer is
+  // not asserted, only that the server never relies on it.
   const ident = leBytes(1n);
-  const ik = await crypto.subtle.importKey('raw', ident, { name: 'Ed25519' }, false, ['verify']);
-  assert.equal(await crypto.subtle.verify({ name: 'Ed25519' }, ik, new Uint8Array([...ident, ...new Uint8Array(32)]), te.encode('anything')), true);
+  try {
+    const ik = await crypto.subtle.importKey('raw', ident, { name: 'Ed25519' }, false, ['verify']);
+    await crypto.subtle.verify({ name: 'Ed25519' }, ik, new Uint8Array([...ident, ...new Uint8Array(32)]), te.encode('anything'));
+  } catch { /* a platform that refuses the identity key outright */ }
   const r = await w.req('POST', '/v1/keys', { cookie: u.cookie, body: { label: 'weak', signerPublicKey: b64u(ident), signerChallengeId: 'ab'.repeat(12), signerProof: b64u(new Uint8Array([...ident, ...new Uint8Array(32)])) } });
   assert.equal(r.body.error, 'bad_signerPublicKey', 'refused before any challenge is looked at');
   assert.equal((await signedKey(w, u.cookie)).key.startsWith('lsr_'), true, 'a normal key still binds');
