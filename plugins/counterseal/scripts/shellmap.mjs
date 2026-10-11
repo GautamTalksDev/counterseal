@@ -31,7 +31,7 @@
 // a keyword (destroy, delete, drop, truncate, reset, force, rm).
 //
 // Every rule has positive, negative and evasion vectors in sdk/shellmap.test.mjs.
-export const SHELL_MAP_VERSION = '2026-10-10.2';
+export const SHELL_MAP_VERSION = '2026-10-10.3';
 
 const SENT = '\uE000'; // marks a piece of a word whose value is not known (a variable, a substitution, a glob)
 

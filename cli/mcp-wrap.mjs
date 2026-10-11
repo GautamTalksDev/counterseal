@@ -29,7 +29,7 @@ import { classifyTool, normalisePolicy, parsePolicy, WHY, MCP_POLICY_VERSION, Po
 import * as Store from './mcp-store.mjs';
 import { loadGuard, makeAsk, readApproval, failureText } from './mcp-ask.mjs';
 
-export const WRAP_VERSION = '0.4.0';
+export const WRAP_VERSION = '0.4.1';
 export const MAX_LINE = 4 * 1024 * 1024;
 const MAX_DETAIL = 4096;
 const DENIED_FOR_MS = 5 * 60_000;

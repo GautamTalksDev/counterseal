@@ -1,0 +1,118 @@
+/* Counterseal v3 skin: loaded after site.css (outer pages) and styles.css (app). Same tokens as the v3 landing:
+   warm paper light theme, studio dark theme, green wax accent. Dark stays the original studio. */
+:root[data-theme="light"]{
+  --bg:#f4f1ea;--bg2:#ebe6da;--card:#fffdf8;--card2:#f6f2e8;
+  --line:rgba(18,19,16,.10);--line2:rgba(18,19,16,.18);
+  --ink:#121310;--dim:#4a4c45;--mute:#6a6c63;
+  --acc:#3d6610;--acc-ink:#fbfaf5;--acc-soft:rgba(79,125,23,.12);
+  --warn:#8a5d0c;--warn-soft:rgba(154,106,18,.12);
+  --danger:#a8331f;--danger-soft:rgba(168,51,31,.10);--ok:#2f6b3a;
+  color-scheme:light}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#f4f1ea;--bg2:#ebe6da;--card:#fffdf8;--card2:#f6f2e8;
+  --line:rgba(18,19,16,.10);--line2:rgba(18,19,16,.18);
+  --ink:#121310;--dim:#4a4c45;--mute:#6a6c63;
+  --acc:#3d6610;--acc-ink:#fbfaf5;--acc-soft:rgba(79,125,23,.12);
+  --warn:#8a5d0c;--warn-soft:rgba(154,106,18,.12);
+  --danger:#a8331f;--danger-soft:rgba(168,51,31,.10);--ok:#2f6b3a;
+  color-scheme:light}}
+:root{--paper-nav:rgba(244,241,234,.86)}
+:root[data-theme="light"] .nav,:root[data-theme="light"] .auth-l{background:var(--paper-nav)}
+:root[data-theme="light"] #wax,:root[data-theme="light"] .wax,:root[data-theme="light"] .grain{display:none}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) .nav{background:var(--paper-nav)}
+  :root:not([data-theme="dark"]) #wax,:root:not([data-theme="dark"]) .wax,:root:not([data-theme="dark"]) .grain{display:none}}
+
+/* Shared polish (both themes) */
+h1{letter-spacing:-.045em;text-wrap:balance}
+h2,h3{text-wrap:balance}
+:focus-visible{outline:2px solid var(--acc);outline-offset:3px;border-radius:6px}
+.btn,.btn-pri,button.pri{border-radius:999px}
+.toc a.cur{color:var(--ink);border-left-color:var(--acc)}
+pre,code{border-radius:10px}
+table{font-variant-numeric:tabular-nums}
+
+/* Trust page header ribbon (DPA, subprocessors, privacy, security, standards, terms): add class="trust" to <main> */
+.trust-nav{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 28px}
+.trust-nav a{font:500 13px var(--sans);padding:6px 12px;border:1px solid var(--line2);border-radius:999px;color:var(--dim)}
+.trust-nav a[aria-current="page"]{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+
+/* App: Warden dashboard (classes from the app agent's site/public/app/index.html on budget-seal) */
+.warden-grid{display:grid;gap:14px;grid-template-columns:1fr;margin-bottom:22px}
+@media (min-width:900px){.warden-grid{grid-template-columns:1.3fr 1fr;grid-auto-rows:auto}.w-hero{grid-row:span 3}}
+.wcard{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:20px;display:flex;flex-direction:column;gap:12px}
+.w-hero{background:#08090b;color:#f1f0ea;border-color:transparent}
+.w-top{display:flex;justify-content:space-between;align-items:center;font-size:11px;letter-spacing:.16em}
+.w-badge{padding:4px 10px;border-radius:999px;background:rgba(200,245,96,.14);color:#c8f560}
+.w-hero[data-state="held"] .w-badge,.w-hero[data-state="spend80"] .w-badge{background:rgba(245,183,72,.16);color:#f5b748}
+.w-hero[data-state="cap"] .w-badge,.w-hero[data-state="tripped"] .w-badge{background:rgba(255,107,85,.16);color:#ff8a77}
+.w-stage{display:grid;place-items:center}
+.w-img{width:min(100%,320px);height:auto;-webkit-mask-image:radial-gradient(closest-side,#000 76%,transparent);mask-image:radial-gradient(closest-side,#000 76%,transparent)}
+.w-title{font-size:clamp(26px,3.4vw,38px);letter-spacing:-.035em;line-height:1.05}
+.w-hot{font-family:var(--serif);font-style:italic;font-weight:400;color:#c8f560}
+.w-hero[data-state="held"] .w-hot,.w-hero[data-state="spend80"] .w-hot{color:#f5b748}
+.w-hero[data-state="cap"] .w-hot,.w-hero[data-state="tripped"] .w-hot{color:#ff8a77}
+.w-hero .dim{color:#b8b8b0}
+.w-spend-body{display:flex;gap:16px;align-items:center}
+.w-ring{position:relative;width:120px;flex:none}
+.w-ring svg{width:120px;height:120px;fill:none;stroke-width:10}
+.w-ring-t{stroke:var(--line2)}.w-ring-a{stroke:var(--acc);stroke-linecap:round}
+.w-ring-c{position:absolute;inset:0;display:grid;place-content:center;text-align:center;font-size:12px;color:var(--dim)}
+.w-ring-c b{font-size:18px;color:var(--ink)}
+.w-bars{flex:1;display:grid;gap:8px;min-width:0}
+.w-brk-row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.w-pill{width:44px;height:24px;border-radius:99px;background:var(--acc-soft);position:relative}
+.w-pill span{position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:var(--acc)}
+.w-recent{list-style:none;padding:0;display:grid;gap:6px;font-size:14px}
+.w-go{align-self:flex-start;color:var(--acc);font-weight:600;font-size:14px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.theme-sw{width:34px;height:34px;border-radius:50%;border:1px solid var(--line2);background:transparent;color:var(--ink);cursor:pointer;font-size:15px;line-height:1}
+.doc>.trust-nav{grid-column:1/-1}
+:root[data-theme="light"] pre{background:#15171b;color:#e6e7ea}
+:root[data-theme="light"] :is(.doc p,.doc li,.doc td,.doc dd){color:#2c2e29}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) pre{background:#15171b;color:#e6e7ea}
+  :root:not([data-theme="dark"]) :is(.doc p,.doc li,.doc td,.doc dd){color:#2c2e29}}
+
+/* light theme: text that the dark CSS hard codes */
+:root[data-theme="light"] .ph-time{color:var(--ink)}
+:root[data-theme="light"] .console pre{color:var(--ink)}
+:root[data-theme="light"] .receipt pre{color:var(--ink)}
+:root[data-theme="light"] .setup pre{color:var(--ink)}
+:root[data-theme="light"] .price .btn-pri{color:var(--ink)}
+:root[data-theme="light"] .prose p,:root[data-theme="light"] .prose li{color:var(--ink)}
+:root[data-theme="light"] .prose pre{color:var(--ink)}
+:root[data-theme="light"] .prose td{color:var(--ink)}
+:root[data-theme="light"] .verdict.ok{color:var(--ink)}
+:root[data-theme="light"] .verdict.bad{color:var(--ink)}
+:root[data-theme="light"] .kr-file pre{color:var(--ink)}
+:root[data-theme="light"] .kr-text.bad{color:var(--ink)}
+:root[data-theme="light"] .kr-text.ok{color:var(--ink)}
+:root[data-theme="light"] .sh-out{color:var(--ink)}
+:root[data-theme="light"] .gh-log pre{color:var(--ink)}
+:root[data-theme="light"] .chat{color:var(--ink)}
+:root[data-theme="light"] .honest{color:var(--ink)}
+:root[data-theme="light"] .rcpt{color:var(--ink)}
+:root[data-theme="light"] .cnt.seal-cnt.two{color:var(--ink)}
+:root[data-theme="light"] .banner.glass h3{color:var(--ink)}
+@media (prefers-color-scheme:light){
+:root:not([data-theme="dark"]) .ph-time{color:var(--ink)}
+:root:not([data-theme="dark"]) .console pre{color:var(--ink)}
+:root:not([data-theme="dark"]) .receipt pre{color:var(--ink)}
+:root:not([data-theme="dark"]) .setup pre{color:var(--ink)}
+:root:not([data-theme="dark"]) .price .btn-pri{color:var(--ink)}
+:root:not([data-theme="dark"]) .prose p,:root:not([data-theme="dark"]) .prose li{color:var(--ink)}
+:root:not([data-theme="dark"]) .prose pre{color:var(--ink)}
+:root:not([data-theme="dark"]) .prose td{color:var(--ink)}
+:root:not([data-theme="dark"]) .verdict.ok{color:var(--ink)}
+:root:not([data-theme="dark"]) .verdict.bad{color:var(--ink)}
+:root:not([data-theme="dark"]) .kr-file pre{color:var(--ink)}
+:root:not([data-theme="dark"]) .kr-text.bad{color:var(--ink)}
+:root:not([data-theme="dark"]) .kr-text.ok{color:var(--ink)}
+:root:not([data-theme="dark"]) .sh-out{color:var(--ink)}
+:root:not([data-theme="dark"]) .gh-log pre{color:var(--ink)}
+:root:not([data-theme="dark"]) .chat{color:var(--ink)}
+:root:not([data-theme="dark"]) .honest{color:var(--ink)}
+:root:not([data-theme="dark"]) .rcpt{color:var(--ink)}
+:root:not([data-theme="dark"]) .cnt.seal-cnt.two{color:var(--ink)}
+:root:not([data-theme="dark"]) .banner.glass h3{color:var(--ink)}
+}
+.trust-nav a{text-decoration:none}

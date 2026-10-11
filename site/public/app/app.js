@@ -10,6 +10,18 @@ const CLI_PKG = BRAND.cliInstall || BRAND.cli || 'leashcli';
 // and it only ever travels in a POST body
 let inviteToken = null;
 { const iv = location.hash.match(/^#invite=([A-Za-z0-9_-]{43})$/); if (iv) { inviteToken = iv[1]; history.replaceState(null, '', '/app'); } }
+// single sign-on links: #sso=<team id> (the team's sign-in link), and where the callback sends you back:
+// #sso-joined (you joined the team through SSO) or #sso-error=<code>. Read once and taken out of the address bar.
+let SSO = { team: null, joined: false, error: null };
+function readSso() {
+  const h = location.hash;
+  if (!/^#sso(-joined$|-error=|=)/.test(h)) return false;
+  const t = /^#sso=([0-9a-f]{24})$/.exec(h), e = /^#sso-error=([a-z_]{1,40})$/.exec(h);
+  SSO = { team: t ? t[1] : null, joined: h === '#sso-joined', error: e ? e[1] : (h !== '#sso-joined' && !t ? 'sso_link' : null) };
+  history.replaceState(null, '', '/app');
+  return true;
+}
+readSso();
 const el = (tag, props = {}, ...kids) => { const n = document.createElement(tag); Object.assign(n, props); for (const k of kids) if (k != null) n.append(k); return n; };
 const b64u = { enc: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''), dec: (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)) };
 
@@ -510,7 +522,7 @@ function show(view) {
   if (changed && view === 'gates') gatesView().catch(() => {});
   if (changed && view === 'budget') budgetView().catch((e) => toast(e.message));
   if (changed && view === 'account') { passkeysView().catch(() => {}); cliSessionsView().catch(() => {}); guardKeysView().catch(() => {}); }
-  if (changed && view === 'team') teamView().catch((e) => toast(e.message));
+  if (changed && view === 'team') { teamView().catch((e) => toast(e.message)); ssoView().catch(() => {}); }
   if (changed && view === 'privacy') privacyView().catch((e) => toast(e.message));
   for (const s of document.querySelectorAll('.view')) s.hidden = s.dataset.view !== view;
   for (const a of document.querySelectorAll('#snav a')) a.classList.toggle('on', a.dataset.view === view);
@@ -520,6 +532,8 @@ for (const a of document.querySelectorAll('#snav a')) a.onclick = (e) => { e.pre
 // ---- deep links: #hold=<id>, #device (command line sign-in), #cli=<id> (the alert after one), #freeze (the alert's
 // Freeze button could not freeze: this only brings you to the button, it never presses it)
 function route() {
+  // an SSO link opened in a tab where the app is already running
+  if (readSso()) { clearInterval(boot.poll); boot(); return; }
   // an invite link opened in a tab where the app is already running: take the token out of the address bar at once
   if (/^#invite=/.test(location.hash)) {
     const iv = location.hash.match(/^#invite=([A-Za-z0-9_-]{43})$/);
@@ -882,6 +896,92 @@ async function inviteIn() {
     } catch (e) { toast(e.name === 'InvalidStateError' ? 'This device already holds a passkey for this team. Each person joins once, with their own passkey.' : e.message); }
   };
 }
+
+// ---- single sign-on (server/src/sso.js). The sign-in link only starts a sign-in at the team's own identity provider; the
+// provider's page takes the password, never this one. Joining through SSO gives no approvals: the member makes their
+// own passkey next. The settings take an owner's passkey; the client secret goes to the server once and is never shown.
+const SSO_ERR = {
+  sso_link: 'This single sign-on link is incomplete. Ask your team for the whole link.',
+  sso_not_found: 'This team has no single sign-on. Ask an owner for the right link.',
+  sso_state: 'This sign-in expired, was already used or was started in another browser. Start again from the team link, in this browser.',
+  sso_denied: 'Your identity provider did not sign you in.',
+  sso_token: 'Your identity provider did not accept the sign-in. Start again.',
+  sso_domain: 'People from your email domain cannot sign in to this team. Ask an owner.',
+  sso_removed: 'You were removed from this team. Ask an owner to invite you again.',
+  sso_team_full: 'This team is full. An owner can remove someone first.',
+  sso_required: 'This team signs in with single sign-on. Use the team sign-in link; your passkey still approves.',
+};
+const ssoErrText = (code) => SSO_ERR[code] || 'Single sign-on did not work. Start again from the team link, or ask an owner to check the settings.';
+function ssoIn() {
+  $('signedOut').hidden = false; $('signedIn').hidden = true;
+  for (const id of ['authMain', 'devSignedOut']) $(id).hidden = true;
+  $('ssoIn').hidden = false;
+  const team = SSO.team;
+  $('ssoGo').onclick = async () => {
+    try {
+      const r = await api('POST', '/v1/sso/start', { team });
+      const u = new URL(r.url);
+      if (u.protocol !== 'https:') throw new Error('The identity provider address is not https. Ask an owner to check the settings.');
+      location.assign(u.href);
+    } catch (e) { authErr(e.code ? ssoErrText(e.code) : e.message); }
+  };
+  $('ssoLater').onclick = () => { SSO.team = null; $('ssoIn').hidden = true; $('authMain').hidden = false; authErr(''); };
+  $('ssoGo').focus();
+}
+// someone in an SSO session with no passkey yet: one button makes their first passkey
+async function ssoKeyCheck(me, joined) {
+  const note = $('ssoKeyNote');
+  if (!me.member || me.via !== 'sso') { note.hidden = true; return; }
+  const t = await api('GET', '/v1/team');
+  const you = t.members.find((m) => m.you);
+  note.hidden = !you || you.passkeys > 0;
+  if (joined && !note.hidden) toast(`Welcome to ${me.account.name}. Create your passkey next: approvals need it.`);
+}
+$('ssoKeyAdd').onclick = async () => {
+  try {
+    const b = await api('POST', '/v1/sso/passkey/begin', {});
+    let cred;
+    try { cred = await navigator.credentials.create(createOptions(b.options)); } catch (e) { throw new Error(passkeyError(e)); }
+    await api('POST', '/v1/sso/passkey/finish', { challengeId: b.challengeId, credential: { id: cred.id, attestationObject: b64u.enc(cred.response.attestationObject), clientDataJSON: b64u.enc(cred.response.clientDataJSON) } });
+    $('ssoKeyNote').hidden = true; toast('Passkey made. Use it to approve, and to sign in next time.');
+  } catch (e) { toast(e.message); }
+};
+async function ssoView() {
+  const r = await api('GET', '/v1/team/sso');
+  const c = r.sso;
+  $('ssoRedirect').textContent = r.redirectUri;
+  $('ssoState').textContent = c
+    ? `On. Issuer ${c.issuer}; people from ${c.domains.join(', ')} join as ${(ROLE_TEXT[c.defaultRole] || c.defaultRole).toLowerCase()}; ${c.enforce ? 'single sign-on required for everyone but owners' : 'passkey sign-in still allowed'}${c.clientSecret ? '; client secret saved' : ''}. Changed ${new Date(c.changedAt).toLocaleString()}.`
+    : 'Off. Everyone signs in with their own passkey.';
+  $('ssoLinkBox').hidden = !c;
+  if (c) $('ssoLink').textContent = c.loginLink;
+  $('ssoOff').hidden = !c;
+  if (c && !ssoView.filled) {
+    $('ssoIssuer').value = c.issuer; $('ssoClient').value = c.clientId; $('ssoDomains').value = c.domains.join(', ');
+    $('ssoRole').value = c.defaultRole; $('ssoEnforce').checked = !!c.enforce; ssoView.filled = true;
+  }
+  const ids = r.identities || [];
+  $('ssoPeopleBox').hidden = !can('owner') || !ids.length;
+  $('ssoPeople').replaceChildren(...ids.map((x) => el('div', {}, el('span', {}, el('b', { textContent: x.email }), el('span', { className: 'dim', textContent: `  ${NAMES.get(x.member) || 'a former member'}, joined ${new Date(x.created_at).toLocaleDateString()}, last sign-in ${x.last_login ? new Date(x.last_login).toLocaleString() : 'never'}${x.removed ? ', removed' : ''}` })))));
+}
+$('ssoSave').onclick = async () => {
+  try {
+    const domains = $('ssoDomains').value.split(/[\s,]+/).map((d) => d.trim()).filter(Boolean);
+    const body = { issuer: $('ssoIssuer').value.trim(), clientId: $('ssoClient').value.trim(), domains, defaultRole: $('ssoRole').value, enforce: $('ssoEnforce').checked };
+    if (!body.issuer || !body.clientId || !domains.length) return toast('Fill in the issuer address, the client id and at least one email domain.');
+    const secret = $('ssoSecret').value; if (secret) body.clientSecret = secret;
+    await ceremony('/v1/team/sso/begin', '/v1/team/sso/finish', body);
+    $('ssoSecret').value = ''; ssoView.filled = false;
+    toast('Saved. Send your team the sign-in link.'); ssoView().catch(() => {});
+  } catch (e) { toast(e.message); }
+};
+$('ssoOff').onclick = async () => {
+  try {
+    await ceremony('/v1/team/sso/off/begin', '/v1/team/sso/off/finish');
+    ssoView.filled = false; toast('Single sign-on is off. Everyone keeps their passkeys and their place on the team.'); ssoView().catch(() => {});
+  } catch (e) { toast(e.message); }
+};
+$('ssoCopy').onclick = async () => { try { await navigator.clipboard.writeText($('ssoLink').textContent); toast('Copied.'); } catch { toast('Select the link and copy it.'); } };
 
 // ---- alerts (Web Push). The push itself carries nothing; sw.js fetches the held request after it wakes.
 const swPolicy = window.trustedTypes ? trustedTypes.createPolicy('leash-sw', { createScriptURL: (u) => { if (u !== '/sw.js') throw new Error('blocked'); return u; } }) : null;
@@ -1393,6 +1493,9 @@ async function boot() {
     const provs = [...meta.providers, { id: 'openai', name: 'OpenAI (metered)' }, { id: 'anthropic', name: 'Anthropic (metered)' }];
     const p = $('prov'); p.replaceChildren(...provs.map((x) => el('option', { value: x.id, textContent: x.name })));
     PROV = Object.fromEntries(provs.map((x) => [x.id, x])); showHost();
+    if (SSO.team) toast('You are already signed in. To sign in as someone else, sign out first.');
+    if (SSO.error) toast(ssoErrText(SSO.error));
+    ssoKeyCheck(me, SSO.joined).catch(() => {}); SSO = { team: null, joined: false, error: null };
     route(); await load(); pushState().catch(() => {});
     installUi(); reportInstalled();
     // the background refresh: quiet, so it never keeps an idle session alive (see refresh() below)
@@ -1402,6 +1505,9 @@ async function boot() {
     $('signedOut').hidden = false; $('signedIn').hidden = true;
     if (e && e.code === 'offline') { $('offlineNote').hidden = false; return; }
     prepareLogin();
+    if (SSO.error) authErr(ssoErrText(SSO.error));
+    if (SSO.team) ssoIn();
+    SSO.error = null; SSO.joined = false;
     // a command line sign-in waits for you here; the code is typed after you sign in, never taken from the link
     $('devSignedOut').hidden = !/^#device/.test(location.hash);
   }

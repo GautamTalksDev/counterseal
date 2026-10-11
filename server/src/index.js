@@ -123,6 +123,8 @@ const ROUTES = [
       account: account ? rest : null, kind: c.s.kind,
       // who is signed in: on a team, one member with their own role (the account's founder: the account's id and name)
       member: { id: c.s.memberId, role: c.s.role, name: c.s.memberName || account?.name || null, founder: c.s.memberId === c.s.accountId },
+      // how this session was started: null (a passkey) or 'sso' (single sign-on; the app then offers a first passkey)
+      via: c.s.via || null,
       // the seals a held action needs now, and a lowering that is waiting (the app shows it on every page)
       team: Team.effective({ quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at }),
       // a break-glass window that is open (the app shows a banner with a countdown on every page)

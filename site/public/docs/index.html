@@ -8,6 +8,8 @@
 <meta name="theme-color" content="#08090b">
 <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/skin.css">
+<script src="/theme.js"></script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
 <body class="page">
@@ -159,7 +161,7 @@ npx counterseal guard install --agents none     # makes the key the plugin's hoo
   </ol>
   <p>Agents whose hook cannot wait (or if you set <code>mode</code> to <code>retry</code>) get the denial at once with the link, and run exactly the same command again after you approve it.</p>
   <p>On a team that <a href="#team">requires two seals</a>, a held command stays pending until two different people have approved it, each with their own passkey. The hook keeps waiting, prints how far it is (for example "1 of 2 approvals so far") and, if the time runs out, tells the agent that a second person has to approve it too. A guard key can be revoked only by the person who made it or by an owner.</p>
-  <h3>What is held (shell map 2026-10-10.2)</h3>
+  <h3>What is held (shell map 2026-10-10.3)</h3>
   <table>
     <tr><th>Rule</th><th>Holds</th></tr>
     <tr><td><code>sh.terraform-destroy</code></td><td>terraform or tofu: destroy, apply -destroy, workspace delete (also terragrunt)</td></tr>

@@ -3,10 +3,23 @@
 All notable changes to Counterseal. The CLI follows [Semantic Versioning](https://semver.org/); the hosted service and
 the self-hosted Worker change together with this repository (see [docs/DEPLOY.md](docs/DEPLOY.md) for migrations).
 
-## Unreleased (branch `budget-seal`, not deployed)
+## 0.4.1 (2026-10-13)
+
+**Upgrading: run `counterseal guard install` again** after updating, so the guard hooks pick up shell map
+`2026-10-10.3` and the new PowerShell matcher.
 
 ### Added
 
+- **Single sign-on for teams (OpenID Connect).** An owner picks the team's identity provider with a passkey; people
+  sign in through it from the team link (`/app/#sso=<team id>`) and new people from the allowed email domains join as
+  viewer or member. SSO never approves: a member who joined through it makes their own passkey next, in the app.
+  Optional "SSO required" for everyone but owners. Migration `0015_sso.sql`. See [ENTERPRISE.md](ENTERPRISE.md).
+- **App screens for SSO**: the sign-in page for a team link, the messages for `#sso-error=` and `#sso-joined`, the
+  first-passkey prompt for SSO sessions, and an owner settings panel in Team. `GET /v1/me` now says how the session
+  was started (`member.via`).
+- **DPA template 0.2 and the subprocessors page** list single sign-on data and where each kind of data lives.
+- **New site and app look**: light and dark themes everywhere (shared `cs.theme` setting), a new landing page, the
+  trust pages linked together, and the Warden on the landing and sign-in page. No new third-party requests.
 - **Budget seal: hard spend caps on AI model calls.** OpenAI and Anthropic can now be brokered like the other APIs (the
   agent holds a Counterseal token, the key stays in the vault). Each call's cost is metered from the usage the provider
   returns times a price table in code (`server/src/metered.js`, read 2026-10-10, sources linked). Daily and monthly caps

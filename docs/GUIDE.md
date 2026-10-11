@@ -246,7 +246,7 @@ The full contract (request fields, errors, budgets) is in [docs/PROTOCOL.md](PRO
 
 `counterseal guard` is the hook that does the asking for you. It reads each shell command your coding agent is about to
 run the way a shell does (quotes, `&&` and pipes, `sh -c`, `sudo`, `xargs`, `ssh`, `docker exec`, `package.json` scripts and
-more) and holds the ones on the **shell map** (version `2026-10-10.2`, 29 rules: `terraform destroy`, `git push --force`,
+more) and holds the ones on the **shell map** (version `2026-10-10.3`, 29 rules: `terraform destroy`, `git push --force`,
 `DROP TABLE` through `psql`, `railway volume delete`, `gh repo delete`, `rm -rf` outside the project, `kubectl delete`,
 `docker volume prune`, cloud CLI deletes, `curl` to a brokered API with a write method, and more) until you approve that
 exact command, once, with a passkey. Everything not on the map is left to the agent's own permission settings.

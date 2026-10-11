@@ -22,7 +22,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
-const VERSION = '0.4.0';
+const VERSION = '0.4.1';
 // the npm package that runs this CLI (published as counterseal; leashcli is the old name, a thin alias that runs this one)
 const PKG = 'counterseal';
 const CFG_DIR = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'leash');

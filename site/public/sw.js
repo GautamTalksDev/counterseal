@@ -12,8 +12,8 @@
 //     opens without a network and says it is offline. Nothing private is ever cached: never /v1/ (the API), /p/ (the
 //     proxy) or /.well-known/, never a request with credentials in it, never a response marked no-store, and only these
 //     exact paths. Network first, so a new version is used as soon as it can be fetched.
-const SHELL_CACHE = 'counterseal-shell-v1';
-const SHELL = ['/app', '/app/app.js', '/app/evidence.js', '/app/warden.js', '/styles.css', '/brand.js', '/favicon.svg', '/receipts-sdk.js', '/manifest.webmanifest',
+const SHELL_CACHE = 'counterseal-shell-v2';
+const SHELL = ['/app', '/app/app.js', '/app/evidence.js', '/app/warden.js', '/styles.css', '/skin.css', '/app-v3.css', '/img/warden/held-still.webp', '/brand.js', '/favicon.svg', '/receipts-sdk.js', '/manifest.webmanifest',
   '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png', '/badge-96.png',
   '/fonts/geist.woff2', '/fonts/geist-mono.woff2', '/fonts/instrument-serif-italic.woff2'];
 const SHELL_SET = new Set(SHELL);
