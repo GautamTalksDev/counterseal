@@ -268,7 +268,7 @@
       <div class="sh-flow" aria-hidden="true" id="shFlow"></div>
     </div>
     <ol class="setup three">
-      <li class="rv"><span class="sn">1</span><h3>Install the hook</h3><p>One command finds your coding agents and adds the hook without touching the rest of their settings. It needs CLI 0.3.0, coming to npm.</p><pre class="mono">npx counterseal guard install</pre></li>
+      <li class="rv"><span class="sn">1</span><h3>Install the hook</h3><p>One command finds your coding agents and adds the hook without touching the rest of their settings. It needs CLI 0.3.0 or later, on npm.</p><pre class="mono">npx counterseal guard install</pre></li>
       <li class="rv"><span class="sn">2</span><h3>Or add the plugin</h3><p>The same hook as a plugin, from this repository's marketplace file. No form, no store.</p><pre class="mono">claude plugin marketplace add GautamTalksDev/counterseal
 claude plugin install counterseal@counterseal</pre></li>
       <li class="rv"><span class="sn">3</span><h3>See what it would hold</h3><p>Ask the map about any command. It works offline and sends nothing.</p><pre class="mono">npx counterseal guard check -- terraform destroy</pre></li>
@@ -330,9 +330,9 @@ claude plugin install counterseal@counterseal</pre></li>
 <!-- ============================================================ DEPLOY GATE -->
 <section class="sec part" id="deploy" aria-labelledby="dp-h">
   <div class="wrap">
-    <p class="kicker"><span class="num">V</span>Deploys</p>
+    <p class="kicker"><span class="num">V</span>Deploys, preview</p>
     <h2 id="dp-h" class="h2">The deploy waits for <em>a passkey.</em></h2>
-    <p class="sub">Deploy Gate is a step for GitHub Actions. It proves which run is asking with GitHub's own signed OIDC token, then waits until you approve that one run with a passkey. With a vaulted key on the gate, the job gets a 15 minute Counterseal token only after the approval: no approval, no key.</p>
+    <p class="sub"><b>Preview, not yet tested with real GitHub tokens.</b> Deploy Gate is a step for GitHub Actions. It proves which run is asking with GitHub's own signed OIDC token, then waits until you approve that one run with a passkey. With a vaulted key on the gate, the job gets a 15 minute Counterseal token only after the approval: no approval, no key.</p>
     <div class="gate rv">
       <div class="gh-log">
         <div class="win-bar"><i></i><i></i><i></i><span>deploy.yml &#183; production</span></div>
@@ -523,7 +523,7 @@ claude plugin install counterseal@counterseal</pre></li>
 }</pre></li>
       <li class="rv"><span class="sn">4</span><h3>Give it a seal</h3><p>Make an agent key in the app: it is generated in your browser and only the public half is sent. Bind tokens to it and they only work on requests it signed (signing from the MCP server needs CLI 0.3.0, coming to npm).</p><a class="lnk-arrow" href="/docs/#agent-keys">Agent keys in the docs</a></li>
     </ol>
-    <p class="fine">The <code>counterseal</code> package (CLI 0.3.0) is on npm. From version 0.3.0 the CLI is the <code>counterseal</code> package; <code>leashcli</code>, its first name, keeps working and runs the same CLI.</p>
+    <p class="fine">The <code>counterseal</code> package (CLI 0.4.0) is on npm. From version 0.3.0 the CLI is the <code>counterseal</code> package; <code>leashcli</code>, its first name, keeps working and runs the same CLI.</p>
   </div>
 </section>
 
@@ -558,7 +558,8 @@ claude plugin install counterseal@counterseal</pre></li>
         <li>Agent keys and signed requests</li>
         <li>Phone alerts for held calls</li>
         <li>The free signature checker</li>
-        <li>Two-person seal, Deploy Gate and Brakes</li>
+        <li>Two-person seal and Brakes</li>
+        <li>Deploy Gate, as a preview not yet tested with real GitHub tokens</li>
       </ul>
       <p class="p-note">Paid plans for teams may come later. You will get at least 30 days' notice before anything you use starts to cost money.</p>
     </div>

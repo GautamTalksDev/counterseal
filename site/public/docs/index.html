@@ -223,7 +223,8 @@ npx counterseal guard install --agents none     # makes the key the plugin's hoo
     <tr><td>Copilot CLI, Gemini CLI, Antigravity</td><td colspan="2">Not supported yet: their hooks have not been tested with the guard.</td></tr>
   </table>
   <p>What leaves your machine: the command text with credentials removed (connection strings, bearer tokens, key-shaped values, <code>PASSWORD=</code> style variables), the rule, why, the name of the folder (not its path) and the session id. Held commands are shown on your devices and may appear on the lock screen.</p>
-  <h2 id="deploy-gate">Deploy gates for GitHub Actions</h2>
+  <h2 id="deploy-gate">Deploy gates for GitHub Actions (preview)</h2>
+  <p class="callout">Preview: the Deploy Gate has been tested against a stand-in issuer that signs like GitHub, not yet with real GitHub tokens.</p>
   <p>Hold any GitHub Actions job until you approve it with your passkey. GitHub's own deployment approvals (required reviewers, wait timers, custom protection rules) are available only for public repositories on the Free, Pro and Team plans, according to <a href="https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments">GitHub's documentation</a> (read 9 Oct 2026). A gate does not use them: the job's step sends the OIDC token GitHub signs for it, Counterseal checks the signature and what the token says about the run, and your phone shows the repository, workflow, commit, run and who started it, from that token.</p>
   <pre>permissions:
   id-token: write   # lets the job ask GitHub for the token the gate checks
@@ -358,7 +359,7 @@ steps:
   <p>Give each agent its own Ed25519 key. You register the public half with a proof of possession; the private half never leaves the agent's machine. A token bound to the key then only works on requests that key signed, so a token copied from a log, a config file or a screen is useless on its own, and every decision on a signed request records which agent key made it.</p>
   <pre>npx counterseal agent-key agent-key.json --label laptop-agent     # makes the key (file mode 600) and registers it
 npx counterseal token &lt;key-id&gt; --agent-key &lt;agent-key-id&gt;          # a token bound to it</pre>
-  <p>Then run the MCP server of leashcli 0.3.0 with <code>LEASH_AGENT_KEY=agent-key.json</code> next to <code>LEASH_TOKENS</code>; it signs every call. (0.3.0 is in the repository and not yet on npm: <code>npx counterseal</code> still runs 0.1.1, which cannot sign, so a bound token refuses its calls.) You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys arrive in CLI 0.3.0; until it is published, use the app or the signer in <code>cli/sign.mjs</code>.</p>
+  <p>Then run the MCP server of the CLI (0.3.0 or later; <code>npx counterseal</code> runs 0.4.0) with <code>LEASH_AGENT_KEY=agent-key.json</code> next to <code>LEASH_TOKENS</code>; it signs every call. An older CLI cannot sign, so a bound token refuses its calls. You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys arrive in CLI 0.3.0; until it is published, use the app or the signer in <code>cli/sign.mjs</code>.</p>
   <p>The signature is an RFC 9421 HTTP Message Signature with this profile:</p>
   <pre>Signature-Input: sig1=("@method" "@target-uri" "content-digest" "content-type");created=1791300000;expires=1791300060;keyid="&lt;JWK thumbprint&gt;";alg="ed25519";nonce="&lt;random&gt;";tag="leash-pop"
 Signature: sig1=:&lt;base64 Ed25519 signature&gt;:
