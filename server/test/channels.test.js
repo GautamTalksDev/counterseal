@@ -8,6 +8,7 @@ import { _resetMemoryBuckets } from '../src/ratelimit.js';
 import { _resetSeen } from '../src/admin.js';
 import { checkUrl, holdText, safeLabel, KINDS, MAX_FAILURES } from '../src/channels.js';
 import { anon, db, withVapid, device, founder, add, ceremony, setQuorum, seal, vault, makeToken, del, heldCall, guardKey, create, ask } from './bg-helpers.js';
+import { cliSession } from './brakes-helpers.js';
 
 beforeEach(() => { _resetMemoryBuckets(); _resetSeen(); });
 
@@ -268,4 +269,16 @@ test('a deploy gate\'s hold tells the channels too: the gate\'s name, the rule a
   assert.equal(calls.length, 1);
   assert.match(calls[0].body.text, /^Counterseal: prod deploy needs approval for gate\.bind\. Approve with your passkey: https:\/\/leash\.test\/app#hold=[0-9a-f]{24}$/);
   for (const s of ['acme', 'a1b2c3d', 'octocat', '812', 'production', 'refs/heads']) assert.ok(!calls[0].body.text.includes(s), s);
+});
+
+test('gate M4: a command line session cannot remove an alert channel (monitoring is switched off only from the app)', async () => {
+  const w = new World();
+  const u = await founder(w);
+  sink(w);
+  const ch = await addOk(w, u, 'gchat', GCHAT, 'g');
+  const cli = await cliSession(w, u);
+  const r = await w.req('DELETE', `/v1/team/channels/${ch.id}`, { bearer: cli, ...anon });
+  assert.equal(r.status, 403);
+  assert.equal(r.body.error, 'passkey_required');
+  assert.equal((await w.req('DELETE', `/v1/team/channels/${ch.id}`, { cookie: u.cookie })).status, 200, 'the app still can');
 });

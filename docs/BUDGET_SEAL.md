@@ -40,14 +40,17 @@ owner or approver in the web app. A command line session cannot change a budget.
 
 1. Before the call: an estimate is reserved. It leans high on purpose: every input byte counts as a third of a token
    (English is about four characters a token) and the full output limit the request allows (`max_tokens`,
-   `max_completion_tokens` or `max_output_tokens`; 4096 if none).
+   `max_completion_tokens` or `max_output_tokens`; 32,768 if none), times the number of choices `n` (up to 128; an `n`
+   that is not a plain number counts as 128). Set `max_tokens` to reserve less.
 2. The reservation adds the estimate to all six totals the call touches (agent, key, account; day, month) in one SQL
    statement. A `CHECK` on the table makes the whole statement fail if any total would pass its cap. So two calls near
    a cap cannot both pass; the tests run 30 and 50 at once.
 3. After the answer: the real cost (the usage the provider returned, times the price table) replaces the estimate.
-   Streams are read too (OpenAI sends usage only when the request sets `stream_options.include_usage`; without it the
-   estimate stays). A refusal (4xx) gives the reservation back. A 5xx or an answer whose usage cannot be read keeps the
-   estimate, because the call may have run.
+   Streams are read too. OpenAI sends usage in a stream only when the request sets `stream_options.include_usage`, so
+   Counterseal adds it to every metered OpenAI stream before it is sent (the agent sees one extra last chunk with empty
+   `choices` and the usage). A refusal (4xx) gives the reservation back. A 5xx keeps the estimate, because the call may
+   have run. A 2xx whose usage cannot be read is charged its ceiling: the input plus 128,000 output tokens per choice
+   (or the request's own limit, if higher).
 4. If the real cost is above the estimate (the provider ran longer than the request allowed), the true total is kept
    (`over`). It can pass the cap by that call and by every other call already in flight. Nothing new goes after it.
 
@@ -63,8 +66,8 @@ Rules that keep it honest:
 
 - Exact model names only. On Anthropic a dated snapshot of a listed model counts as that model. Nothing is matched by
   prefix, so a new model is never priced as an older one.
-- A model that is not in the table is **unpriced**, never guessed. Each agent gets 10 unpriced calls a UTC day (the
-  account can set 0 to 1000); past that each one waits for your passkey. Images, audio, batches and other paid calls
+- A model that is not in the table is **unpriced**, never guessed. Each account gets 10 unpriced calls a UTC day, shared by all its
+  agents (the account can set 0 to 1000), so minting another token does not buy more; past that each one waits for your passkey. Images, audio, batches and other paid calls
   on these hosts count the same way.
 - The dear side wins: cache reads at the listed cache price, cache writes at twice the input price (the one hour rate),
   OpenAI cached input at the full input price, Claude Haiku 5.5 at its long prompt tier. If the provider says it ran a

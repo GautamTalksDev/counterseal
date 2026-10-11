@@ -212,11 +212,12 @@ const ROUTES = [
   ['POST', /^\/v1\/team\/breakglass\/begin$/, 'webw', (c) => Win.openBegin(c.env, c.s, c.body), APPROVER],
   ['POST', /^\/v1\/team\/breakglass\/finish$/, 'webw', (c) => Win.openFinish(c.env, c.s, c.body), APPROVER],
   ['DELETE', new RegExp(`^/v1/team/breakglass/${ID}$`), 'write', (c) => Win.close(c.env, c.s, c.m[1]), ANY],
-  // Alert channels (src/channels.js): an owner. Adding one sends team information out, so it needs a passkey ceremony; removing only
-  // tightens; a test is a web session.
+  // Alert channels (src/channels.js): an owner. Adding one sends team information out, so it needs a passkey ceremony; removing
+  // one switches monitoring off, so it is a web session (signed in with a passkey), never a command line session; a test is
+  // a web session too.
   ['POST', /^\/v1\/team\/channels\/begin$/, 'webw', (c) => Ch.addBegin(c.env, c.s, c.body), OWNER],
   ['POST', /^\/v1\/team\/channels\/finish$/, 'webw', (c) => Ch.addFinish(c.env, c.s, c.body), OWNER],
-  ['DELETE', new RegExp(`^/v1/team/channels/${ID}$`), 'write', (c) => Ch.remove(c.env, c.s, c.m[1]), OWNER],
+  ['DELETE', new RegExp(`^/v1/team/channels/${ID}$`), 'webw', (c) => Ch.remove(c.env, c.s, c.m[1]), OWNER],
   ['POST', new RegExp(`^/v1/team/channels/${ID}/test$`), 'webw', (c) => Ch.test(c.env, c.s, c.m[1]), OWNER],
   ['POST', /^\/v1\/team\/invites\/begin$/, 'webw', (c) => Team.inviteBegin(c.env, c.s, c.body), OWNER],
   ['POST', /^\/v1\/team\/invites\/finish$/, 'webw', (c) => Team.inviteFinish(c.env, c.s, c.body), OWNER],

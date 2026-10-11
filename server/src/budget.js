@@ -216,10 +216,10 @@ export async function before(env, x, opts = {}) {
     const allowance = acct.unpriced_per_day ?? UNPRICED_DEFAULT;
     const n = (await env.DB.prepare(`INSERT INTO counters (k, n, expires_at) VALUES (?1, 1, ?2) ON CONFLICT (k) DO UPDATE SET
       n = CASE WHEN counters.expires_at <= ?3 THEN 1 ELSE counters.n + 1 END, expires_at = CASE WHEN counters.expires_at <= ?3 THEN ?2 ELSE counters.expires_at END RETURNING n`)
-      .bind(`p:${tok.id}:u`, resetsOf(t).day, t).first()).n;
+      .bind(`p:${tok.account_id}:u`, resetsOf(t).day, t).first()).n; // per account: a new token does not get a new allowance
     if (n > allowance && !opts.approved) {
       const what = kind === 'unpriced' ? `this ${provider === 'openai' ? 'OpenAI' : 'Anthropic'} call is not one the meter can price` : req.model ? `the model "${String(req.model).slice(0, 60)}" is not in the price table (${PRICES_DATE})` : 'the request does not name a model the meter can read';
-      return hold('budget.unpriced', `${BRAND.name} cannot price this call: ${what}. This token has used its ${allowance} unpriced calls for today (UTC), so it waits for you.`, null);
+      return hold('budget.unpriced', `${BRAND.name} cannot price this call: ${what}. This account has used its ${allowance} unpriced calls for today (UTC), so it waits for you.`, null);
     }
     return { meter: null };
   }
@@ -251,7 +251,7 @@ export async function before(env, x, opts = {}) {
     if (!/CHECK|constraint/i.test(String(e?.message || e))) throw e; // anything else: fail closed (the call is not sent)
     return atCap(env, x, rows, by, req, t, opts);
   }
-  const meter = { accountId: tok.account_id, keys: rows.map((r) => r[0]).filter((k, i, a) => a.indexOf(k) === i), periods: [day, month], estimate: req.estimate, price: req.price, model: req.model, provider };
+  const meter = { accountId: tok.account_id, keys: rows.map((r) => r[0]).filter((k, i, a) => a.indexOf(k) === i), periods: [day, month], estimate: req.estimate, unread: req.unread ?? req.estimate, price: req.price, model: req.model, provider, needsUsage: !!req.needsUsage };
 
   // "ask me" at 80%: the first call past it this period waits for a passkey
   if (!opts.approved) {
@@ -309,11 +309,16 @@ async function adjust(env, m, delta) {
 }
 
 /** After the answer came back (2xx): read the usage and replace the estimate with the real cost. Text: the answer's
- * body. When the usage cannot be read, the estimate stays (it is the dear side). */
+ * body. When the usage cannot be read, the call ran but its size is unknown: it is charged at m.unread (the request's
+ * input and the largest output it could have had), never at the smaller estimate. */
 export async function settle(env, m, contentType, text) {
   if (!m) return null;
   const u = readUsage(m.provider, contentType, text);
-  if (!u) return { cost: m.estimate, read: false };
+  if (!u) {
+    const cost = Math.max(m.unread ?? m.estimate, m.estimate);
+    await adjust(env, m, cost - m.estimate);
+    return { cost, read: false };
+  }
   // the provider says which model it ran: if that one is priced and dearer, it is the one charged
   const said = priceOf(m.provider, u.model);
   const cost = Math.max(costOf(m.price, u.usage), said ? costOf(said, u.usage) : 0);

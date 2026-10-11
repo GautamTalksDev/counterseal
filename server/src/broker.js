@@ -4,7 +4,7 @@ import * as Budget from './budget.js';
 import { mapOf } from './approvals.js';
 import { cardOf, publicRepoOf } from './gatefacts.js';
 import { seal, open } from './vault.js';
-import { summarize, providerOf, MAP_VERSION, storeHost, LIMITS } from './providers.js';
+import { summarize, providerOf, MAP_VERSION, storeHost, LIMITS, jsonView } from './providers.js';
 import { normalisePolicy, decide, afterMap } from './policy.js';
 import { audit } from './audit.js';
 import { newChallenge, takeChallenge, checkAssertion, rp, appOrigin, sessionId } from './auth.js';
@@ -320,7 +320,7 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   const upHost = P.perCredentialHost ? storeHost(P, cred.host) : P.host;
   if (!upHost) throw new HttpError(500, 'bad_host', 'This credential has no valid store address.');
   const url = new URL(request.url);
-  const body = ['GET', 'HEAD'].includes(method) ? null : await readBody(request, MAX_BODY);
+  let body = ['GET', 'HEAD'].includes(method) ? null : await readBody(request, MAX_BODY);
   // Prove who: a bound token needs the agent's own signature over this exact request. Checked before the token's rate
   // limit, so someone holding only the token can neither use it nor spend the real agent's request budget.
   let agentKey = null;
@@ -447,6 +447,15 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
     if (brake.reserved) await Brakes.release(env, brake.reserved).catch(() => {});
     if (meter) await Budget.release(env, meter).catch(() => {});
     throw e;
+  }
+  // Budget seal: an OpenAI stream is asked to end with its usage (stream_options.include_usage), so it can be settled
+  // from the real cost. The agent sees one more chunk at the end, with empty choices and the usage.
+  if (meter?.needsUsage) {
+    const j = jsonView(bodyText);
+    if (j && typeof j === 'object' && !Array.isArray(j)) {
+      const so = j.stream_options && typeof j.stream_options === 'object' && !Array.isArray(j.stream_options) ? j.stream_options : {};
+      body = new TextEncoder().encode(JSON.stringify({ ...j, stream_options: { ...so, include_usage: true } }));
+    }
   }
   const headers = new Headers();
   for (const h of PASS_REQ) { const v = request.headers.get(h); if (v) headers.set(h, v); }

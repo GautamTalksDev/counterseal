@@ -18,9 +18,14 @@ export const PRICE_SOURCES = {
 };
 /** calls a token may make each UTC day to a model or a paid path with no price, before they wait for approval */
 export const UNPRICED_DEFAULT = 10;
-/** what an estimate assumes the answer will be when the request names no output limit */
-export const DEFAULT_OUTPUT_TOKENS = 4096;
+/** what an estimate assumes the answer will be when the request names no output limit (the dear side: about the
+ * largest output most current models allow; a request that sets max_tokens is reserved at its own limit) */
+export const DEFAULT_OUTPUT_TOKENS = 32_768;
 export const MAX_OUTPUT_TOKENS = 1_000_000;
+/** what a 2xx answer whose usage cannot be read is charged as output, per choice (the call ran, its size is unknown) */
+export const UNREAD_OUTPUT_TOKENS = 128_000;
+/** the most choices (n) one request is reserved for; OpenAI allows up to 128 */
+export const MAX_CHOICES = 128;
 
 // [input, output, cache read (null: charged as input)] in USD per million tokens, Standard tier.
 // OpenAI, short context (up to 272K input tokens), read on 10 Oct 2026 from PRICE_SOURCES.openai.
@@ -97,9 +102,20 @@ export function readRequest(provider, bodyText, view) {
   const model = typeof j.model === 'string' ? j.model : null;
   const price = priceOf(provider, model);
   if (!price) return { model, price: null };
-  const out = posInt(j.max_tokens, MAX_OUTPUT_TOKENS) ?? posInt(j.max_completion_tokens, MAX_OUTPUT_TOKENS) ?? posInt(j.max_output_tokens, MAX_OUTPUT_TOKENS) ?? DEFAULT_OUTPUT_TOKENS;
+  const limit = posInt(j.max_tokens, MAX_OUTPUT_TOKENS) ?? posInt(j.max_completion_tokens, MAX_OUTPUT_TOKENS) ?? posInt(j.max_output_tokens, MAX_OUTPUT_TOKENS);
+  // n choices: each one can run to the output limit. A value that is not a plain number is read as the most allowed.
+  const choices = j.n === undefined || j.n === null ? 1 : posInt(j.n, MAX_CHOICES) ?? MAX_CHOICES;
+  const out = (limit ?? DEFAULT_OUTPUT_TOKENS) * choices;
   const input = Math.ceil(new TextEncoder().encode(bodyText).length / 3);
-  return { model, price, stream: j.stream === true, estimate: costOf(price, { input, output: out, cacheRead: 0, cacheWrite: 0 }) };
+  const stream = j.stream === true;
+  // OpenAI streams carry usage only when the request asks for it: the broker adds stream_options.include_usage, so a
+  // streamed call is always settled from its real usage (Chat Completions and the legacy Completions API)
+  const needsUsage = provider === 'openai' && stream && j.stream_options?.include_usage !== true;
+  return {
+    model, price, stream, needsUsage,
+    estimate: costOf(price, { input, output: out, cacheRead: 0, cacheWrite: 0 }),
+    unread: costOf(price, { input, output: Math.max(out, Math.max(limit ?? 0, UNREAD_OUTPUT_TOKENS) * choices), cacheRead: 0, cacheWrite: 0 }),
+  };
 }
 
 // ---------------------------------------------------------------- reading the answer

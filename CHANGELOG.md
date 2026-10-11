@@ -15,6 +15,22 @@ the self-hosted Worker change together with this repository (see [docs/DEPLOY.md
   spend in a few minutes. Alerts at 50%, 80% and 100%. Unknown models are never guessed. Every budget change needs a
   passkey. Migration `0014_budget_seal.sql` (two new tables). The public irreversible map is unchanged. See
   [docs/BUDGET_SEAL.md](docs/BUDGET_SEAL.md), including what it cannot cap, and [docs/CLOUD_KILL_SWITCH.md](docs/CLOUD_KILL_SWITCH.md).
+- **Guard: the Claude Code PowerShell tool is hooked** (Windows). `guard install` and the plugin add a `PowerShell`
+  matcher, and its text is read as PowerShell, not as bash. Run `counterseal guard install` again to add it.
+
+### Fixed (release gate, 10 Oct)
+
+- Guard: common Windows and WSL forms are read: glued cmd switches (`rd /s/q`, `rd/s/q`), `cmd/c`, `start`, cmd `for`
+  variables and `!delayed!` expansion, `call`, `forfiles`; module-qualified cmdlets, `~` in PowerShell, `iex`,
+  `& $var`, `Start-Process`, `Format-Volume`, `Clear-Disk`, FileSystemObject deletes; `wsl`, `wsl -e`, `wsl --`;
+  `find -exec rm {}` on a risky root without `-r`; `node22`, `ruby3.3` and similar names. Still a seatbelt, not a
+  sandbox: see docs/THREAT_MODEL.md for what it does not read.
+- Guard: an error inside the classifier now denies the call instead of letting it through.
+- Budget seal: metered OpenAI streams are sent with `stream_options.include_usage`, so they are settled from real usage;
+  a 2xx whose usage cannot be read is charged its ceiling, not the smaller estimate; the estimate counts every choice
+  (`n`) and assumes 32,768 output tokens when the request sets no limit; the unpriced allowance is per account, not per
+  token.
+- Alert channels: removing one needs a web session (passkey), never a command line session.
 
 ## 0.4.0 (2026-10-10)
 

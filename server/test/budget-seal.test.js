@@ -88,12 +88,12 @@ test('cost: tokens times the price per million, rounded up, in micro dollars; ca
   assert.equal(M.costOf([3, 15, null], { input: 0, output: 0, cacheRead: 1_000_000, cacheWrite: 0 }), 3_000_000, 'no cache price: input price');
 });
 
-test('estimate: input bytes over three plus the full output limit; no limit means 4096; odd limits are ignored', () => {
+test('estimate: input bytes over three plus the full output limit; no limit means DEFAULT_OUTPUT_TOKENS (32,768); odd limits are ignored', () => {
   const r = M.readRequest('openai', chat('gpt-4o', 1000), jsonView);
   assert.equal(r.model, 'gpt-4o');
   assert.equal(r.estimate, Math.ceil(Math.ceil(chat().length / 3) * 2.5) + 10000);
   const none = J({ model: 'gpt-4o', messages: [] });
-  assert.equal(M.readRequest('openai', none, jsonView).estimate, Math.ceil(Math.ceil(none.length / 3) * 2.5) + 4096 * 10);
+  assert.equal(M.readRequest('openai', none, jsonView).estimate, Math.ceil(Math.ceil(none.length / 3) * 2.5) + M.DEFAULT_OUTPUT_TOKENS * 10);
   for (const max of [-1, 0, 1.5, '100', 2e6]) assert.equal(M.readRequest('openai', J({ model: 'gpt-4o', max_tokens: max }), jsonView).estimate > 40000, true, String(max));
   assert.equal(M.readRequest('openai', J({ model: 'gpt-4o', max_completion_tokens: 10 }), jsonView).estimate < 1000, true);
   assert.equal(M.readRequest('openai', '{"model":"gpt-4o","model":"gpt-4o-mini"}', jsonView).model, null, 'a repeated key is unreadable');
@@ -264,7 +264,7 @@ test('the reservation is one atomic statement: 50 concurrent reservations fit th
   assert.ok(rows.every((r) => r.amount === ok * e), 'every total moved together: ' + J(rows));
 });
 
-test('a refusal (4xx) gives the reservation back; a 5xx and an answer without usage keep the estimate', async () => {
+test('a refusal (4xx) gives the reservation back; a 5xx keeps the estimate; an answer without usage is charged its ceiling', async () => {
   at(Date.UTC(2026, 9, 10, 12));
   const w = aiWorld();
   const { t } = await setup(w);
@@ -279,7 +279,7 @@ test('a refusal (4xx) gives the reservation back; a 5xx and an answer without us
   const r = await call(w, t.token);
   assert.equal(r.status, 200);
   assert.match(r.body, /DONE/, 'the agent gets the stream unchanged');
-  assert.equal(totals(w)['tok d:2026-10-10'], 2 * est(chat()));
+  assert.equal(totals(w)['tok d:2026-10-10'], est(chat()) + M.readRequest('openai', chat(), jsonView).unread, 'unread usage: charged the largest output it could have had (gate M1)');
 });
 
 test('a streamed answer is metered from its usage, and a real cost above the estimate is kept past the cap (as over)', async () => {
@@ -584,4 +584,49 @@ test('the docs say what it caps and what it cannot, with the price date; no dash
   assert.match(doc, /## What it cannot cap/);
   assert.match(doc, /Only calls that go through Counterseal/);
   assert.match(note, /not built/i);
+});
+
+// ---------------------------------------------------------------- release gate 10 Oct: M1, M2, M3
+test('gate M1: an OpenAI stream without stream_options is sent with include_usage, so it is settled from its real usage', async () => {
+  at(Date.UTC(2026, 9, 10, 12));
+  const w = aiWorld();
+  const { t } = await setup(w);
+  let sent = null;
+  w.answer = (url, init) => {
+    sent = JSON.parse(new TextDecoder().decode(init.body));
+    return new Response('data: {"choices":[{"delta":{"content":"x"}}]}\n\ndata: {"model":"o1-pro","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":100000}}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  };
+  const body = J({ model: 'o1-pro', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+  assert.equal((await call(w, t.token, body)).status, 200);
+  assert.deepEqual(sent.stream_options, { include_usage: true });
+  assert.equal(sent.model, 'o1-pro');
+  assert.equal(totals(w)['tok d:2026-10-10'], M.costOf([150, 600, null], { input: 10, output: 100000, cacheRead: 0, cacheWrite: 0 }), 'the real cost, not the estimate');
+  // a request that already asks for usage is sent as it is
+  const own = J({ model: 'gpt-4o', stream: true, stream_options: { include_usage: true }, max_tokens: 10, messages: [] });
+  assert.equal(M.readRequest('openai', own, jsonView).needsUsage, false);
+  assert.equal(M.readRequest('anthropic', J({ model: 'claude-opus-5-5', stream: true, max_tokens: 10 }), jsonView).needsUsage, false, 'Anthropic streams always carry usage');
+});
+
+test('gate M2: the estimate counts every choice (n), and an odd n is read as the most allowed', () => {
+  const one = M.readRequest('openai', J({ model: 'gpt-4o', max_tokens: 1000, messages: [] }), jsonView);
+  const many = M.readRequest('openai', J({ model: 'gpt-4o', max_tokens: 1000, n: 8, messages: [] }), jsonView);
+  assert.ok(many.estimate - one.estimate >= 7 * 1000 * 10 - 10, 'eight choices reserve eight outputs');
+  const odd = M.readRequest('openai', J({ model: 'gpt-4o', max_tokens: 10, n: '5', messages: [] }), jsonView);
+  assert.ok(odd.estimate >= M.MAX_CHOICES * 10 * 10, 'n that is not a plain number: the most choices');
+});
+
+test('gate M3: the unpriced allowance is per account, so minting another token does not buy more calls', async () => {
+  at(Date.UTC(2026, 9, 10, 12));
+  const w = aiWorld();
+  const { u, t } = await setup(w);
+  assert.equal((await setBudget(w, u, { scope: 'account', dailyCents: 100, unpricedPerDay: 2 })).status, 200);
+  const t2 = await mint(w, u, {});
+  assert.equal((await call(w, t.token, chat('gpt-4o-2024-08-06'))).status, 200);
+  assert.equal((await call(w, t2.token, chat('gpt-4o-2024-08-06'))).status, 200);
+  const h = await call(w, t2.token, chat('gpt-4o-2024-08-06'));
+  assert.equal(h.status, 428);
+  assert.match(h.body.message, /This account has used its 2 unpriced calls/);
+  // a trailing slash is the same metered path, so it is priced, not unpriced
+  assert.equal((await call(w, t.token, chat('gpt-4o', 10), '/v1/chat/completions/')).status, 200);
+  assert.ok(totals(w)['acct d:2026-10-10'] > 0, 'priced and reserved');
 });
