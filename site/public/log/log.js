@@ -55,7 +55,7 @@ async function since() {
         out.className = 'verdict ok'; out.textContent = `CONSISTENT\nOn your last visit the log had ${last.size} entries. It now has ${head.size}, and the consistency proof (${p.consistency_proof.length} hashes) shows every earlier entry is still there, unchanged.`;
       }
     } catch (e) {
-      out.className = 'verdict bad'; out.textContent = `NOT CONSISTENT\n${e.message}\nThe checkpoint your browser kept and today's head do not fit together. Keep both and report it to security@gautamkhosla.com.`;
+      out.className = 'verdict bad'; out.textContent = `NOT CONSISTENT\n${e.message}\nThe checkpoint your browser kept and today's head do not fit together. Keep both and report it to developwith.gt@gmail.com.`;
       return; // keep the old checkpoint as evidence
     }
   } else if (last && last.key !== key) {

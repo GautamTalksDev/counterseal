@@ -35,7 +35,7 @@ export async function publicKey(env) {
 async function vapidHeader(env, k, endpoint) {
   const enc = (o) => b64u(new TextEncoder().encode(JSON.stringify(o)));
   const aud = new URL(endpoint).origin;
-  const body = `${enc({ typ: 'JWT', alg: 'ES256' })}.${enc({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: env.VAPID_SUBJECT || 'mailto:security@gautamkhosla.com' })}`;
+  const body = `${enc({ typ: 'JWT', alg: 'ES256' })}.${enc({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: env.VAPID_SUBJECT || 'mailto:developwith.gt@gmail.com' })}`;
   const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, k.priv, new TextEncoder().encode(body));
   return `vapid t=${body}.${b64u(sig)}, k=${k.pub}`;
 }

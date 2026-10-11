@@ -40,9 +40,9 @@ export function wardenState(x = {}) {
   if (tripped) return { state: 'tripped', badge: 'BREAKER TRIPPED', lead: 'Breaker ', hot: 'tripped', tail: '.', sub: 'A token went past its limits. Its writes wait for you; reads still pass. Reset it with your passkey.' };
   const pct = topPct(x.budget);
   const capHeld = holds.some((h) => h.rule === 'budget.cap');
-  if ((pct !== null && pct >= 100) || capHeld) return { state: 'cap', badge: 'CAP HIT', lead: 'Spend ', hot: 'stopped', tail: ' at the cap.', sub: 'The next AI model call through Counterseal is stopped before it is sent, until the cap resets or you raise it.' };
+  if ((pct !== null && pct >= 100) || capHeld) return { state: 'cap', badge: 'CAP HIT', lead: 'Spend ', hot: 'stopped', tail: ' at the cap.', sub: 'The next AI model call through Counterseal is stopped before it is sent, until the cap resets or you raise it. Calls already in flight can still finish.' };
   if (holds.length) return { state: 'held', badge: 'CALL HELD', lead: '', hot: n(holds.length, 'call', 'calls'), tail: ' held for you.', sub: 'Irreversible calls wait for your passkey.' };
-  if (pct !== null && pct >= 80) return { state: 'spend80', badge: `SPEND ${Math.min(pct, 99)}%`, lead: 'Spend at ', hot: `${Math.min(pct, 99)}%`, tail: ' of a cap.', sub: 'Calls still go through. At the cap the next one is stopped before it is sent.' };
+  if (pct !== null && pct >= 80) return { state: 'spend80', badge: `SPEND ${Math.min(pct, 99)}%`, lead: 'Spend at ', hot: `${Math.min(pct, 99)}%`, tail: ' of a cap.', sub: 'Calls still go through. At the cap the next one is stopped before it is sent; calls in flight can still finish.' };
   if (x.approvedAt && now - x.approvedAt >= 0 && now - x.approvedAt < APPROVED_MS) return { state: 'approved', badge: 'APPROVED', lead: 'Sealed. ', hot: 'Approved', tail: '.', sub: 'The agent can retry that exact request once.' };
-  return { state: 'calm', badge: 'ALL CLEAR', lead: '', hot: 'All clear', tail: '.', sub: 'Agents are working. Anything they cannot take back waits for your passkey.' };
+  return { state: 'calm', badge: 'ALL CLEAR', lead: '', hot: 'All clear', tail: '.', sub: 'Agents are working. Anything on the irreversible map waits for your passkey.' };
 }

@@ -118,7 +118,7 @@ test('the manifest makes an installable app: name, standalone, scope, every icon
 test('security.txt is valid (RFC 9116): contact, an Expires in the future and under a year away, canonical, policy', async () => {
   const { SECURITY_TXT } = await import('../src/index.js');
   const t = SECURITY_TXT({ ORIGIN: 'https://counterseal.gautamkhosla.com', RP_ID: 'counterseal.gautamkhosla.com' });
-  assert.match(t, /^Contact: mailto:security@gautamkhosla\.com$/m);
+  assert.match(t, /^Contact: mailto:developwith\.gt@gmail\.com$/m);
   const exp = Date.parse(/^Expires: (.+)$/m.exec(t)[1]);
   assert.ok(exp > Date.now() + 30 * 86_400_000, 'Expires is more than 30 days away (move it a year forward: docs/RELEASE.md)');
   assert.ok(exp < Date.now() + 366 * 86_400_000, 'RFC 9116 recommends less than a year');

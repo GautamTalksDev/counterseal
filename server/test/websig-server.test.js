@@ -16,7 +16,7 @@ test('/.well-known serves security.txt and 404s the rest; the Worker publishes n
   const w = new World();
   const st = await w.req('GET', '/.well-known/security.txt', anon);
   assert.equal(st.status, 200);
-  assert.match(st.body, /Contact: mailto:security@gautamkhosla\.com/);
+  assert.match(st.body, /Contact: mailto:developwith\.gt@gmail\.com/);
   assert.match(st.body, /Canonical: https:\/\/leash\.test\/\.well-known\/security\.txt/);
   assert.equal((await w.req('GET', DIR, anon)).status, 404);
   assert.equal((await w.req('POST', '/.well-known/security.txt', anon)).status, 405);

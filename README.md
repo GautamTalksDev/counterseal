@@ -4,7 +4,7 @@
 
 ### Every irreversible action gets a second seal.
 
-**Your AI agent never holds a real API key, and anything it cannot take back waits for your passkey.**
+**For calls through Counterseal, your AI agent never holds a real API key, and anything on the irreversible map waits for your passkey.**
 
 [Website](https://counterseal.gautamkhosla.com) · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Limits](#honest-limits) · [Security](SECURITY.md) · [Self-hosting](docs/DEPLOY.md) · [Full guide](docs/GUIDE.md)
 

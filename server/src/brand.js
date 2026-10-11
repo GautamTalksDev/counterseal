@@ -34,9 +34,9 @@ export const BRAND = {
   repo: 'https://github.com/GautamTalksDev/counterseal',
   owner: 'Gautam Khosla',
   city: 'Ottawa',
-  security: 'security@gautamkhosla.com',
-  privacy: 'privacy@gautamkhosla.com',
-  hello: 'hello@gautamkhosla.com',
+  security: 'developwith.gt@gmail.com',
+  privacy: 'developwith.gt@gmail.com',
+  hello: 'developwith.gt@gmail.com',
 };
 
 // The public log's name, signed into every checkpoint. It is NOT renamed with the brand: once the log has its first

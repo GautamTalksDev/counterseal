@@ -148,7 +148,7 @@
         <article class="wcard w-hero" id="wHero" data-state="calm">
           <div class="w-top"><span class="w-duty mono">WARDEN IS ON DUTY</span><span id="wBadge" class="w-badge mono">ALL CLEAR</span></div>
           <div class="w-stage"><img id="wImg" class="w-img" src="/media/warden/calm.png" width="320" height="320" alt="The Warden, a ceramic seal, stands calm with a green wax seal on its belly." decoding="async"></div>
-          <div class="w-copy" aria-live="polite"><h2 class="w-title"><span id="wLead"></span><span id="wHot" class="w-hot">All clear</span><span id="wTail">.</span></h2><p id="wSub" class="dim">Agents are working. Anything they cannot take back waits for your passkey.</p></div>
+          <div class="w-copy" aria-live="polite"><h2 class="w-title"><span id="wLead"></span><span id="wHot" class="w-hot">All clear</span><span id="wTail">.</span></h2><p id="wSub" class="dim">Agents are working. Anything on the irreversible map waits for your passkey.</p></div>
         </article>
         <article class="wcard w-spend" aria-labelledby="wSpendTitle">
           <h3 id="wSpendTitle">Spend vs cap, today</h3>
@@ -295,7 +295,7 @@
     </section>
 
     <section class="view" data-view="budget" id="budget" hidden>
-      <header class="vh"><div><h1>Budget seal</h1><p class="dim">Hard spend caps on the AI model calls your agents make through Counterseal. At a cap the next call is stopped before it is sent.</p></div></header>
+      <header class="vh"><div><h1>Budget seal</h1><p class="dim">Spend limits on the AI model calls your agents make through Counterseal, best effort on streaming. At a cap the next call is stopped before it is sent; calls already in flight can still finish and pass the cap.</p></div></header>
       <div class="panel">
         <div id="budgetList" class="list"></div>
         <p class="empty-row dim" id="noBudget">Add an OpenAI or Anthropic key to the vault and give your agent a token for it. Its spend shows here.</p>
@@ -533,7 +533,7 @@
         <h3>Download all my data</h3>
         <p class="dim small">One JSON file with everything Counterseal keeps about this account: settings, people and roles, passkeys (as fingerprints), sessions, vault entries (names and dates, never a key or any part of one), tokens and their policies, keys (labels and dates, never the key), every held request and command still kept, seals, invites, which push services your devices use (never the push address), counters and the whole audit log. Your passkey confirms it; 3 times an hour; it is written to the audit log.</p>
         <div class="actions" data-need="owner"><button id="dlAll" class="btn pri" type="button">Download with passkey</button></div>
-        <p class="dim small" id="dlOwner" data-need-not="owner">Only an owner of this account can download all of it. Ask an owner, or write to privacy@gautamkhosla.com.</p>
+        <p class="dim small" id="dlOwner" data-need-not="owner">Only an owner of this account can download all of it. Ask an owner, or write to developwith.gt@gmail.com.</p>
         <p class="dim small" id="dlState" role="status"></p>
       </div>
       <div class="panel form">

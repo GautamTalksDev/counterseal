@@ -74,7 +74,7 @@
   <p>The Processor gives the Controller the information it reasonably needs for security, breach notification, data protection impact assessments and prior consultation, mostly through the documentation already public (the <a href="/security/">security page</a>, the threat model and the protocol in the source repository) and [at the Controller's cost for anything beyond that].</p>
 
   <h2 id="end">10. Return and deletion at the end (Art. 28(3)(g))</h2>
-  <p>Before the end, the Controller can download all its data (section 7) and the evidence pack (Audit log, Evidence pack). Deleting the account in the app erases at once the account, its people, passkeys, vault, tokens, keys, holds, sessions, alert devices, rate limit counters and the audit log, and unlinks its public log entries so nothing on the Processor's side says whose they were. Two things remain, by design, and the Controller accepts them: <strong>public log entries already published</strong> stay in the append-only public log (they hold no name, path, body, key, token or IP address); and <strong>database backups</strong> kept by the subprocessor roll off within 30 days.</p>
+  <p>Before the end, the Controller can download all its data (section 7) and the evidence pack (Audit log, Evidence pack). Deleting the account in the app erases at once the account, its people, passkeys, vault, tokens, keys, holds, sessions, alert devices, rate limit counters and the audit log, and unlinks its public log entries so nothing on the Processor's side says whose they were. Two things remain, by design, and the Controller accepts them: <strong>public log entries already published</strong> stay in the append-only public log (they hold no name, path, body, key, token or IP address); and <strong>backups of the database and log storage</strong> kept by the subprocessor roll off within 30 days.</p>
 
   <h2 id="audit">11. Information and audits (Art. 28(3)(h))</h2>
   <p>The Processor makes available the information needed to show it meets this agreement: this agreement, the security self-assessment, and the service's source code, tests and threat model in its public repository. [Once a year, on 30 days' written notice, at the Controller's cost,] the Controller or an independent auditor bound to confidentiality may audit further, in a way that does not expose other customers' data or the service's secrets.</p>
@@ -88,7 +88,8 @@
   <h2 id="annex">Annex 1: data subjects and data</h2>
   <ul>
     <li><strong>People on the Controller's account</strong> (its owner and team members): name as typed, role, passkey public keys and their fingerprints, sessions, coarse place (country and network name) of command line sign-ins, seals they give, alert devices' push addresses if they turn alerts on.</li>
-    <li><strong>Anyone whose data appears in the Controller's agents' requests or commands</strong> (for example a customer whose refund an agent asks for, or a name in a command): only in the preview of a held request (dropped a day after it closes), a held command (kept with its hold, 365 days by default, 30 or 90 if the owner chooses), the private audit log's path field (first 300 characters), and, for a Stripe call let through by a money cap, its amount and charge id in the private audit log. Never in a public receipt.</li>
+    <li><strong>Anyone whose data appears in the Controller's agents' requests or commands</strong> (for example a customer whose refund an agent asks for, or a name in a command): only in the preview of a held request (dropped a day after it closes), a held command (its exact text dropped a day after the hold closes; the guard's summary of it, and the method, host and path of a held request, kept with the hold, 365 days by default, 30 or 90 if the owner chooses), the private audit log's path field (first 300 characters), and, for a Stripe call let through by a money cap, its amount and charge id in the private audit log. Never in a public receipt.</li>
+    <li><strong>Budget seal</strong> (if the Controller sets caps): the caps and the spend totals per token or account (daily totals kept 35 days, monthly totals about 13 months), and audit entries when a cap changes, a call is stopped or an alert fires. The broker reads only the usage figures in AI provider responses (OpenAI, Anthropic); prompts and answers pass through and are not kept.</li>
     <li>No special categories of data are needed or asked for. The Controller should not send them in agent requests that will be held.</li>
   </ul>
   <h2>Annex 2: technical and organisational measures</h2>
@@ -103,13 +104,13 @@
     <li>Request logs off (Workers Logs disabled); IP addresses kept only as salted hashes for rate limiting, for a day at most.</li>
     <li>An automated test suite for every security rule, run in continuous integration; a public threat model; a security contact in <code>/.well-known/security.txt</code>.</li>
   </ul>
-  <p>Contact for this agreement: <a href="mailto:privacy@gautamkhosla.com">privacy@gautamkhosla.com</a>.</p>
+  <p>Contact for this agreement: <a href="mailto:developwith.gt@gmail.com">developwith.gt@gmail.com</a>.</p>
 </article>
 </main>
 <footer class="foot">
   <div class="foot-in">
     <a class="brand" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="ring"/><circle cx="12" cy="12" r="5.2" class="ring2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
-    <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/security/standards/">Standards</a><a href="/privacy/">Privacy</a><a href="/privacy/subprocessors/">Subprocessors</a><a href="/privacy/dpa/">DPA template</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/counterseal" rel="noopener noreferrer">GitHub</a><a href="mailto:hello@gautamkhosla.com">Contact</a></nav>
+    <nav class="foot-links" aria-label="Footer"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/tools/web-bot-auth/">Signature checker</a><a href="/security/">Security</a><a href="/security/standards/">Standards</a><a href="/privacy/">Privacy</a><a href="/privacy/subprocessors/">Subprocessors</a><a href="/privacy/dpa/">DPA template</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/counterseal" rel="noopener noreferrer">GitHub</a><a href="mailto:developwith.gt@gmail.com">Contact</a></nav>
     <span class="muted">By Gautam Khosla, Ottawa. Not affiliated with GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend or Shopify.</span>
   </div>
 </footer>

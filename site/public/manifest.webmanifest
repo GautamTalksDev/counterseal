@@ -2,7 +2,7 @@
   "id": "/app",
   "name": "Counterseal",
   "short_name": "Counterseal",
-  "description": "Approve what your AI agents cannot take back, with your passkey. The Warden keeps watch.",
+  "description": "Approve the irreversible calls your AI agents make through Counterseal, with your passkey. The Warden keeps watch.",
   "lang": "en",
   "dir": "ltr",
   "start_url": "/app",

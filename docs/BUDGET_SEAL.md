@@ -1,6 +1,6 @@
 # Budget seal
 
-Hard spend caps on the AI model calls your agents make through Counterseal. Status: built on branch `budget-seal`,
+Spend limits on the AI model calls your agents make through Counterseal, best effort on streaming. Status: built on branch `budget-seal`,
 not deployed, not merged.
 
 Providers send budget alerts, often hours late. They do not stop the next call. Counterseal already sits between the
@@ -49,7 +49,7 @@ owner or approver in the web app. A command line session cannot change a budget.
    estimate stays). A refusal (4xx) gives the reservation back. A 5xx or an answer whose usage cannot be read keeps the
    estimate, because the call may have run.
 4. If the real cost is above the estimate (the provider ran longer than the request allowed), the true total is kept
-   (`over`). It can pass the cap by that one call. Nothing more goes after it.
+   (`over`). It can pass the cap by that call and by every other call already in flight. Nothing new goes after it.
 
 ## Prices
 

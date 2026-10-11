@@ -5,7 +5,7 @@ protects them. The full threat model is in [docs/THREAT_MODEL.md](docs/THREAT_MO
 
 ## Reporting a vulnerability
 
-Email **security@gautamkhosla.com** or open a [private advisory on GitHub](https://github.com/GautamTalksDev/counterseal/security/advisories/new) (Security tab, "Report a vulnerability").
+Email **developwith.gt@gmail.com** or open a [private advisory on GitHub](https://github.com/GautamTalksDev/counterseal/security/advisories/new) (Security tab, "Report a vulnerability").
 Please do not open a public issue. You will get a reply within 7 days. Good-faith research is welcome; do not access
 other people's data or degrade the service. `/.well-known/security.txt` carries the same contact.
 
