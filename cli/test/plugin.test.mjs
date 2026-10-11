@@ -26,11 +26,11 @@ test('plugin.json follows the Claude Code plugin format', () => {
   assert.ok(!existsSync(join(PLUGIN, '.claude-plugin', 'hooks')), 'only the manifest lives in .claude-plugin');
 });
 
-test('hooks.json: PreToolUse on Bash and on MCP tools, exec form, pinned copy (no npx), long timeout, fail closed', () => {
+test('hooks.json: PreToolUse on Bash, PowerShell and MCP tools, exec form, pinned copy (no npx), long timeout, fail closed', () => {
   const h = rj('plugins/counterseal/hooks/hooks.json');
   assert.ok(h.description);
   const groups = h.hooks.PreToolUse;
-  assert.deepEqual(groups.map((g) => g.matcher), ['Bash', 'mcp__.*']);
+  assert.deepEqual(groups.map((g) => g.matcher), ['Bash', 'PowerShell', 'mcp__.*']);
   for (const g of groups) {
     assert.equal(g.hooks.length, 1);
     const x = g.hooks[0];

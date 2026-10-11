@@ -1,5 +1,5 @@
 {
-  "description": "Counterseal guard: holds irreversible shell commands and MCP tool calls until you approve them with a passkey",
+  "description": "Counterseal guard: holds irreversible shell commands (Bash and PowerShell) and MCP tool calls until you approve them with a passkey",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,7 +8,30 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/guard.mjs", "hook", "--agent", "claude-code"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/guard.mjs",
+              "hook",
+              "--agent",
+              "claude-code"
+            ],
+            "timeout": 660,
+            "onFailure": "block",
+            "statusMessage": "Counterseal guard"
+          }
+        ]
+      },
+      {
+        "matcher": "PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/guard.mjs",
+              "hook",
+              "--agent",
+              "claude-code"
+            ],
             "timeout": 660,
             "onFailure": "block",
             "statusMessage": "Counterseal guard"
@@ -21,7 +44,12 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/guard.mjs", "hook", "--agent", "claude-code"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/guard.mjs",
+              "hook",
+              "--agent",
+              "claude-code"
+            ],
             "timeout": 660,
             "onFailure": "block",
             "statusMessage": "Counterseal guard"

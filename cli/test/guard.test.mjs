@@ -532,7 +532,7 @@ test('install: mints a key with the CLI sign-in, writes the config (600), copies
   assert.deepEqual(cs.hooks.Stop, [{ hooks: [{ type: 'command', command: 'echo done' }] }]);
   assert.equal(cs.hooks.PreToolUse[0].matcher, 'Edit');
   const ours = cs.hooks.PreToolUse.slice(1);
-  assert.deepEqual(ours.map((x) => x.matcher), ['Bash', 'mcp__.*']);
+  assert.deepEqual(ours.map((x) => x.matcher), ['Bash', 'PowerShell', 'mcp__.*']);
   const { command, args, ...h } = ours[0].hooks[0];
   assert.deepEqual(h, { type: 'command', timeout: 660, onFailure: 'block', statusMessage: 'Counterseal guard' });
   assert.equal(command, process.execPath);
@@ -798,4 +798,19 @@ test('no em or en dash, and no brand names that are retired, in the guard files'
     const text = readFileSync(new URL(f, import.meta.url), 'utf8');
     assert.ok(!/[\u2013\u2014]/.test(text), `${f} has a dash character`);
   }
+});
+
+// release gate 10 Oct, H1: the Claude Code PowerShell tool is read as PowerShell
+test('the Claude Code PowerShell tool is guarded and read as PowerShell, not as bash', async () => {
+  const ps = (command) => JSON.stringify({ session_id: 'abc123', cwd: '/home/u/proj', hook_event_name: 'PreToolUse', tool_name: 'PowerShell', tool_input: { command } });
+  const c = readCall('claude-code', ps('Remove-Item C:\\ -Recurse -Force'));
+  assert.equal(c.kind, 'shell');
+  assert.equal(c.shell, 'ps');
+  const t = await setup();
+  const ok = await hook(t, 'claude-code', ps('Get-ChildItem; git status'));
+  assert.deepEqual(ok, { code: 0, stdout: '', stderr: '' });
+  const approved = t.stub.approveWhenAsked();
+  await hook(t, 'claude-code', ps('Remove-Item C:\\ -Recurse -Force'));
+  await approved;
+  assert.equal(t.stub.state.log[0].body.rule, 'sh.win-delete', 'the PowerShell delete went to a person');
 });

@@ -39,7 +39,7 @@ test('the vector table: every held command is held by the named rule, every othe
   const V = vectors();
   for (const v of V) {
     let r;
-    try { r = classify(v.cmd, OPT); } catch (e) { bad.push(`line ${v.line}: threw ${e.stack.split('\n').slice(0, 3).join(' | ')}: ${v.cmd}`); continue; }
+    try { r = v.cmd.startsWith('@ps ') ? classify(v.cmd.slice(4), { ...OPT, shell: 'ps' }) : classify(v.cmd, OPT); } catch (e) { bad.push(`line ${v.line}: threw ${e.stack.split('\n').slice(0, 3).join(' | ')}: ${v.cmd}`); continue; }
     if (v.kind === 'HOLD') {
       if (!r.hits.some((h) => h.rule === v.rule)) bad.push(`line ${v.line}: expected ${v.rule}, got ${r.hits.map((h) => h.rule).join(',') || 'pass'}: ${JSON.stringify(v.cmd)}`);
     } else if (r.hold) bad.push(`line ${v.line}: expected pass, held by ${r.hits.map((h) => h.rule + ' (' + h.why + ')').join(', ')}: ${JSON.stringify(v.cmd)}`);

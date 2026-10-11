@@ -1209,6 +1209,8 @@ function runExec(argv, cx, st) {
   for (let hop = 0; argv.length && hop < MAX_HOPS; hop++) {
     const w0 = argv[0];
     if (!w0.lit || w0.glob) { dynamicProgram(argv, st); return; }
+    const glued = /^((?:.*[\\/])?cmd(?:\.exe)?)(\/[\s\S]+)$/i.exec(w0.s); // cmd/c rd ...
+    if (glued) { argv = [{ ...w0, s: glued[1], raw: glued[1] }, { ...w0, s: glued[2], raw: glued[2] }, ...argv.slice(1)]; continue; }
     const prog = progName(w0.s);
     if (st.aliases.has(prog) && !cx.aliased) { cx = { ...cx, aliased: true }; argv = [...st.aliases.get(prog), ...argv.slice(1)]; continue; }
     const cx2 = { ...cx, prog, argv, args: argv.slice(1), st };
@@ -2523,6 +2525,9 @@ function findRule(cx) {
     // {} stands for what find found: below the roots when a test narrows it, otherwise everything including the roots
     const found = (r) => (!r.lit ? { s: SENT, lit: false, glob: false, raw: '{}' } : tests.length ? { s: r.s + '/' + SENT, lit: false, glob: false, raw: '{}', under: r.s } : { ...r, raw: '{}' });
     const inner = expr.slice(k + 1, e).map((w) => (w.s === '{}' ? found(roots[0]) : w));
+    if (inner.length && inner[0].lit && /^(rm|unlink|shred)$/.test(progName(inner[0].s)) && expr.slice(k + 1, e).some((w) => w.s === '{}')) {
+      for (const r of roots) { const risk = pathRisk(underRoot(r), st); if (risk) return `find ${expr[k].s} ${progName(inner[0].s)} removes files in ${risk}.`; }
+    }
     if (inner.length) runExec(inner, { stdin: { kind: 'none' }, redirs: [] }, fork(st));
     k = e;
   }
@@ -2535,7 +2540,7 @@ function findRule(cx) {
 // backticks are read as shell text.
 const INLINE_MAX = 65_536;
 const argvText = (cx) => (cx.argv || []).map((w) => w.raw ?? w.s).join(' ');
-const inlineLang = (prog) => (/^(python[0-9.]*|py|pypy[0-9.]*)$/.test(prog) ? 'python' : ['node', 'nodejs', 'bun'].includes(prog) ? 'node' : ['ruby', 'perl', 'php'].includes(prog) ? prog : null);
+const inlineLang = (prog) => { prog = prog.replace(/^(node|nodejs|ruby|perl|php)[0-9][0-9.]*$/, '$1'); return /^(python[0-9.]*|py|pypy[0-9.]*)$/.test(prog) ? 'python' : ['node', 'nodejs', 'bun'].includes(prog) ? 'node' : ['ruby', 'perl', 'php'].includes(prog) ? prog : null; };
 const NODE_VAL = OPT_SET('-r --require --import --loader --experimental-loader -C --conditions --env-file --title --stack-size');
 /** the inline code pieces a command line runs, as text (empty when it runs a script file, a module or nothing known) */
 function inlineCode(lang, args, cx) {
@@ -2739,7 +2744,7 @@ function winStatements(text, ps, out = [], nest = 0) {
     else add(SENT, false);
     return i + m[0].length;
   };
-  const cmdVar = (i) => { CMD_VAR.lastIndex = i; const m = CMD_VAR.exec(text); if (!m) { add('%'); return i; } if (/^(temp|tmp)$/i.test(m[1])) add('%TEMP%'); else add(SENT, false); return i + m[0].length - 1; };
+  const cmdVar = (i) => { CMD_VAR.lastIndex = i; const m = CMD_VAR.exec(text); if (!m) { const f = /%%?[A-Za-z]/y; f.lastIndex = i; const fm = f.exec(text); if (fm) { add(SENT, false); return i + fm[0].length - 1; } add('%'); return i; } if (/^(temp|tmp)$/i.test(m[1])) add('%TEMP%'); else add(SENT, false); return i + m[0].length - 1; };
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (c === SENT) { add(c, false); continue; }
@@ -2764,9 +2769,10 @@ function winStatements(text, ps, out = [], nest = 0) {
       }
     } else {
       if (c === '^') { add(text[i + 1] ?? ''); i++; continue; }
+      if (c === '!') { const e = text.indexOf('!', i + 1); if (e > i + 1 && /^[A-Za-z_]\w*$/.test(text.slice(i + 1, e))) { add(SENT, false); i = e; continue; } }
       if (c === '%') { i = cmdVar(i); continue; }
       if (c === '(' || c === ')') { end(false); continue; }
-      if (c === '"') { w ??= ''; let j = i + 1; for (; j < text.length && text[j] !== '"'; j++) { if (text[j] === '%') j = cmdVar(j); else add(text[j], text[j] !== SENT); } i = j; continue; }
+      if (c === '"') { w ??= ''; let j = i + 1; for (; j < text.length && text[j] !== '"'; j++) { if (text[j] === '%') j = cmdVar(j); else if (text[j] === '!' && /^![A-Za-z_]\w*!/.test(text.slice(j))) { const e = text.indexOf('!', j + 1); add(SENT, false); j = e; } else add(text[j], text[j] !== SENT); } i = j; continue; }
     }
     add(c);
   }
@@ -2795,10 +2801,66 @@ function winScript(text, st, ps, label) {
       if (r) hit(s2, 'sh.win-delete', `[IO.Directory]::Delete with $true recursively deletes ${r}.`, m[0] + inside + ')');
     }
   }
-  for (const { words, piped, pipedRec } of winStatements(text, ps)) {
-    if (ps && words[0].lit && PS_ALIAS_RM.has(lc(words[0].s))) words[0] = { ...words[0], s: 'Remove-Item' };
-    runExec(words, { stdin: piped ? { kind: 'pipe', names: [], rec: pipedRec } : { kind: 'none' }, redirs: [], shell: ps ? 'ps' : 'cmd' }, s2);
+  for (let { words, piped, pipedRec } of winStatements(text, ps)) {
+    winStatement(words, piped, pipedRec, ps, s2, text);
   }
+}
+const PS_DISK = new Set(['format-volume', 'clear-disk', 'initialize-disk', 'remove-partition', 'reset-physicaldisk']);
+const WIN_DANGER = /^(\/s|\/q|-r(e(c(u(r(se?)?)?)?)?)?|-force)$/i;
+/** one PowerShell or cmd statement: the wrappers of those shells, then the map */
+function winStatement(words, piped, pipedRec, ps, st, text) {
+  for (let hop = 0; words.length && hop < 6; hop++) {
+    const w0 = words[0];
+    if (!w0.lit) { // the program is a value: & $r, !a!!b!, %X%
+      if (words.some((x) => x.lit && (WIN_DANGER.test(x.s) || /\b(remove|rd|rmdir|del|erase|format|delete)\b/i.test(x.s)))) {
+        hit(st, 'sh.dynamic-program', 'The program to run is built at run time (a variable or a substitution) in a command with a dangerous word in it, so the guard cannot tell what it does.', words.map((x) => x.raw ?? x.s).join(' '));
+      } else dynamicProgram(words, st);
+      return;
+    }
+    const l = lc(w0.s);
+    if (ps) {
+      const q = /^[A-Za-z][\w.]*\\(.+)$/.exec(w0.s); // Microsoft.PowerShell.Management\Remove-Item
+      if (q && !/^[A-Za-z]:/.test(w0.s)) { words = [{ ...w0, s: q[1], raw: q[1] }, ...words.slice(1)]; continue; }
+      if (l === '&' || l === '.') { words = words.slice(1); continue; }
+      if (PS_ALIAS_RM.has(l)) words = [{ ...w0, s: 'Remove-Item' }, ...words.slice(1)];
+      if (PS_DISK.has(l)) { hit(st, 'sh.disk', 'Formats or wipes a disk or partition.', words.map((x) => x.raw ?? x.s).join(' ')); return; }
+      if (l === 'iex' || l === 'invoke-expression') {
+        const arg = words.slice(1).find((x) => !/^-/.test(x.s) || !x.lit);
+        if (arg && arg.lit) winScript(arg.s, st, true, 'Invoke-Expression');
+        else hit(st, 'sh.dynamic-program', 'Invoke-Expression runs text built at run time, so the guard cannot tell what it does.', words.map((x) => x.raw ?? x.s).join(' '));
+        return;
+      }
+      if (/-comobject/i.test(words.map((x) => x.s).join(' ')) && /delete(folder|file)/i.test(text)) { hit(st, 'sh.win-delete', 'A COM object (Scripting.FileSystemObject) deletes files or folders.', words.map((x) => x.raw ?? x.s).join(' ')); }
+      if (l === 'start-process' || l === 'saps' || l === 'start') {
+        let file = null, args = [];
+        for (let i = 1; i < words.length; i++) {
+          const m = words[i].lit && /^-([A-Za-z]+)$/.exec(words[i].s);
+          if (m) {
+            const n = m[1].toLowerCase();
+            if (psParam(n, 'filepath', 1)) { file = words[++i]; continue; }
+            if (psParam(n, 'argumentlist', 1) || n === 'args') { const v = words[++i]; if (v) args.push(...(v.lit ? v.s.split(/[\s,]+/).filter(Boolean).map((x) => ({ s: x, lit: true, glob: false, raw: x })) : [v])); continue; }
+            if (/^(wait|nonewwindow|passthru|noprofile|usenewenvironment)$/.test(n)) continue;
+            i++; continue;
+          }
+          if (!file) file = words[i]; else if (!args.length) args.push(...(words[i].lit ? words[i].s.split(/[\s,]+/).filter(Boolean).map((x) => ({ s: x, lit: true, glob: false, raw: x })) : [words[i]]));
+        }
+        if (!file) return;
+        words = [file, ...args]; continue;
+      }
+      if (w0.s === '~' || /^~[\\/]/.test(w0.s)) break;
+    } else {
+      if (l === 'do' || l === 'call' || l === '@') { words = words.slice(1); continue; }
+      const g = /^([A-Za-z]+)(\/[\s\S]*)$/.exec(w0.s); // rd/s/q
+      if (g) { words = [{ ...w0, s: g[1], raw: g[1] }, { ...w0, s: g[2], raw: g[2] }, ...words.slice(1)]; continue; }
+    }
+    break;
+  }
+  if (!words.length) return;
+  // ~ is the home directory in PowerShell
+  if (ps && st.o.home) words = words.map((x) => (x.lit && (x.s === '~' || /^~[\\/]/.test(x.s)) ? { ...x, s: st.o.home + x.s.slice(1).replace(/\\/g, '/') } : x));
+  // glued cmd switches: /s/q
+  words = words.flatMap((x, i) => (i && x.lit && /^(\/[A-Za-z](:[^/\s]*)?){2,}$/.test(x.s) ? x.s.match(/\/[A-Za-z](:[^/\s]*)?/g).map((p) => ({ ...x, s: p, raw: p })) : [x]));
+  runExec(words, { stdin: piped ? { kind: 'pipe', names: [], rec: pipedRec } : { kind: 'none' }, redirs: [], shell: ps ? 'ps' : 'cmd' }, st);
 }
 const PS_VALS = [['executionpolicy', 2], ['ep', 2], ['windowstyle', 1], ['version', 1], ['inputformat', 1], ['outputformat', 1], ['configurationname', 4], ['workingdirectory', 2], ['wd', 2], ['psconsolefile', 2], ['settingsfile', 2], ['custompipename', 2]];
 UNWRAP.powershell = UNWRAP.pwsh = UNWRAP.powershell_ise = (a, cx, st) => {
@@ -2834,6 +2896,32 @@ UNWRAP.cmd = (a, cx, st) => {
   }
   return null;
 };
+UNWRAP.start = (a) => { // start [/b /min /wait /d dir "title"] cmd ...
+  let i = 0;
+  while (i < a.length && /^\//.test(a[i].s)) { if (/^\/d$/i.test(a[i].s)) i++; i++; }
+  return cmdAfter(a, i);
+};
+const WSL_VAL = OPT_SET('-d --distribution -u --user --cd --distribution-id');
+UNWRAP.wsl = (a) => {
+  let i = 0;
+  for (; i < a.length; i++) {
+    const s = a[i].s;
+    if (s === '-e' || s === '--exec') return cmdAfter(a, i + 1);
+    if (s === '--') return cmdAfter(a, i + 1);
+    if (WSL_VAL.has(s)) { i++; continue; }
+    if (/^--?[A-Za-z]/.test(s)) { if (/^--(install|list|shutdown|terminate|unregister|export|import|mount|unmount|status|update|set-default|set-version|help|version)/.test(s) || /^-(l|t|s)$/.test(s)) return null; continue; }
+    break;
+  }
+  return cmdAfter(a, i); // wsl runs the rest as a command line in the default shell
+};
+UNWRAP.forfiles = (a, cx, st) => {
+  let root = { s: '.', lit: true, glob: false, raw: '.' }, cmd = null;
+  for (let i = 0; i < a.length; i++) { if (/^\/p$/i.test(a[i].s)) root = a[++i] ?? root; else if (/^\/c$/i.test(a[i].s)) cmd = a[++i]; }
+  if (!cmd || !/\b(del|erase|rd|rmdir|remove-item|ri)\b/i.test(cmd.s)) return null;
+  const r = pathRisk(root.lit ? { s: root.s + '/' + SENT, lit: false, glob: false, raw: root.raw, under: root.s } : root, st);
+  if (r) hit(st, 'sh.win-delete', `forfiles runs a delete on every file in ${r}.`, argvText(cx));
+  return null;
+};
 rule('sh.win-delete', 'PowerShell and cmd: Remove-Item (ri, rm, del, erase, rd, rmdir) with -Recurse, /s or a wildcard on a path outside the project or one built at run time; [IO.Directory]::Delete(path, $true); powershell -Command and cmd /c text is read as commands', 'remove-item ri del erase rd rmdir', (cx) => {
   const st = cx.st, args = cx.args, onlyRecursive = cx.prog === 'rd' || cx.prog === 'rmdir';
   let rec = false, wild = false;
@@ -2842,7 +2930,7 @@ rule('sh.win-delete', 'PowerShell and cmd: Remove-Item (ri, rm, del, erase, rd, 
   for (let i = 0; i < args.length; i++) {
     const a = args[i], s = a.s;
     if (a.lit && PS_RECURSE.test(s)) { rec = true; continue; }
-    if (a.lit && /^\/[A-Za-z](:\S*)?$/.test(s)) { if (/^\/s$/i.test(s)) rec = true; continue; } // cmd switches: /s /q /f
+    if (a.lit && /^(\/[A-Za-z](:[^/\s]*)?)+$/.test(s)) { if (/\/s(?![A-Za-z])/i.test(s)) rec = true; continue; } // cmd switches: /s /q /f, also glued: /s/q
     const m = a.lit && /^-([A-Za-z]+)(:([\s\S]*))?$/.exec(s);
     if (m) {
       const name = m[1].toLowerCase();
@@ -2889,7 +2977,7 @@ const BY_PROG = new Map();
 for (const r of R) for (const p of r.progs) { if (!BY_PROG.has(p)) BY_PROG.set(p, []); BY_PROG.get(p).push(r); }
 const MKFS = /^(mkfs(\..+)?|mke2fs|mkswap|newfs)$/;
 function runRules(prog, cx) {
-  const key = MKFS.test(prog) ? 'mkfs' : /^python\d+\.\d+$/.test(prog) ? 'python3' : prog;
+  const key = MKFS.test(prog) ? 'mkfs' : /^python\d+\.\d+$/.test(prog) ? 'python3' : /^(node|nodejs|ruby|perl|php)\d[\d.]*$/.test(prog) ? prog.replace(/[\d.]+$/, '') : prog;
   for (const r of BY_PROG.get(key) || []) {
     if (cx.st.o.disable.has(r.id)) continue;
     let out = null;
@@ -2948,6 +3036,13 @@ export function classify(command, opts = {}) {
   const res = { unreadable: false };
   o.res = res;
   let st = newState(o);
+  if (opts.shell === 'ps' || opts.shell === 'cmd') {
+    try { winScript(text.slice(0, 1_000_000), st, opts.shell === 'ps', opts.shell === 'ps' ? 'PowerShell' : 'cmd'); } catch (e) {
+      if (globalThis.__SHELLMAP_THROW) throw e;
+      res.unreadable = true;
+    }
+    return done(st, res);
+  }
   if (text.length <= 1_000_000) {
     try {
       walk(parseScript(text, 0, o.budget), st);

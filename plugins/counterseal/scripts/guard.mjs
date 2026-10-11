@@ -100,6 +100,8 @@ export function readCall(agent, input) {
   }
   const name = j.tool_name;
   if (name === 'Bash' && typeof j.tool_input?.command === 'string') return { kind: 'shell', command: j.tool_input.command, cwd, session };
+  // Claude Code on Windows: the PowerShell tool runs PowerShell text, read with the PowerShell reading, not the bash one
+  if (name === 'PowerShell' && typeof j.tool_input?.command === 'string') return { kind: 'shell', shell: 'ps', command: j.tool_input.command, cwd, session };
   if (typeof name === 'string' && name.startsWith('mcp__')) {
     const rest = name.slice(5), i = rest.indexOf('__');
     return { kind: 'tool', cwd, session, tool: { server: i > 0 ? rest.slice(0, i) : '', name: i > 0 ? rest.slice(i + 2) : rest, input: j.tool_input } };
@@ -237,6 +239,7 @@ function classifyCall(call, cfg, io, env) {
     const apiMap = metaCache?.meta ? apiMapFromMeta(metaCache.meta) : undefined;
     const cwd = posixPath(call.cwd);
     const r = classify(call.command, {
+      shell: call.shell === 'ps' ? 'ps' : undefined,
       cwd, root: projectRoot(cwd, io.exists), home: posixPath(homeDir(env)) ?? undefined, apiMap, disable: cfg.disableRules,
       readFile: (f) => (/\/package\.json$/.test(f) ? io.readText(f) : null),
     });
@@ -270,7 +273,8 @@ export async function runHook({ agent, mode, input, over = false, env = process.
   }
   let verdict;
   try { verdict = classifyCall(call0, cfg, io, env); } catch (e) {
-    return pass(); // a bug in the map must not stop every command; `guard status` and the tests are where it shows
+    // fail closed: a bug in the map must never turn into an allow
+    return deny('Counterseal could not check this call (guard error). Run `counterseal guard status`, and update the guard if this keeps happening.');
   }
   if (!verdict.hits.length && verdict.unreadable && cfg.unreadable === 'hold' && call0.kind === 'shell') {
     verdict.hits = [{ rule: 'sh.unreadable', why: 'The guard could not read this command, and your settings say to hold what it cannot read.', text: clean(call0.command, 200) }];
@@ -386,7 +390,7 @@ const quote = (s) => `"${String(s).replace(/(["\\$`])/g, '\\$1')}"`;
 export function hookEntries(agent, scriptPath, node) {
   if (agent === 'claude-code') {
     const h = { type: 'command', command: node, args: [scriptPath, 'hook', '--agent', 'claude-code'], timeout: 660, onFailure: 'block', statusMessage: 'Counterseal guard' };
-    return { PreToolUse: [{ matcher: 'Bash', hooks: [h] }, { matcher: 'mcp__.*', hooks: [{ ...h }] }] };
+    return { PreToolUse: [{ matcher: 'Bash', hooks: [h] }, { matcher: 'PowerShell', hooks: [{ ...h }] }, { matcher: 'mcp__.*', hooks: [{ ...h }] }] };
   }
   if (agent === 'codex') {
     return { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: `${quote(node)} ${quote(scriptPath)} hook --agent codex`, timeout: 600, statusMessage: 'Counterseal guard' }] }] };

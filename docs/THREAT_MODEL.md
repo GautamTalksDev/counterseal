@@ -746,9 +746,11 @@ is sent only to the server it was made on.
 - The coding-agent guard (G-section, final gate F7): it does not hold commands that disable the guard itself (editing the
   agents' hook settings, `guard.json`, the guard's own script, `guard uninstall`, `mcp pin --yes`); a `server` written into
   `guard.json` receives the guard key and can answer "approved". Not covered by the map: `git -c alias.*` and `git config
-  alias.*`, a program word from `"$@"`, an array or a changed `IFS`, `find -exec rm` and `xargs rm` on unknown files, `> file`
-  and `truncate`, `kubectl exec ... rm`, `curl` to an IP with a `Host` header, `gh pr merge --admin`, `npm publish`; the
-  Claude Code PowerShell tool (Windows) is not hooked; an approval is bound to the folder's name, not its full path; the
+  alias.*`, a program word from `"$@"`, an array or a changed `IFS`, `find -exec rm` inside the project and `xargs rm` on unknown
+  files, `> file` and `truncate`, `kubectl exec ... rm`, `curl` to an IP with a `Host` header, `gh pr merge --admin`,
+  `npm publish`; PowerShell and cmd built at run time beyond `iex`, `& $var` and `!var!` (string concatenation fed to
+  methods, COM objects other than FileSystemObject); interpreters other than python, node, ruby, perl and php (deno,
+  lua, awk, Rscript, osascript, tclsh); an approval is bound to the folder's name, not its full path; the
   hook's MCP SQL check reads only `query` and `sql` (the wrapper reads more); `curl -u user:pass` and `X-Api-Key` headers
   are not redacted. An agent can read the CLI's session file. All are on the agent's machine: a seatbelt, not a sandbox.
 - The public log's capacity: reported receipts are capped below the day's total (F3), but the broker's own decisions of all

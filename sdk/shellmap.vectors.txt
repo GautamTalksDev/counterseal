@@ -1,6 +1,7 @@
 # Test vectors for sdk/shellmap.mjs. One command per line.
 #   HOLD <rule> | <command>   the command must be held, and one of the hits must be <rule>
 #   PASS | <command>          the command must not be held at all
+#   "@ps <command>" is read as PowerShell (the Claude Code PowerShell tool).
 #   GAP | <command>           a documented limit: the guard does not see this (must pass today; docs list these)
 # "⏎" stands for a newline inside a command. The working directory in the tests is /home/u/proj (the project root),
 # the home directory is /home/u. package.json of the project has the scripts clean, db:reset, build, test, deploy.
@@ -1170,3 +1171,58 @@ PASS | rm -rf C:/tmp/build-cache
 GAP | pwsh -File wipe.ps1
 HOLD sh.dynamic-program | powershell -c 'Get-ChildItem C:/Users -Recurse | ForEach-Object { $_.Delete() }'
 GAP | powershell -c 'Clear-RecycleBin -Force'
+
+# ================================================================ release gate 10 Oct (H1, H2): Windows and WSL forms
+# "@ps " in front: the text is read as PowerShell, the way the guard reads the Claude Code PowerShell tool
+HOLD sh.win-delete | @ps Remove-Item C:\ -Recurse
+HOLD sh.win-delete | @ps remove-item c:\ -recurse
+HOLD sh.win-delete | @ps ri C:\ -Recurse -Force
+HOLD sh.win-delete | @ps Remove-Item ~ -Recurse
+HOLD sh.win-delete | @ps Remove-Item $HOME -Recurse
+HOLD sh.win-delete | @ps Microsoft.PowerShell.Management\Remove-Item C:\ -Recurse
+HOLD sh.win-delete | @ps Re`move-Item C:\ -Recurse
+HOLD sh.dynamic-program | @ps & ('Remove'+'-Item') C:\ -Recurse
+HOLD sh.win-delete | @ps iex 'Remove-Item C:\ -Recurse'
+HOLD sh.win-delete | @ps Invoke-Expression 'Remove-Item C:\ -Recurse'
+HOLD sh.dynamic-program | @ps $r='Remove-Item'; & $r C:\ -Recurse
+HOLD sh.dynamic-program | @ps iex $payload
+HOLD sh.disk | @ps Format-Volume -DriveLetter D
+HOLD sh.disk | @ps Clear-Disk -Number 1 -RemoveData
+HOLD sh.win-delete | @ps Start-Process cmd -ArgumentList '/c rd /s /q C:\'
+HOLD sh.win-delete | @ps (New-Object -ComObject Scripting.FileSystemObject).DeleteFolder('C:\Users')
+HOLD sh.win-delete | @ps cmd /c rd /s/q C:\
+HOLD sh.win-delete | @ps cmd /c rd/s/q C:\
+HOLD sh.win-delete | @ps cmd/c rd /s /q C:\
+HOLD sh.win-delete | @ps cmd /c start /b cmd /c rd /s /q C:\
+HOLD sh.win-delete | @ps cmd /c rd /s /q .\..\..
+HOLD sh.win-delete | @ps cmd /c "for /d %i in (C:\*) do rd /s /q %i"
+HOLD sh.dynamic-program | @ps cmd /c "set X=rd&& call %X% /s /q C:\"
+HOLD sh.dynamic-program | @ps cmd /v:on /c "set a=r&&set b=d&& !a!!b! /s /q C:\"
+HOLD sh.win-delete | @ps forfiles /p C:\ /s /c "cmd /c del @file"
+HOLD sh.rm | @ps wsl rm -rf /
+HOLD sh.rm | @ps wsl bash -c "rm -rf /"
+HOLD sh.inline-code | @ps node22 -e "require('fs').rmSync('/home/u',{recursive:true})"
+HOLD sh.rm | wsl rm -rf /
+HOLD sh.rm | wsl -e rm -rf /mnt/c
+HOLD sh.rm | wsl.exe -- rm -rf /mnt/c/Users
+HOLD sh.rm | wsl bash -c "rm -rf /"
+HOLD sh.rm | find / -name x -exec rm {} \;
+HOLD sh.rm | find ~ -type f -exec rm -f {} +
+HOLD sh.win-delete | cmd /c rd /s/q C:\\
+HOLD sh.win-delete | cmd /c rd /S/Q C:\\Users
+HOLD sh.win-delete | cmd/c rd /s /q C:\\
+HOLD sh.win-delete | start /b cmd /c rd /s /q C:\\
+HOLD sh.inline-code | node22 -e "require('fs').rmSync('/home/u',{recursive:true})"
+PASS | @ps Remove-Item node_modules -Recurse -Force
+PASS | @ps Remove-Item .\dist -Recurse
+PASS | @ps Get-ChildItem
+PASS | @ps $x = Get-Content a.txt
+PASS | @ps $env:FOO = 'bar'; npm run build
+PASS | @ps cmd /c rd /s /q build
+PASS | @ps Start-Process notepad
+PASS | @ps wsl ls -la
+PASS | @ps wsl --list
+PASS | find . -name "*.tmp" -exec rm {} \;
+PASS | node22 --version
+PASS | wsl --shutdown
+PASS | wsl -e ls /mnt/c
