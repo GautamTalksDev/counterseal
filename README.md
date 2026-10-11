@@ -82,7 +82,7 @@ All commands: `login`, `logout`, `add`, `creds`, `tokens`, `token`, `revoke`, `f
 | **Guard** | `counterseal guard` is a hook for a coding agent's shell commands. A command on the shell map (29 rules: `terraform destroy`, `git push --force`, `DROP TABLE` through `psql`, `rm -rf` outside the project, and more) waits for your passkey. A seatbelt, not a sandbox. |
 | **MCP gateway** | `counterseal mcp wrap` sits in front of any local MCP server: destructive tool calls wait for your passkey, and the server's tool definitions are pinned so a changed tool is hidden until you review it. |
 | **Two-person seal** | A team can require two different people, each with their own passkey, before an irreversible action goes ahead. Roles, one-time invites, and nobody can lower the rule quietly: lowering it takes 24 hours and tells everyone. |
-| **Deploy Gate** | A GitHub Actions step that holds a deploy job until you approve that exact run. It uses the OIDC token GitHub signs for the job. The action is in this repository, not on the Marketplace. |
+| **Deploy Gate (preview)** | A GitHub Actions step that holds a deploy job until you approve that exact run. It uses the OIDC token GitHub signs for the job. Not yet tested with real GitHub tokens, only with a stand-in that signs like GitHub, so it is not part of the launch. The action is in this repository, not on the Marketplace. |
 | **Brakes** | Money caps for Stripe refunds and payouts, a breaker for too many or repeated writes, and Freeze, which stops every agent token at once. They cover calls through Counterseal, not LLM tokens. |
 | **The app** | An installable web app with live holds, alerts to your devices that carry no payload, the audit log, a privacy center, a data export and an evidence pack. |
 
@@ -181,7 +181,7 @@ never in a public issue.
 
 ## Status
 
-The CLI, `counterseal` 0.3.0, is on npm. The hosted service lives at
+The CLI, `counterseal` 0.4.0, is on npm. The hosted service lives at
 [counterseal.gautamkhosla.com](https://counterseal.gautamkhosla.com) and is free during the public beta; there is no
 billing and no paid plan. What each release adds is in [CHANGELOG.md](CHANGELOG.md), and what is deployed where is in
 [docs/DEPLOY.md](docs/DEPLOY.md). Self-hosting runs everything in this repository.
