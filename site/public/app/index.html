@@ -79,6 +79,7 @@
       <a href="#" data-view="holds" class="on"><span class="ico i-hold"></span>Held<b id="holdCount" class="cnt">0</b></a>
       <a href="#" data-view="vault"><span class="ico i-vault"></span>Vault</a>
       <a href="#" data-view="tokens"><span class="ico i-tok"></span>Agent tokens</a>
+      <a href="#" data-view="budget"><span class="ico i-vault"></span>Budget</a>
       <a href="#" data-view="gates"><span class="ico i-tok"></span>Deploy gates</a>
       <a href="#" data-view="agentkeys"><span class="ico i-acct"></span>Agent keys</a>
       <a href="#" data-view="receipts"><span class="ico i-log"></span>Receipts</a>
@@ -257,6 +258,37 @@
           <label class="lbl">Your token, shown once</label><div id="newTokenVal" class="secret mono"></div>
           <label class="lbl">Add to your agent (MCP config)</label><div id="newTokenMcp" class="secret mono"></div>
         </div>
+      </div>
+    </section>
+
+    <section class="view" data-view="budget" id="budget" hidden>
+      <header class="vh"><div><h1>Budget seal</h1><p class="dim">Hard spend caps on the AI model calls your agents make through Counterseal. At a cap the next call is stopped before it is sent.</p></div></header>
+      <div class="panel">
+        <div id="budgetList" class="list"></div>
+        <p class="empty-row dim" id="noBudget">Add an OpenAI or Anthropic key to the vault and give your agent a token for it. Its spend shows here.</p>
+      </div>
+      <div class="panel form" data-need="approver">
+        <h3>Set a budget</h3>
+        <div class="grid">
+          <div><label for="bgScope" class="lbl">For</label><select id="bgScope"></select></div>
+          <div><label for="bgAsk" class="lbl">At 80% and at the cap</label><select id="bgAsk"><option value="">Stop at the cap</option><option value="ask">Ask me with my passkey</option></select></div>
+        </div>
+        <div class="grid">
+          <div><label for="bgDay" class="lbl">Most per UTC day (USD)</label><input id="bgDay" inputmode="decimal" autocomplete="off" placeholder="5.00"></div>
+          <div><label for="bgMonth" class="lbl">Most per UTC month (USD)</label><input id="bgMonth" inputmode="decimal" autocomplete="off" placeholder="50.00"></div>
+        </div>
+        <div id="bgAcct">
+          <label class="lbl">Runaway detector <span class="dim">(whole account, per agent: past either limit in the window, the agent's breaker trips until you reset it)</span></label>
+          <div class="grid3">
+            <div><label for="bgRunCalls" class="lbl sm">Calls</label><input id="bgRunCalls" inputmode="numeric" autocomplete="off" placeholder="60"></div>
+            <div><label for="bgRunUsd" class="lbl sm">Or USD</label><input id="bgRunUsd" inputmode="decimal" autocomplete="off" placeholder="2.00"></div>
+            <div><label for="bgRunMin" class="lbl sm">In minutes</label><input id="bgRunMin" inputmode="numeric" autocomplete="off" placeholder="5"></div>
+          </div>
+        </div>
+        <p class="dim small">Leave a field empty for no cap. Setting, raising, lowering or removing a budget needs your passkey.</p>
+        <div class="actions"><button id="bgSave" class="btn pri" type="button">Save with passkey</button></div>
+        <p class="dim small" id="bgPrices"></p>
+        <p class="dim small">What it caps: only calls that go through Counterseal with a Counterseal token. It cannot cap a key used directly, the provider's own console, or a cloud bill. Costs are worked out from the usage the provider returns and a price table in Counterseal's code; prices change, so check the date below. Estimates lean high.</p>
       </div>
     </section>
 

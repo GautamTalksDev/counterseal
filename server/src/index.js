@@ -19,6 +19,7 @@ import { directoryTool } from './tools.js';
 import { stats, checkStatsToken, markSeen, rewrapVault } from './admin.js';
 import * as Passkeys from './passkeys.js';
 import * as Brakes from './brakes.js';
+import * as Budget from './budget.js';
 import * as Team from './team.js';
 import * as Win from './windows.js';
 import * as Ch from './channels.js';
@@ -98,6 +99,8 @@ const ROUTES = [
     holds: (await B.listHolds(c.env, c.s, 'pending')).holds, signins: await A.recentCliSignins(c.env, c.s.accountId), passkeys: await Passkeys.recentPasskeys(c.env, c.s.accountId),
     frozen_at: (await c.env.DB.prepare('SELECT frozen_at FROM accounts WHERE id = ?').bind(c.s.accountId).first())?.frozen_at ?? null,
     team: await Team.recentEvents(c.env, c.s.accountId),
+    // Budget seal: totals at or past 50% of a cap (the push for 50%, 80% and 100% carries nothing)
+    budget: await Budget.alertsOf(c.env, c.s.accountId),
   })],
   // Brakes. Freeze: any signed-in session of any member, a viewer too (stopping is always safe). Unfreeze and resetting
   // a tripped breaker: an owner or approver, in a web session with a fresh passkey ceremony, never a command line session.
@@ -106,6 +109,11 @@ const ROUTES = [
   ['POST', /^\/v1\/me\/unfreeze\/finish$/, 'webw', (c) => Brakes.unfreezeFinish(c.env, c.s, c.body), APPROVER],
   ['POST', new RegExp(`^/v1/tokens/${ID}/reset/begin$`), 'webw', (c) => Brakes.resetBegin(c.env, c.s, c.m[1]), APPROVER],
   ['POST', new RegExp(`^/v1/tokens/${ID}/reset/finish$`), 'webw', (c) => Brakes.resetFinish(c.env, c.s, c.m[1], c.body), APPROVER],
+  // Budget seal (src/budget.js): the live spend view for every member; setting, changing or removing a cap is an owner or
+  // approver in a web session with a fresh passkey ceremony that names the exact settings
+  ['GET', /^\/v1\/budget$/, 'session', (c) => Budget.view(c.env, c.s)],
+  ['POST', /^\/v1\/budget\/begin$/, 'webw', (c) => Budget.setBegin(c.env, c.s, c.body), APPROVER],
+  ['POST', /^\/v1\/budget\/finish$/, 'webw', (c) => Budget.setFinish(c.env, c.s, c.body), APPROVER],
   ['GET', /^\/v1\/me$/, 'session', async (c) => {
     const account = await c.env.DB.prepare('SELECT id, name, created_at, receipts, plan, frozen_at, quorum, self_approve, quorum_pending, self_approve_pending, quorum_effective_at, first_token_at, first_call_at, demo_at, installed_at, alerts_at, hold_days FROM accounts WHERE id = ?').bind(c.s.accountId).first();
     const u = await usageOf(c.env, c.s.accountId);
@@ -283,6 +291,7 @@ async function deleteAccount(env, s, body) {
   await env.DB.batch([
     ...deleteStatements(env.DB, id),
     ...Brakes.deleteStatements(env.DB, id), // their tokens' daily totals and breaker windows, before the tokens go
+    ...Budget.deleteStatements(env.DB, id), // Budget seal caps and totals
     ...T.deleteStatements(env.DB, id), // rate limit rows that name the account
     // (gate_polls, gate_runs, windows and channels go with the account by their foreign keys: ON DELETE CASCADE)
     ...['push_subs', 'hold_votes', 'holds', 'guard_keys', 'gates', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes', 'invites', 'members'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
@@ -439,6 +448,7 @@ export async function sweep(env, t = Date.now()) {
     env.DB.prepare('DELETE FROM windows WHERE expires_at < ?').bind(t - 7 * 86400_000),
     ...cleanupStatements(env.DB, t),
     ...Brakes.sweepStatements(env.DB, t), // breaker windows that ended, daily money totals older than 35 days
+    ...Budget.sweepStatements(env.DB, t), // Budget seal day totals older than 35 days, month totals older than 13 months
     ...T.retentionStatements(env.DB, t), // closed holds past the account's retention (365 days unless it chose 30 or 90)
   ]);
 }

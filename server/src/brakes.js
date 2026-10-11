@@ -115,7 +115,8 @@ export async function resetFinish(env, sess, tokenId, body) {
   // a fresh start: the old windows go (or the next write would trip it again at once), and the writes that waited because
   // of the trip are closed (the agent just retries)
   await env.DB.batch([
-    env.DB.prepare('DELETE FROM counters WHERE k = ?1 OR (k >= ?2 AND k < ?3)').bind('w:' + tokenId, `r:${tokenId}:`, `r:${tokenId};`),
+    // (b:<token>: the Budget seal's runaway windows, src/budget.js)
+    env.DB.prepare('DELETE FROM counters WHERE k = ?1 OR (k >= ?2 AND k < ?3) OR (k >= ?4 AND k < ?5)').bind('w:' + tokenId, `r:${tokenId}:`, `r:${tokenId};`, `b:${tokenId}:`, `b:${tokenId};`),
     env.DB.prepare("UPDATE holds SET status = 'expired' WHERE token_id = ? AND account_id = ? AND rule = 'brake.tripped' AND status = 'pending'").bind(tokenId, sess.accountId),
   ]);
   await audit(env, sess.accountId, 'web', 'brake_reset', { token: tokenId, passkey: (await sha256hex(String(body.credential.id))).slice(0, 16), ...(sess.memberId && sess.memberId !== sess.accountId ? { member: sess.memberId } : {}) });
@@ -158,9 +159,10 @@ export const deleteStatements = (db, accountId) => [
 const TRIP_WHY = {
   writes_per_hour: 'This token made more writes in an hour than its limit allows',
   repeat: 'This token sent the same request more times in 5 minutes than its limit allows',
+  runaway: 'This token made more AI model calls, or spent more, in a few minutes than the Budget seal\'s runaway limit allows',
 };
-/** the hold for a write while the breaker is tripped */
-const trippedHold = (reason) => ({
+/** the hold for a write while the breaker is tripped (also used by the Budget seal's runaway detector, src/budget.js) */
+export const trippedHold = (reason) => ({
   decision: 'hold', rule: 'brake.tripped',
   why: `${TRIP_WHY[reason] || 'This token went past a limit'}, so its breaker tripped. Its writes wait until you reset it with your passkey; reads still pass.`,
 });
@@ -315,7 +317,7 @@ export async function countWrite(env, tok, limits, reqHash, t) {
 
 /** trip the token. True only for the one call that did it (a concurrent call finds it already tripped), so the owner is
  * told once. */
-async function trip(env, tok, hit) {
+export async function trip(env, tok, hit) {
   const r = await env.DB.prepare('UPDATE tokens SET tripped_at = ?, tripped_why = ? WHERE id = ? AND account_id = ? AND tripped_at IS NULL RETURNING id').bind(now(), hit.why, tok.id, tok.account_id).first();
   if (!r) return false;
   await audit(env, tok.account_id, 'token:' + tok.id, 'brake_tripped', { token: tok.id, why: hit.why, count: hit.n, limit: hit.max });

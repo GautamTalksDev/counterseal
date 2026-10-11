@@ -140,8 +140,8 @@ function toMinor(text, cur) {
   const n = Number(m[1] + (m[2] || '').padEnd(e, '0'));
   return Number.isSafeInteger(n) && n >= 1 ? n : null;
 }
-const HOLD_BADGE = { 'brake.tripped': 'Breaker tripped', 'brake.money-per-call': 'Over a cap', 'brake.money-per-day': 'Over a cap', 'brake.money-currency': 'Wrong currency', 'brake.money-unreadable': 'Not readable' };
-const TRIP_WHY = { writes_per_hour: 'too many writes in an hour', repeat: 'the same request again and again' };
+const HOLD_BADGE = { 'budget.ask': 'Budget 80%', 'budget.cap': 'Budget cap', 'budget.unpriced': 'Unpriced', 'brake.tripped': 'Breaker tripped', 'brake.money-per-call': 'Over a cap', 'brake.money-per-day': 'Over a cap', 'brake.money-currency': 'Wrong currency', 'brake.money-unreadable': 'Not readable' };
+const TRIP_WHY = { writes_per_hour: 'too many writes in an hour', repeat: 'the same request again and again', runaway: 'too many AI calls, or too much spend, in a few minutes (Budget seal)' };
 /** what a token's brakes say, in words: one line each */
 function brakesLines(x, spent) {
   const l = x.policy.limits, m = x.policy.money, out = [];
@@ -502,6 +502,7 @@ function show(view) {
   current = view;
   if (changed && view === 'receipts') load().catch(() => {});
   if (changed && view === 'gates') gatesView().catch(() => {});
+  if (changed && view === 'budget') budgetView().catch((e) => toast(e.message));
   if (changed && view === 'account') { passkeysView().catch(() => {}); cliSessionsView().catch(() => {}); guardKeysView().catch(() => {}); }
   if (changed && view === 'team') teamView().catch((e) => toast(e.message));
   if (changed && view === 'privacy') privacyView().catch((e) => toast(e.message));
@@ -928,6 +929,71 @@ async function passkeysView() {
   }
 }
 
+// ---- Budget seal: live spend per agent, key and account, and budgets set with a passkey (server/src/budget.js)
+const usdOf = (micros) => '$' + (Math.max(0, micros || 0) / 1e6).toFixed(micros && micros < 10_000 ? 4 : 2);
+/** "12.50" -> 1250 cents; empty -> null; anything else throws */
+function centsOf(text, what) {
+  const t = String(text || '').trim().replace(/^\$/, '');
+  if (!t) return null;
+  if (!/^[0-9]{1,7}(\.[0-9]{1,2})?$/.test(t)) throw new Error(`${what}: write an amount like 5 or 5.00.`);
+  const [a, b = ''] = t.split('.');
+  const c = Number(a) * 100 + Number((b + '00').slice(0, 2));
+  if (c < 1) throw new Error(`${what}: at least 0.01.`);
+  return c;
+}
+const wholeOf = (text, what) => { const t = String(text || '').trim(); if (!t) return null; if (!/^[0-9]{1,6}$/.test(t)) throw new Error(`${what}: a whole number.`); return Number(t); };
+function spendBar(p, name) {
+  const pct = p.cap ? Math.min(100, Math.round((p.spent * 100) / (p.cap + (p.extra || 0)))) : 0;
+  const bar = el('progress', { max: 100, value: pct, title: p.cap ? `${pct}%` : 'no cap' });
+  bar.setAttribute('aria-label', `${name}: ${p.cap ? pct + '% of the cap' : 'no cap'}`);
+  const txt = p.cap ? `${usdOf(p.spent)} of ${usdOf(p.cap + (p.extra || 0))}${p.extra ? ' (raised once)' : ''}, ${usdOf(p.remaining)} left` : `${usdOf(p.spent)}, no cap`;
+  return el('span', { className: 'budget-bar' }, el('span', { className: 'dim', textContent: `${name}: ` }), bar, el('span', { textContent: ' ' + txt }));
+}
+let BUDGET = null;
+async function budgetView() {
+  const v = await api('GET', '/v1/budget');
+  BUDGET = v;
+  const L = $('budgetList'); L.replaceChildren();
+  for (const s of v.scopes) {
+    const kind = s.scope === 'account' ? 'Account' : s.scope.startsWith('cred:') ? 'Key' : 'Agent';
+    L.append(el('div', {}, el('span', {}, el('b', { textContent: s.label }), el('span', { className: 'dim', textContent: `  ${kind}${s.provider ? ', ' + (s.provider === 'openai' ? 'OpenAI' : 'Anthropic') : ''}${s.ask ? ', asks at 80%' : ''}` })),
+      el('span', { className: 'budget-bars' }, spendBar(s.day, 'Today (UTC)'), spendBar(s.month, 'This month (UTC)'))));
+  }
+  $('noBudget').hidden = v.scopes.length > 1;
+  const sel = $('bgScope'), was = sel.value;
+  sel.replaceChildren(...v.scopes.map((s) => el('option', { value: s.scope, textContent: s.scope === 'account' ? 'The whole account' : `${s.scope.startsWith('cred:') ? 'Key' : 'Agent'}: ${s.label}` })));
+  if (was && v.scopes.some((s) => s.scope === was)) sel.value = was;
+  budgetFill();
+  $('bgPrices').textContent = `Price table of ${v.prices.date}: ${Object.values(v.prices.models).reduce((n, m) => n + m.length, 0)} models. A model not in it is not guessed: each agent gets ${v.unpricedPerDay} such calls a UTC day, then each one waits for your passkey.`;
+}
+function budgetFill() {
+  const s = BUDGET && BUDGET.scopes.find((x) => x.scope === $('bgScope').value);
+  if (!s) return;
+  const c = (p) => (p.cap ? (p.cap / 1e6).toFixed(2) : '');
+  $('bgDay').value = c(s.day); $('bgMonth').value = c(s.month); $('bgAsk').value = s.ask ? 'ask' : '';
+  const acct = s.scope === 'account';
+  $('bgAcct').hidden = !acct;
+  const r = BUDGET.runaway;
+  $('bgRunCalls').value = acct && r && r.calls ? String(r.calls) : '';
+  $('bgRunUsd').value = acct && r && r.micros ? (r.micros / 1e6).toFixed(2) : '';
+  $('bgRunMin').value = acct && r ? String(r.minutes) : '';
+}
+$('bgScope').onchange = budgetFill;
+$('bgSave').onclick = async () => {
+  try {
+    const scope = $('bgScope').value;
+    const s = { scope, dailyCents: centsOf($('bgDay').value, 'Per day'), monthlyCents: centsOf($('bgMonth').value, 'Per month'), ask: $('bgAsk').value === 'ask' };
+    if (scope === 'account') {
+      const calls = wholeOf($('bgRunCalls').value, 'Runaway calls'), cents = centsOf($('bgRunUsd').value, 'Runaway USD'), minutes = wholeOf($('bgRunMin').value, 'Runaway minutes');
+      if (calls || cents || minutes) s.runaway = { calls, cents, minutes };
+    }
+    const r = await ceremony('/v1/budget/begin', '/v1/budget/finish', s);
+    toast(r.removed ? 'Budget removed.' : 'Budget sealed.');
+    budgetView();
+  } catch (e) { toast(e.message); }
+};
+// ---- end Budget seal
+
 // ---- receipts (Record)
 const download = (name, text, type = 'application/json') => {
   const a = el('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
@@ -1247,8 +1313,10 @@ async function boot() {
     $('avatar').textContent = (shown.trim()[0] || '?').toUpperCase();
     api('GET', '/v1/team').then((t) => { NAMES = new Map(t.members.map((m) => [m.id, m.name])); }).catch(() => {});
     meta = meta || (await api('GET', '/v1/meta'));
-    const p = $('prov'); p.replaceChildren(...meta.providers.map((x) => el('option', { value: x.id, textContent: x.name })));
-    PROV = Object.fromEntries(meta.providers.map((x) => [x.id, x])); showHost();
+    // the AI model APIs the Budget seal meters are proxied too, but are not part of the public irreversible map
+    const provs = [...meta.providers, { id: 'openai', name: 'OpenAI (metered)' }, { id: 'anthropic', name: 'Anthropic (metered)' }];
+    const p = $('prov'); p.replaceChildren(...provs.map((x) => el('option', { value: x.id, textContent: x.name })));
+    PROV = Object.fromEntries(provs.map((x) => [x.id, x])); showHost();
     route(); await load(); pushState().catch(() => {});
     installUi(); reportInstalled();
     // the background refresh: quiet, so it never keeps an idle session alive (see refresh() below)

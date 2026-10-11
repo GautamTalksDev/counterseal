@@ -1,9 +1,10 @@
 // Credentials, proxy tokens, the proxy, and holds.
-import { HttpError, json, b64u, rand, randomId, sha256hex, now, str, readBody, cleanText } from './util.js';
+import { HttpError, json, b64u, rand, randomId, sha256hex, now, str, readBody, cleanText, readCapped } from './util.js';
+import * as Budget from './budget.js';
 import { mapOf } from './approvals.js';
 import { cardOf, publicRepoOf } from './gatefacts.js';
 import { seal, open } from './vault.js';
-import { summarize, PROVIDERS, MAP_VERSION, storeHost, LIMITS } from './providers.js';
+import { summarize, providerOf, MAP_VERSION, storeHost, LIMITS } from './providers.js';
 import { normalisePolicy, decide, afterMap } from './policy.js';
 import { audit } from './audit.js';
 import { newChallenge, takeChallenge, checkAssertion, rp, appOrigin, sessionId } from './auth.js';
@@ -24,7 +25,7 @@ export const PENDING_PER_TOKEN = 20, PENDING_PER_ACCOUNT = 100, MAX_CREDENTIALS 
 // ---------------------------------------------------------------- credentials
 export async function addCredential(env, sess, body) {
   const provider = str(body.provider, 'provider', { max: 20 });
-  const P = PROVIDERS[provider];
+  const P = providerOf(provider);
   if (!P) throw new HttpError(400, 'bad_provider');
   const label = str(body.label ?? P.name, 'label', { max: 60, re: /^[\p{L}\p{N} ._:/()-]+$/u });
   const secret = str(body.secret, 'secret', { min: 8, max: 4096, re: P.secretRe || /^[\x21-\x7e]+$/ });
@@ -184,6 +185,14 @@ export async function approveFinish(env, sess, holdId, body) {
     return { ok: true, approved: false, seals: s.votes.length, needs: s.need, note: `Your seal is on (${s.votes.length} of ${s.need}). It needs ${s.need - s.votes.length} more from a different approver before the agent can go ahead.` };
   }
   await audit(env, sess.accountId, 'web', demo ? 'demo_approved' : 'approve', { ...base, ...(s.need > 1 ? { quorum: s.need, votes: s.votes } : {}) }, { receipts: demo ? false : s.receipts });
+  // a Budget seal question (80%, or the cap in "ask me" mode): the approval acts on the budget itself (src/budget.js)
+  if (!guard && !demo && (h.rule === 'budget.ask' || h.rule === 'budget.cap')) {
+    const c = await Budget.onApproved(env, sess.accountId, { ...h, id: holdId });
+    if (c) {
+      await audit(env, sess.accountId, 'web', 'budget_raised', { hold: holdId, scope: c.scope, period: c.period, rule: h.rule, passkey: s.passkey, ...who });
+      return { ok: true, approved: true, seals: s.votes.length, needs: s.need, note: h.rule === 'budget.cap' ? 'The cap is raised once, by one cap, for this period. The agent can retry now.' : 'This period can now run on to its cap without asking again. The agent can retry now.' };
+    }
+  }
   return { ok: true, approved: true, seals: s.votes.length, needs: s.need, note: demo ? 'Approved. The demo agent can now retry once, within 10 minutes. No public receipt is written for the demo.' : !guard ? 'The agent can now retry the exact same request once, within 10 minutes.' : h.kind === 'deploy' ? 'The job can now go on, once, within 10 minutes.' : 'The agent can now run that exact command once, within 10 minutes.' };
 }
 
@@ -273,7 +282,7 @@ function noteSignatureFailure(env, tok, method, host, e) {
 }
 
 export async function proxy(env, request, provider, rest, fetcher = fetch) {
-  const P = PROVIDERS[provider];
+  const P = providerOf(provider);
   if (!P) throw new HttpError(404, 'unknown_provider');
   const authz = request.headers.get('authorization') || '';
   const m = authz.match(/^Bearer (lsh_[A-Za-z0-9_-]{43})$/);
@@ -371,6 +380,13 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
       d = brake.d;
     }
   }
+  // Budget seal (src/budget.js): an AI model call the rest has allowed is metered and reserved against the agent's, the
+  // key's and the account's daily and monthly caps; at a hard cap it is answered 402 here and never sent.
+  let meter = null, budgetCtx = null, budgetTripped = false;
+  if (d.decision === 'allow' && P.metered) {
+    const b = await Budget.before(env, { tok, provider, method, canon: path, bodyText });
+    if (b?.d) { d = b.d; budgetCtx = b.ctx || null; budgetTripped = !!b.tripped; } else if (b) meter = b.meter;
+  }
   if (d.decision === 'hold') {
     // an approved grant for exactly this request? consume it atomically
     const g = await env.DB.prepare("UPDATE holds SET status = 'used' WHERE id = (SELECT id FROM holds WHERE token_id = ? AND req_hash = ? AND status = 'approved' AND expires_at > ? LIMIT 1) RETURNING id")
@@ -390,14 +406,15 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
         h = { id: randomId(), expires_at: now() + HOLD_TTL };
         const pv = preview(url.search, bodyText, undefined, brake.lines);
         // needs: the seals the team requires now; requested_by: who made this token (separation of duties)
-        await env.DB.prepare('INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview, needs, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .bind(h.id, tok.account_id, tok.id, reqHash, method, upHost, where.path, d.rule, d.why, now(), h.expires_at, pv, team.quorum, Team.memberOf(tok)).run();
+        // context: for a Budget seal hold, which budget it is about (scope and period), for the approval to act on
+        await env.DB.prepare('INSERT INTO holds (id, account_id, token_id, req_hash, method, host, path, rule, why, created_at, expires_at, preview, needs, requested_by, context) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(h.id, tok.account_id, tok.id, reqHash, method, upHost, where.path, d.rule, d.why, now(), h.expires_at, pv, team.quorum, Team.memberOf(tok), budgetCtx ? JSON.stringify(budgetCtx) : null).run();
         await audit(env, tok.account_id, 'token:' + tok.id, 'hold', { ...where, rule: d.rule, hold: h.id, preview_sha256: await sha256hex(pv || '') }, seal);
         // wake the owner's devices after responding; the push itself carries nothing. At most one alert a minute per
         // account for held requests: the alert says how many are waiting, so a flood of holds is one buzz, not hundreds.
         // A tripped token's later holds stay quiet altogether: the call that tripped it already woke them, and the rest
         // wait in the list (they do not even spend the minute's alert).
-        if (d.rule !== 'brake.tripped' || brake.tripped) {
+        if (d.rule !== 'brake.tripped' || brake.tripped || budgetTripped) {
           const p = (async () => {
             if (await allow(env.DB, 'pushhold:' + tok.account_id, 1, 60_000, now())) {
               await notify(env, tok.account_id, env.__pushFetch || fetch);
@@ -414,14 +431,21 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
         message: `${BRAND.name} held this request${d.rule.startsWith('brake.') ? ':' : ' because it cannot be undone:'} ${d.why} Stop and ask your human${team.quorum > 1 ? `s (${team.quorum} different approvers)` : ''} to approve it at ${approveUrl} . After they approve, retry the exact same request once.`,
       }, 428);
     }
+    // an approved AI model call is still metered and still stops at a hard cap (it is only not asked about again)
+    if (P.metered) {
+      const b = await Budget.before(env, { tok, provider, method, canon: path, bodyText }, { approved: true });
+      if (b?.d) throw new HttpError(423, 'token_tripped', b.d.why);
+      meter = b?.meter || null;
+    }
     await audit(env, tok.account_id, 'token:' + tok.id, 'proxy_approved', { ...where, rule: d.rule, hold: g.id }, seal);
   }
 
   // forward
   let secretNow;
   try { secretNow = await secretOf(); } catch (e) {
-    // the call never left: whatever a money cap reserved for it goes back
+    // the call never left: whatever a money cap or a budget reserved for it goes back
     if (brake.reserved) await Brakes.release(env, brake.reserved).catch(() => {});
+    if (meter) await Budget.release(env, meter).catch(() => {});
     throw e;
   }
   const headers = new Headers();
@@ -442,6 +466,18 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   if (brake.reserved && Brakes.definitelyNotDone(res.status)) {
     released = await Brakes.release(env, brake.reserved).then(() => true, (e) => { console.error(JSON.stringify({ event: 'release_failed', message: String(e?.message || e).slice(0, 200) })); return false; });
   }
+  // the Budget seal: a refusal gives the reservation back; a 2xx is settled from the usage in the answer (read from a
+  // copy of the stream after the response, so the agent is never slowed down); a 5xx keeps the estimate (it may have run)
+  let resBody = res.body;
+  if (meter && Brakes.definitelyNotDone(res.status)) await Budget.release(env, meter).catch((e) => console.error(JSON.stringify({ event: 'budget_release_failed', message: String(e?.message || e).slice(0, 200) })));
+  else if (meter && res.status >= 200 && res.status < 300 && res.body) {
+    const [a, b] = res.body.tee();
+    resBody = a;
+    const ct = res.headers.get('content-type') || '';
+    const p = (async () => Budget.settle(env, meter, ct, new TextDecoder().decode(await readCapped(b, MAX_RESP))))()
+      .catch((e) => console.error(JSON.stringify({ event: 'budget_settle_failed', message: String(e?.message || e).slice(0, 200) })));
+    if (env.__ctx && env.__ctx.waitUntil) env.__ctx.waitUntil(p); else await p;
+  }
   const len = Number(res.headers.get('content-length') || 0);
   if (len > MAX_RESP) throw new HttpError(502, 'upstream_too_large');
   const out = new Headers();
@@ -458,5 +494,5 @@ export async function proxy(env, request, provider, rest, fetcher = fetch) {
   // writes are on the record; an approved call was already sealed as "executed", so its result is not sealed twice
   // (a call a money cap let through also records what it was, for the owner: never in the public receipt)
   if (method !== 'GET' && method !== 'HEAD') await audit(env, tok.account_id, 'token:' + tok.id, 'proxy', { ...where, status: res.status, rule: d.rule, ...(breakglass && d.rule.endsWith(':breakglass') ? { breakglass } : {}), ...(brake.money ? { money: brake.money, ...(released ? { released: true } : {}) } : {}) }, d.decision === 'hold' ? { receipts: false } : seal);
-  return new Response(res.body, { status: res.status, headers: out });
+  return new Response(resBody, { status: res.status, headers: out });
 }

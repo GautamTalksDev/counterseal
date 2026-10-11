@@ -4,6 +4,7 @@
 // Body checks fail closed: a body LEASH cannot read on a route that has a body rule is held.
 // Version it; every change must come with a test in test/bypass.test.js, test/hardening.test.js or test/leash.test.js.
 import { BRAND } from './brand.js';
+import { METERED } from './metered.js';
 export const MAP_VERSION = '2026-10-10.1';
 
 // ---------------------------------------------------------------- strict JSON
@@ -875,6 +876,10 @@ export const PROVIDERS = {
   },
 };
 
+/** a provider the proxy can broker: one of the ten in the irreversible map, or one of the metered AI model APIs of the
+ * Budget seal (src/metered.js), which are proxied the same way but are not part of the public map. Own keys only. */
+export const providerOf = (id) => (Object.hasOwn(PROVIDERS, id) ? PROVIDERS[id] : Object.hasOwn(METERED, id) ? METERED[id] : null);
+
 /** the public description of the map: what GET /v1/meta serves (next to the app origin) and what site/public/data/meta.json
  * holds for the website when the Worker is not reachable (regenerate it with node scripts/gen-meta.mjs) */
 export function metaOf() {
@@ -926,7 +931,7 @@ export const matchPath = (provider, path) => (PROVIDERS[provider]?.ci ? path.toL
  * - HEAD trips the GET rules (many frameworks run the GET handler for HEAD);
  * - a method override (`_method`) trips COMMON on every provider. */
 export function irreversibleRule(provider, method, path, body, search = '') {
-  const P = PROVIDERS[provider];
+  const P = providerOf(provider);
   const lp = String(path).toLowerCase();
   const paths = [lp, lp.replace(/(\/[^/]+)\.[a-z0-9]{1,8}$/, '$1')];
   for (const r of COMMON) if (r.test(body, search, P, paths)) return r;

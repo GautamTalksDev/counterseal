@@ -3,6 +3,19 @@
 All notable changes to Counterseal. The CLI follows [Semantic Versioning](https://semver.org/); the hosted service and
 the self-hosted Worker change together with this repository (see [docs/DEPLOY.md](docs/DEPLOY.md) for migrations).
 
+## Unreleased (branch `budget-seal`, not deployed)
+
+### Added
+
+- **Budget seal: hard spend caps on AI model calls.** OpenAI and Anthropic can now be brokered like the other APIs (the
+  agent holds a Counterseal token, the key stays in the vault). Each call's cost is metered from the usage the provider
+  returns times a price table in code (`server/src/metered.js`, read 2026-10-10, sources linked). Daily and monthly caps
+  (UTC) per agent, per key and per account; at a cap the next call gets 402 and is never sent. "Ask me" mode asks for a
+  passkey at 80% and raises a cap once at 100%. A runaway detector trips the agent's breaker on too many calls or too much
+  spend in a few minutes. Alerts at 50%, 80% and 100%. Unknown models are never guessed. Every budget change needs a
+  passkey. Migration `0014_budget_seal.sql` (two new tables). The public irreversible map is unchanged. See
+  [docs/BUDGET_SEAL.md](docs/BUDGET_SEAL.md), including what it cannot cap, and [docs/CLOUD_KILL_SWITCH.md](docs/CLOUD_KILL_SWITCH.md).
+
 ## 0.4.0 (2026-10-10)
 
 ### Fixed
