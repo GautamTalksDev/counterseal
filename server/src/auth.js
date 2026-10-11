@@ -115,7 +115,10 @@ export async function verifyPasskey(env, cred, challenge, who = null) {
   // here); the authenticator data proves it too
   if (pk.rp_id && pk.rp_id !== r.rpId) throw new HttpError(401, 'unknown_passkey', 'That passkey was made for another host and cannot sign in here.');
   const count = await verifyAssertion(cred, { challenge, origin: r.origin, rpId: r.rpId, alg: pk.alg, jwk: JSON.parse(pk.jwk), signCount: pk.sign_count });
-  await env.DB.prepare('UPDATE passkeys SET sign_count = ?, last_used = ? WHERE cred_id = ?').bind(count, now(), pk.cred_id).run();
+  // conditional: two assertions racing with the same counter cannot both move it (authenticators that always send 0,
+  // like most synced passkeys, are not counting, so 0 is always accepted)
+  const up = await env.DB.prepare('UPDATE passkeys SET sign_count = ?1, last_used = ?2 WHERE cred_id = ?3 AND (?1 = 0 OR sign_count < ?1)').bind(count, now(), pk.cred_id).run();
+  if (count !== 0 && up.meta && up.meta.changes === 0) throw new HttpError(401, 'replay', 'That passkey signature was already used. Try again.');
   return pk;
 }
 /** verifies an assertion (see verifyPasskey); returns the account id */

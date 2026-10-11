@@ -35,6 +35,11 @@ function coseToJwk(m) {
     return { alg: -7, jwk: { kty: 'EC', crv: 'P-256', x: b64u(m.get(-2)), y: b64u(m.get(-3)), ext: true } };
   }
   if (kty === 3 && alg === -257) {
+    const n = m.get(-1), e = m.get(-2);
+    if (!(n instanceof Uint8Array) || !(e instanceof Uint8Array)) throw new HttpError(400, 'unsupported_key');
+    let bytes = n.length, i = 0;
+    while (i < n.length && n[i] === 0) { i++; bytes--; }
+    if (bytes < 256) throw new HttpError(400, 'unsupported_key', 'RSA passkeys need a key of at least 2048 bits.');
     return { alg: -257, jwk: { kty: 'RSA', n: b64u(m.get(-1)), e: b64u(m.get(-2)), alg: 'RS256', ext: true } };
   }
   throw new HttpError(400, 'unsupported_key');
@@ -82,16 +87,20 @@ export async function verifyRegistration({ attestationObject, clientDataJSON }, 
 
 function derToRaw(der) {
   // ECDSA DER SEQUENCE{INTEGER r, INTEGER s} -> r||s (32 bytes each)
-  if (der[0] !== 0x30) throw new HttpError(400, 'bad_signature');
+  // strict: short form lengths only (an ECDSA P-256 signature is at most 72 bytes), lengths that add up, nothing after
+  if (!(der instanceof Uint8Array) || der.length < 8 || der[0] !== 0x30 || der[1] >= 0x80 || der[1] !== der.length - 2) throw new HttpError(400, 'bad_signature');
   let p = 2;
   const int = () => {
     if (der[p] !== 0x02) throw new HttpError(400, 'bad_signature');
-    const len = der[p + 1]; let v = der.slice(p + 2, p + 2 + len); p += 2 + len;
+    const len = der[p + 1];
+    if (!len || len >= 0x80 || p + 2 + len > der.length) throw new HttpError(400, 'bad_signature');
+    let v = der.slice(p + 2, p + 2 + len); p += 2 + len;
     while (v.length > 32 && v[0] === 0) v = v.slice(1);
     if (v.length > 32) throw new HttpError(400, 'bad_signature');
     const o = new Uint8Array(32); o.set(v, 32 - v.length); return o;
   };
   const r = int(), s = int();
+  if (p !== der.length) throw new HttpError(400, 'bad_signature');
   const out = new Uint8Array(64); out.set(r); out.set(s, 32); return out;
 }
 
