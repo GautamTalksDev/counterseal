@@ -63,6 +63,8 @@ jobs:
       - name: Publish counterseal
         run: |
           cd cli
+          # a version already on npm is skipped, so the other package can catch up in the same release
+          if npm view "counterseal@$VERSION" version 2>/dev/null | grep -qxF "$VERSION"; then echo "counterseal@$VERSION is already on npm: skipped"; exit 0; fi
           if [ "$DRY" = true ]; then npm publish --dry-run --access public; else npm publish --provenance --access public; fi
       - name: SBOM of leashcli (after counterseal exists on npm, which it depends on)
         if: env.DRY != 'true'
@@ -76,6 +78,8 @@ jobs:
       - name: Publish leashcli (the old name, a thin alias)
         run: |
           cd packages/leashcli
+          # a version already on npm is skipped, so the other package can catch up in the same release
+          if npm view "leashcli@$VERSION" version 2>/dev/null | grep -qxF "$VERSION"; then echo "leashcli@$VERSION is already on npm: skipped"; exit 0; fi
           if [ "$DRY" = true ]; then npm publish --dry-run --access public; else npm publish --provenance --access public; fi
       - name: Attach the SBOMs to the release
         if: github.event_name == 'release'
