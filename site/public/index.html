@@ -3,150 +3,295 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Counterseal: your agent asks before it does damage</title>
-<meta name="description" content="Counterseal gives your AI agents tokens instead of your real keys. Deletes, refunds, deploys and other calls on its reviewed map wait for your passkey. Budget seal stops model calls at your cap. Open source, free during beta.">
-<meta name="theme-color" content="#f4f1ea" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#08090b" media="(prefers-color-scheme: dark)">
+<title>Counterseal: nothing irreversible without your passkey</title>
+<meta name="description" content="Counterseal gives your AI agents a token instead of your real key. Deletes, refunds and deploys on its reviewed map of 10 APIs wait for your passkey. Open source, free during beta.">
+<meta name="theme-color" content="#f3efe6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#07080a" media="(prefers-color-scheme: dark)">
 <meta name="color-scheme" content="light dark">
 <meta property="og:title" content="Counterseal">
-<meta property="og:description" content="Your agent asks before it does damage.">
+<meta property="og:description" content="Nothing irreversible without your passkey.">
 <meta property="og:image" content="/img/og.png">
 <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/img/warden/held-still.webp" as="image">
-<link rel="stylesheet" href="/v3.css">
+<link rel="preload" href="/img/v4/w-held.webp" as="image" fetchpriority="high">
+<link rel="stylesheet" href="/v5.css">
 <script src="/theme.js"></script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<script src="/v3.js" defer></script>
+<script src="/v5.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
 <header class="nav">
-  <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>COUNTERSEAL</a>
-  <nav class="links" aria-label="Main"><a href="#how">How it works</a><a href="#budget">Budget seal</a><a href="#limits">Limits</a><a href="#proof">Proof</a><a href="/security/">Security</a><a href="/docs/">Docs</a></nav>
-  <div class="nav-r">
-    <button class="theme" id="theme" type="button" aria-label="Switch light or dark theme"><span aria-hidden="true"></span></button>
-    <a class="btn pri sm" href="/app">Start free</a>
+  <div class="nav-in">
+    <a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>Counterseal</a>
+    <nav class="links" aria-label="Main"><a href="#features">Product</a><a href="#proof">Proof</a><a href="#pricing">Pricing</a><a href="/security/">Security</a><a href="/docs/">Docs</a></nav>
+    <div class="nav-r">
+      <button class="theme" id="theme" type="button" aria-label="Switch light or dark theme"><span aria-hidden="true"></span></button>
+      <a class="btn pri sm" href="/app">Start free</a>
+    </div>
   </div>
 </header>
 
 <main id="main">
 
 <section class="hero" aria-labelledby="h1">
+  <div class="aura" aria-hidden="true"></div>
   <div class="hero-copy">
-    <p class="beta"><span class="dot" aria-hidden="true"></span>New: spend caps for model calls. Free during beta.</p>
-    <h1 id="h1">Your agent asks <em>before</em> it does damage.</h1>
-    <p class="lede">Agents get a Counterseal token, never your real key. Deletes, refunds, deploys and other calls on its reviewed map wait for your passkey. Model calls through Counterseal stop at the cap you set. Reads and other writes go straight through.</p>
+    <a class="pill" href="#budget"><span class="dot" aria-hidden="true"></span>New: Budget seal <span class="arr" aria-hidden="true">&rarr;</span></a>
+    <h1 id="h1" aria-label="Nothing irreversible without your passkey.">Nothing irreversible <em>without</em> your <span class="ty" id="ty" aria-hidden="true">passkey.</span></h1>
+    <p class="lede">Agents get a token, never your real key. Deletes, refunds and deploys wait for one tap.</p>
     <div class="cta">
-      <button class="copy" type="button" data-copy="npx counterseal login" aria-label="Copy the install command"><code><span class="pr" aria-hidden="true">$</span> npx counterseal login</code><span class="cp" aria-hidden="true">Copy</span></button>
-      <a class="btn pri" href="/app">Start free</a>
+      <a class="btn pri lg" href="/app">Start free</a>
+      <button class="copy" type="button" data-copy="npx counterseal login" aria-label="Copy the install command: npx counterseal login"><code><span class="pr" aria-hidden="true">$</span> npx counterseal login</code><span class="cp" aria-hidden="true">Copy</span></button>
     </div>
-    <ul class="proofline" aria-label="Proof"><li><a href="https://github.com/GautamTalksDev/counterseal">Open source, Apache 2.0</a></li><li><a href="https://github.com/GautamTalksDev/counterseal/actions/workflows/ci.yml">660 tests in public CI</a></li><li><a href="/log/">Public receipt log</a></li><li><a href="https://www.npmjs.com/package/counterseal">npm provenance</a></li><li><a href="/security/">Security model and limits</a></li></ul>
-    <p class="honest"><b>You trust us with the key.</b> Each key is encrypted on its own and no API returns it, but the hosted service decrypts it to forward a call. Start with a test key. <a href="/security/">How the vault works</a></p>
-    <p class="small">No card. Paid plans come later, with 30 days' notice.</p>
+    <ul class="trust" aria-label="Proof">
+      <li><a href="https://github.com/GautamTalksDev/counterseal">Open source, Apache 2.0</a></li>
+      <li><a href="https://github.com/GautamTalksDev/counterseal/actions/workflows/ci.yml">660 tests in public CI</a></li>
+      <li><a href="/log/">Public receipt log</a></li>
+    </ul>
+    <p class="under custody"><span class="lock" aria-hidden="true"></span><span><b>Who holds the key:</b> it is encrypted in our vault, never sent to the agent, and decrypted only to forward a call. <a href="/security/">Read the security model</a></span></p>
   </div>
 
-  <div class="stage" aria-labelledby="stage-t">
-    <h2 id="stage-t" class="st-h"><span>Live: what your agent gets back</span><span class="st-w">Simulated in this tab</span></h2>
-    <div class="st-body">
-    <div class="warden" id="warden" data-state="held" role="img" aria-label="Warden, holding the call">
-      <div class="sprite" id="sprite" data-s="held"></div>
+  <div class="stage" id="stage" data-s="held" aria-labelledby="stage-t">
+    <h2 id="stage-t" class="sr">Live demo, simulated in this tab</h2>
+    <div class="tilt">
+      <div class="card">
+        <div class="card-top">
+          <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="ct-t">Holds</span>
+          <span class="sim">Simulated</span>
+        </div>
+        <div class="card-body">
+          <div class="call" aria-live="polite">
+            <p class="agent"><span class="av" aria-hidden="true"></span><span id="who">billing-bot</span> wants to</p>
+            <p class="req"><span class="m" id="m">DELETE</span> <span id="path">api.stripe.com/v1/customers/cus_42</span></p>
+            <p class="status"><span class="code" id="code">428</span> <span id="txt">Held. Waiting for your passkey.</span></p>
+            <div class="meter" aria-hidden="true"><i id="bar"></i></div>
+            <p class="rcpt" id="rcpt">Receipt pending</p>
+          </div>
+          <div class="acts" role="group" aria-label="Try a call">
+            <button type="button" data-act="held" aria-pressed="true" class="st">Reset</button>
+            <button type="button" data-act="approved" aria-pressed="false" class="go">Approve with passkey</button>
+            <button type="button" data-act="cap" aria-pressed="false">Hit the cap</button>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="readout" aria-live="polite">
-      <p class="req" id="req"><span class="m">DELETE</span> api.stripe.com/v1/customers/cus_42</p>
-      <p class="res" id="res"><span class="code warn">428</span> Held. Waiting for your passkey (press 2).</p>
+    <div class="warden" id="warden" role="img" aria-label="Warden, the Counterseal mascot, holding the call">
+      <div class="halo" aria-hidden="true"></div>
+      <img class="w on" data-w="held" src="/img/v4/w-held.webp" alt="" width="720" height="720" fetchpriority="high">
+      <img class="w" data-w="approved" src="/img/v4/w-approved.webp" alt="" width="720" height="720" decoding="async">
+      <img class="w" data-w="cap" src="/img/v4/w-cap.webp" alt="" width="720" height="720" decoding="async">
+      <div class="floor" aria-hidden="true"></div>
     </div>
-    </div>
-    <div class="acts" role="group" aria-label="Try a call">
-      <button type="button" data-act="held" class="first"><span class="sn">1</span> Agent deletes a customer</button>
-      <button type="button" data-act="approved" id="approveBtn"><span class="sn">2</span> Approve with passkey</button>
-      <button type="button" data-act="cap"><span class="sn">3</span> Hit the spend cap</button>
-      <button type="button" data-act="calm" class="ghost">Reset</button>
-    </div>
-    <p class="note">Simulated: a button stands in for your passkey. Same status codes as the real broker: 428 held, 402 at the cap. Warden's wax shows the state.</p>
   </div>
 </section>
 
-<section class="how" id="how" aria-labelledby="how-t">
-  <p class="kick">How it works</p>
-  <h2 id="how-t">Three beats. <em>One</em> tap.</h2>
-  <p class="cover">The irreversible map covers 10 APIs: GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend and Shopify. Management APIs only; SQL sent straight over a database connection string never passes through Counterseal.</p>
-  <ol class="beats">
-    <li><span class="n">1</span><h3>Vault the key</h3><p>Paste it once. It is encrypted in the vault. Your agent gets a scoped Counterseal token instead.</p></li>
-    <li><span class="n">2</span><h3>The call is held</h3><p>Anything it can't take back, like a delete, refund or deploy, waits. Reads and other writes go straight through.</p></li>
-    <li><span class="n">3</span><h3>You seal it</h3><p>Your phone asks. Approve with a passkey, or deny. Every decision on a write becomes a receipt anyone can verify.</p></li>
+
+
+<section class="wall" aria-labelledby="wall-t">
+  <h2 id="wall-t" class="wall-h">Protected APIs: irreversible calls held on <b>these 10</b></h2>
+  <ul class="marks">
+    <li>GitHub</li><li>Cloudflare</li><li>Railway</li><li>Stripe</li><li>Supabase</li>
+    <li>Vercel</li><li>Neon</li><li>Fly.io</li><li>Resend</li><li>Shopify</li>
+  </ul>
+  <p class="wall-f">Management APIs, on a reviewed map. Reads and other writes go straight through.</p>
+</section>
+
+<section class="demos" aria-labelledby="dm-t">
+  <h2 id="dm-t" class="sr">What happens, in four beats</h2>
+  <ol class="drow">
+    <li class="dc d1"><p class="dk">01 Held</p><p class="dl"><span class="mth">DELETE</span> /v1/customers/cus_42</p><p class="ds"><span class="code">428</span> waiting</p></li>
+    <li class="dc d2"><p class="dk">02 Passkey</p><span class="dfp" aria-hidden="true"></span><p class="ds">Touch to seal</p></li>
+    <li class="dc d3"><p class="dk">03 Budget seal</p><div class="dbar" aria-hidden="true"><i></i></div><p class="ds"><span class="code bad">402</span> never sent</p></li>
+    <li class="dc d4"><p class="dk">04 Receipt</p><p class="dl">entry in the public log</p><p class="ds"><span class="code ok">verified</span> in your browser</p></li>
   </ol>
 </section>
 
-<section class="budget" id="budget" aria-labelledby="bud-t">
-  <div class="bud-copy">
-    <p class="kick">New</p>
-    <h2 id="bud-t">Budget seal. A cap on <em>model</em> spend.</h2>
-    <p>Set a daily or monthly cap per agent, per key or for the whole account. At the cap the next call gets <code>402 budget_exhausted</code> and is never sent. Provider alerts tell you later; this stops the next call.</p>
-    <ul class="ticks">
-      <li>"Ask me" mode: past 80%, your passkey decides if it goes on.</li>
-      <li>Runaway detector trips an agent that fans out too fast.</li>
-      <li>Raising a cap takes a passkey, never a command line.</li>
-    </ul>
-    <p class="fine">Caps only model calls that go through Counterseal, on the two model APIs listed in the docs. It does not cap your cloud bill, keys used directly, or other tools. One call can pass the cap by its own cost; nothing goes after it.</p>
+<section class="flow" id="how" aria-labelledby="fl-t">
+  <div class="sec-h rv">
+    <p class="kick">How it works</p>
+    <h2 id="fl-t">Your agent never touches the <em>real</em> key.</h2>
   </div>
-  <div class="meter" aria-label="Example budget: 14 dollars 20 of 15 dollars today">
-    <p class="m-h"><span>agent: billing-bot</span><span>today</span></p>
-    <p class="m-v"><b>$14.20</b> of $15.00</p>
-    <div class="bar" aria-hidden="true"><i></i></div>
-    <p class="m-f">Next call: <span class="code warn">waits for passkey</span></p>
-    <p class="m-e">Example values</p>
+  <figure class="fig rv">
+    <svg class="flow-svg" viewBox="0 0 1100 370" role="img" aria-labelledby="fl-d">
+      <title id="fl-d">The agent sends a call with a Counterseal token. Counterseal holds an irreversible call until your passkey approves it, then adds the real key from the vault and forwards the call to the provider. The agent only ever has the token.</title>
+      <path class="wire" d="M150 120 H330"/><path class="wire" d="M490 120 H610"/><path class="wire" d="M770 120 H930"/>
+      <path class="wire w2" d="M690 160 V230"/><path class="wire w3" d="M410 310 V340 H1005 V160"/>
+      <path class="pulse p1" d="M150 120 H330"/><path class="pulse p2" d="M490 120 H610"/><path class="pulse p3" d="M690 160 V230"/><path class="pulse p4" d="M770 120 H930"/><path class="pulse p5" d="M410 310 V340 H1005 V160"/>
+      <g class="node"><rect x="20" y="80" width="130" height="80" rx="16"/><text x="85" y="114">Agent</text><text class="sub" x="85" y="136">cs_tok_ only</text></g>
+      <g class="node acc"><rect x="330" y="80" width="160" height="80" rx="16"/><text x="410" y="114">Counterseal</text><text class="sub" x="410" y="136">checks the map</text></g>
+      <g class="node warn"><rect x="610" y="80" width="160" height="80" rx="16"/><text x="690" y="114">Held call</text><text class="sub" x="690" y="136">428, waiting</text></g>
+      <g class="node acc"><rect x="610" y="230" width="160" height="80" rx="16"/><text x="690" y="264">Your passkey</text><text class="sub" x="690" y="286">approve or deny</text></g>
+      <g class="node"><rect x="930" y="80" width="150" height="80" rx="16"/><text x="1005" y="114">Provider</text><text class="sub" x="1005" y="136">the real API</text></g>
+      <g class="node vault"><rect x="330" y="230" width="160" height="80" rx="16"/><text x="410" y="264">Vault</text><text class="sub" x="410" y="286">real key, encrypted</text></g>
+      <path class="wire w4" d="M410 160 V230"/>
+    </svg>
+    <figcaption>Reads and other writes skip the hold and go straight through. The key is decrypted on the server only to forward a call, and it is never sent to the agent.</figcaption>
+  </figure>
+  <div class="rcard-wrap rv">
+    <div class="rcard" aria-label="Sample receipt with example values">
+      <p class="rc-h"><span>Receipt</span><span class="rc-x">Example values</span></p>
+      <dl>
+        <div><dt>agent</dt><dd>billing-bot</dd></div>
+        <div><dt>action</dt><dd>DELETE /v1/customers</dd></div>
+        <div><dt>subject</dt><dd>stripe cus_42</dd></div>
+        <div><dt>decision</dt><dd class="ok">approved</dd></div>
+        <div><dt>ts</dt><dd>1791614400000</dd></div>
+        <div><dt>input_sha256</dt><dd>9f2c41&hellip;e07a</dd></div>
+      </dl>
+      <p class="rc-f">Hashes, not content. Each entry is in an append only log with a signed checkpoint.</p>
+    </div>
+    <div class="rc-copy">
+      <h3>Every decision leaves a receipt.</h3>
+      <p>Open the public log and check any entry yourself: the checkpoint signature and the inclusion proof are verified in your browser.</p>
+      <p class="rc-links"><a class="btn ghost" href="/log/">See a real receipt</a> <a class="txt" href="/verify/">Verify a receipt bundle</a></p>
+    </div>
   </div>
 </section>
 
-<section class="limits" id="limits" aria-labelledby="lim-t">
-  <p class="kick">Limits, said plainly</p>
-  <h2 id="lim-t">What it does <em>not</em> do.</h2>
-  <div class="grid">
-    <div><h3>You trust us with the key</h3><p>Each key is encrypted on its own (AES-256-GCM) and no API ever returns it, but the hosted service decrypts it to forward a call. Start with a test key.</p></div>
-    <div><h3>Only calls that pass through</h3><p>A key in a .env file, a direct database connection or another tool is never seen.</p></div>
-    <div><h3>A seatbelt, not a sandbox</h3><p>The local coding agent guard matches a map of commands. For a hard stop, use a token instead of the real key.</p></div>
-    <div><h3>The map is a reviewed list</h3><p>A call it does not know to be irreversible goes through. Add hold rules to a token's policy for anything else you care about.</p></div>
+<section class="feat" id="features" aria-labelledby="feat-t">
+  <div class="sec-h rv">
+    <p class="kick">Product</p>
+    <h2 id="feat-t">A second seal on <em>every</em> risky call.</h2>
+  </div>
+  <div class="bento">
+    <article class="tile t-pass rv">
+      <div class="viz v-pass" aria-hidden="true">
+        <div class="phone"><p class="ph-t">Approve DELETE customer?</p><span class="fp"></span><p class="ph-b">Touch to seal</p></div>
+      </div>
+      <h3>Passkey approval</h3>
+      <p>The call waits. Your phone asks. One touch seals it, or you deny it.</p>
+    </article>
+    <article class="tile t-key rv">
+      <div class="viz v-key" aria-hidden="true"><code class="k1">sk_live_&bull;&bull;&bull;&bull;&bull;&bull;</code><span class="k-arrow"></span><code class="k2">cs_tok_scoped</code></div>
+      <h3>Your agent never holds your key</h3>
+      <p>Paste the key once into the vault. Agents get a scoped Counterseal token.</p>
+    </article>
+    <article class="tile t-budget rv" id="budget">
+      <div class="viz v-bud" aria-hidden="true">
+        <p class="b-v"><b>$14.20</b> of $15.00 today</p>
+        <div class="b-bar"><i></i></div>
+        <p class="b-n"><span class="code bad">402</span> budget_exhausted</p>
+      </div>
+      <h3>Budget seal</h3>
+      <p>Daily or monthly caps on model calls through Counterseal. At the cap, the next call is never sent.</p>
+    </article>
+    <article class="tile t-rcpt rv">
+      <div class="viz v-rcpt" aria-hidden="true">
+        <p><span class="ok">sealed</span> DELETE cus_42</p><p><span class="no">denied</span> POST deploy</p><p><span class="ok">sealed</span> POST refund</p>
+      </div>
+      <h3>Public receipts</h3>
+      <p>Every decision on a write becomes a receipt in an append only log anyone can verify.</p>
+    </article>
+    <article class="tile t-guard rv">
+      <div class="viz v-guard" aria-hidden="true"><code><span class="pr">$</span> rm -rf ./prod-data</code><p class="g-ask">Guard: asking you first</p></div>
+      <h3>Coding agent guard</h3>
+      <p>A seatbelt for local coding agents: commands on its map ask you first.</p>
+    </article>
+    <article class="tile t-sso rv">
+      <div class="viz v-sso" aria-hidden="true"><span class="idp">Your identity provider</span><span class="ln"></span><span class="tm">Team</span></div>
+      <h3>SSO for teams</h3>
+      <p>Sign in with OpenID Connect. Every approval still needs that person's own passkey.</p>
+    </article>
   </div>
 </section>
 
 <section class="proof" id="proof" aria-labelledby="pr-t">
-  <p class="kick">Proof, not promises</p>
-  <h2 id="pr-t">Check it <em>yourself.</em></h2>
-  <div class="cards">
-    <a href="https://github.com/GautamTalksDev/counterseal"><b>Open source</b><span>Apache 2.0. Read every line on GitHub.</span></a>
-    <a href="https://github.com/GautamTalksDev/counterseal/actions/workflows/ci.yml"><b>660 tests</b><span>Run in public CI on every change.</span></a>
-    <a href="/log/"><b>Public receipt log</b><span>Append only. Prove a receipt is in it.</span></a>
-    <a href="https://www.npmjs.com/package/counterseal"><b>npm provenance</b><span>Published from CI with no stored npm token.</span></a>
+  <h2 id="pr-t" class="sr">Proof you can check</h2>
+  <ul class="nums">
+    <li class="rv"><a href="https://github.com/GautamTalksDev/counterseal/actions/workflows/ci.yml"><b>660</b><span>tests run in public CI on every change</span></a></li>
+    <li class="rv"><a href="https://github.com/GautamTalksDev/counterseal"><b>Apache 2.0</b><span>every line on GitHub</span></a></li>
+    <li class="rv"><a href="/log/"><b>Public log</b><span>append only; prove any receipt is in it</span></a></li>
+    <li class="rv"><a href="https://www.npmjs.com/package/counterseal"><b>Provenance</b><span>npm package built and signed in public CI</span></a></li>
+  </ul>
+</section>
+
+<section class="start" id="start" aria-labelledby="go-t">
+  <div class="sec-h rv">
+    <p class="kick">Start</p>
+    <h2 id="go-t">Set up from your <em>terminal.</em></h2>
+  </div>
+  <div class="term rv">
+    <div class="tabs" role="tablist" aria-label="Setup">
+      <button type="button" role="tab" id="tb-api" aria-controls="tp-api" aria-selected="true">API broker</button>
+      <button type="button" role="tab" id="tb-guard" aria-controls="tp-guard" aria-selected="false" tabindex="-1">Coding agent guard</button>
+      <button type="button" role="tab" id="tb-mcp" aria-controls="tp-mcp" aria-selected="false" tabindex="-1">MCP</button>
+    </div>
+    <div class="tp" role="tabpanel" id="tp-api" aria-labelledby="tb-api" tabindex="0"><pre><code><span class="pr">$</span> npx counterseal login
+<span class="pr">$</span> npx counterseal add github prod
+<span class="pr">$</span> npx counterseal token &lt;key-id&gt;
+<span class="cm"># give the agent the token, keep the key</span></code></pre></div>
+    <div class="tp" role="tabpanel" id="tp-guard" aria-labelledby="tb-guard" tabindex="0"><pre><code><span class="pr">$</span> npx counterseal login
+<span class="pr">$</span> npx counterseal guard install
+<span class="cm"># commands on its map now ask you first</span></code></pre></div>
+    <div class="tp" role="tabpanel" id="tp-mcp" aria-labelledby="tb-mcp" tabindex="0"><pre><code><span class="pr">$</span> npx counterseal mcp
+<span class="cm"># a local MCP server with one request tool for your providers</span></code></pre></div>
+  </div>
+  <p class="lim-more rv"><a href="/docs/">Full setup in the docs</a> <span aria-hidden="true">&rarr;</span></p>
+</section>
+
+<section class="limits" id="limits" aria-labelledby="lim-t">
+  <div class="sec-h rv">
+    <p class="kick">Said plainly</p>
+    <h2 id="lim-t">What it does <em>not</em> do.</h2>
+  </div>
+  <dl class="lim rv">
+    <div><dt>You trust us with the key</dt><dd>Each key is encrypted on its own and no API returns it, but the hosted service decrypts it to forward a call. Start with a test key.</dd></div>
+    <div><dt>It only sees calls that pass through</dt><dd>A key in a .env file, a direct database connection or another tool is never seen.</dd></div>
+    <div><dt>The map is a reviewed list</dt><dd>A call it does not know to be irreversible goes through. Add hold rules for anything else.</dd></div>
+    <div><dt>The guard is a seatbelt, not a sandbox</dt><dd>It matches a map of commands. For a hard stop, give the agent a token, not the real key.</dd></div>
+    <div><dt>Budget seal caps only its own calls</dt><dd>Not your cloud bill, keys used directly or other tools. One call can pass the cap by its own cost.</dd></div>
+    <div><dt>Security is self-assessed</dt><dd>Checked by us against OWASP ASVS 5.0. No SOC 2, no external audit yet.</dd></div>
+  </dl>
+  <p class="lim-more rv"><a href="/security/">Read the security model</a> <span aria-hidden="true">&rarr;</span></p>
+</section>
+
+<section class="founder" aria-labelledby="fd-t">
+  <div class="fd rv">
+    <p class="kick">Who builds it</p>
+    <h2 id="fd-t">Built by Gautam Khosla in <em>Ottawa.</em></h2>
+    <p>One developer, working in public. The code, the tests and the receipt log are open, so you do not have to take my word for any of this.</p>
+    <p class="fd-l"><a class="btn ghost" href="https://github.com/GautamTalksDev/counterseal">Read the code on GitHub</a> <a class="txt" href="mailto:developwith.gt@gmail.com">developwith.gt@gmail.com</a></p>
   </div>
 </section>
 
-<section class="beta-card" id="pricing" aria-labelledby="pz-t">
-  <div>
-    <p class="kick">Pricing</p>
-    <h2 id="pz-t">Free during <em>beta.</em></h2>
-    <p>Every provider, every rule, approvals, Budget seal and the public log. No card. If anything you use starts to cost money, you get at least 30 days' notice.</p>
-    <p>Teams can already require two people for the riskiest calls. A Team plan comes later; ask to hear first.</p>
-  </div>
-  <div class="bc-r">
-    <a class="btn pri" href="/app">Start free</a>
-    <a class="btn ghost" href="mailto:developwith.gt@gmail.com?subject=Tell%20me%20when%20Counterseal%20Team%20opens">Notify me about Team</a>
+<section class="price" id="pricing" aria-labelledby="pz-t">
+  <div class="pcard rv">
+    <div class="p-l">
+      <p class="kick">Pricing</p>
+      <h2 id="pz-t">Free during <em>beta.</em></h2>
+      <p>Every provider, approvals, Budget seal and the public log. No card. At least 30 days' notice before anything costs money.</p>
+    </div>
+    <div class="p-r">
+      <p class="p-big"><b>$0</b><span>per month</span></p>
+      <a class="btn pri lg" href="/app">Start free</a>
+      <p class="team">Teams: OpenID Connect SSO, two-person approval for the riskiest calls, <a href="/privacy/dpa/">DPA</a> and <a href="/privacy/subprocessors/">subprocessors</a>.</p>
+      <a class="txt" href="mailto:developwith.gt@gmail.com?subject=Tell%20me%20when%20Counterseal%20Team%20opens">Hear first about the Team plan</a>
+    </div>
   </div>
 </section>
 
 <section class="end" aria-labelledby="end-t">
-  <img src="/img/warden/approved-still.webp" alt="" width="200" height="200" loading="lazy" decoding="async">
-  <h2 id="end-t">Ship with agents. <em>Keep</em> production.</h2>
-  <button class="copy" type="button" data-copy="npx counterseal login" aria-label="Copy the install command"><code><span class="pr" aria-hidden="true">$</span> npx counterseal login</code><span class="cp" aria-hidden="true">Copy</span></button>
+  <div class="aura a2" aria-hidden="true"></div>
+  <img class="end-w rv" src="/img/v4/w-approved-360.webp" alt="Warden showing a green approved seal" width="360" height="360" loading="lazy" decoding="async">
+  <h2 id="end-t" class="rv">Ship with agents. <em>Keep</em> production.</h2>
+  <div class="cta c rv">
+    <a class="btn pri lg" href="/app">Start free</a>
+    <a class="btn ghost lg" href="/docs/">Read the docs</a>
+  </div>
 </section>
 </main>
 
 <footer class="foot">
-  <p class="brand-s">Counterseal</p>
-  <nav aria-label="Trust"><a href="/docs/">Docs</a><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/security/">Security</a><a href="/security/standards/">Standards</a><a href="/privacy/">Privacy</a><a href="/privacy/dpa/">DPA</a><a href="/privacy/subprocessors/">Subprocessors</a><a href="/terms/">Terms</a><a href="https://github.com/GautamTalksDev/counterseal">GitHub</a></nav>
-  <p class="small">Not affiliated with GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend or Shopify.</p>
-  <p class="small">By Gautam Khosla, Ottawa. <a href="mailto:developwith.gt@gmail.com">developwith.gt@gmail.com</a>. Security self-assessed against OWASP ASVS 5.0; not certified, no external audit yet. This page loads nothing from anywhere else.</p>
+  <div class="f-in">
+    <div class="f-b"><a class="brand" href="/" aria-label="Counterseal home"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.2"/><circle cx="12" cy="12" r="1.9" class="dot"/></svg>Counterseal</a><p>By Gautam Khosla, Ottawa.<br><a href="mailto:developwith.gt@gmail.com">developwith.gt@gmail.com</a></p></div>
+    <nav aria-label="Product"><p>Product</p><a href="/app">App</a><a href="/docs/">Docs</a><a href="https://github.com/GautamTalksDev/counterseal">GitHub</a></nav>
+    <nav aria-label="Trust"><p>Trust</p><a href="/log/">Public log</a><a href="/verify/">Verify a receipt</a><a href="/security/">Security</a><a href="/security/standards/">Standards</a></nav>
+    <nav aria-label="Legal"><p>Legal</p><a href="/privacy/">Privacy</a><a href="/privacy/dpa/">DPA</a><a href="/privacy/subprocessors/">Subprocessors</a><a href="/terms/">Terms</a></nav>
+  </div>
+  <p class="f-s">Not affiliated with GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend or Shopify. Names say only which APIs are covered. This page loads nothing from anywhere else.</p>
 </footer>
 </body>
 </html>
