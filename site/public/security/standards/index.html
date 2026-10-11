@@ -30,6 +30,7 @@
   <a href="#api">API Security Top 10 2023</a>
   <a href="#llm">Top 10 for LLM Apps 2025</a>
   <a href="#agentic">Top 10 for Agentic Apps 2026</a>
+  <a href="#enterprise">DPA and subprocessors</a>
   <a href="#open">What is not met yet</a>
   <a href="#sources">Sources</a>
 </nav>
@@ -53,7 +54,7 @@
     <tr><td>V7 Session Management</td><td>Met (L2), except 7.5.2 partly. L3 7.5.3 met</td><td>Reference tokens of 256 random bits, stored as hashes; 12 hours at most on the web and 7 days for a command line; a web session also ends after an hour without an action of yours (added on this branch); logout deletes the session. Every sensitive action asks for your passkey again (7.5.3). Command line sessions are listed and can be revoked with everything they made; other browser sessions are not listed yet, but removing a passkey signs them all out. Tests: <code>app-trust.test.js</code>, <code>cli-signin.test.js</code>.</td></tr>
     <tr><td>V8 Authorization</td><td>Met (L2)</td><td>Every query is scoped to the account; team roles are checked on the server for every request; a passkey proves presence, not authority. Tests: <code>team.test.js</code>, <code>leash.test.js</code>.</td></tr>
     <tr><td>V9 Self-contained Tokens</td><td>Met where used</td><td>Sessions and agent tokens are reference tokens, not JWTs. Agent request signatures (RFC 9421) cover the method, URL, body digest and content type, within 5 minutes, each nonce once. Tests: <code>leash.test.js</code>, <code>joints.test.js</code>.</td></tr>
-    <tr><td>V10 OAuth and OIDC</td><td>Not applicable</td><td>Counterseal is not an OAuth client, server or identity provider.</td></tr>
+    <tr><td>V10 OAuth and OIDC</td><td>Met (L2) for team single sign-on, added 10 October 2026</td><td>Counterseal is an OpenID Connect relying party for team sign-in, never an identity provider. Authorization code flow only, with PKCE S256, a single-use state bound to the browser by a <code>__Host-</code> cookie, and a nonce; the ID token is checked before any claim is used: the algorithm is pinned to what the account accepts (RS256 or ES256, never <code>none</code> or HS256), the key comes only from the provider's JWKS by <code>kid</code> (header keys refused), then issuer, audience and <code>azp</code>, expiry, issue time, <code>nbf</code>, nonce and a verified email in an allowed domain. People are matched by issuer and subject, never by email. SSO signs people in only: approvals still need their own passkey. Tests: <code>sso.test.js</code> (bad signature, wrong audience, expired, replayed state, wrong domain and more, against a local mock identity provider).</td></tr>
     <tr><td>V11 Cryptography</td><td>Met (L2)</td><td>AES-256-GCM per vaulted key with its own data key, wrapped by a master key and bound to its row; Ed25519 checkpoints; SHA-256; the platform's random generator. The master key rotates without losing a stored key: only the data keys are wrapped again, the secrets are never decrypted for it (procedure in <code>docs/KEY_ROTATION.md</code>, test <code>key-rotation.test.js</code>). It has not been run on the live service yet.</td></tr>
     <tr><td>V12 Secure Communication</td><td>Met (L2)</td><td>HTTPS only, with HSTS for two years on every subdomain (preload asked for; the parent domain is not on the preload list yet); calls to providers go only to their fixed HTTPS hosts (Shopify: to a strictly checked store address); redirects are never followed.</td></tr>
     <tr><td>V13 Configuration</td><td>Met (L2)</td><td>Secrets live in the platform's secret store, never in the repository; zero runtime dependencies; request logs off; a generic error to clients.</td></tr>
@@ -122,6 +123,9 @@
     <tr><td>ASI10 Rogue Agents</td><td>Freeze, revocation of tokens and keys, the audit log, and public receipts anyone can verify.</td></tr>
   </table>
 
+  <h2 id="enterprise">For a security or procurement review</h2>
+  <p>The <a href="/privacy/dpa/">data processing agreement template</a> (GDPR Article 28, with the EU Standard Contractual Clauses, UK and Canada notes, and a map of where each kind of data lives) and the <a href="/privacy/subprocessors/">subprocessors page</a> (Cloudflare only, and who is not a subprocessor) go with this self-assessment. <code>ENTERPRISE.md</code> in the <a href="https://github.com/GautamTalksDev/counterseal" rel="noopener noreferrer">source repository</a> lists what exists today and what does not.</p>
+
   <h2 id="open">What is not met yet</h2>
   <ul>
     <li>The master key rotation is tested, but has not been run on the live service yet (V11).</li>
@@ -132,6 +136,8 @@
     <li>Browser sessions are not listed for you to end one by one (V7 7.5.2); removing a passkey ends all of them.</li>
     <li>Level 3 authentication needs a hardware-based factor; a synced passkey is not one (V6 6.3.3).</li>
     <li>No external audit or penetration test has been done.</li>
+    <li>SOC 2: planned, not started. Counterseal has no SOC 2 report and does not claim one.</li>
+    <li>SCIM provisioning is not built: removing someone at your identity provider stops their next sign-in, and with SSO required they cannot sign in with a passkey alone, but an owner still removes them in the app to end a session they already have at once (it ends by itself within an hour without activity, 12 hours at most).</li>
   </ul>
   <p>Fixed while writing this: a web session now ends after an hour without an action (V7 7.3.1); deleting an account now also removes rate limit counters that name it (V14); the app's offline copy is tested never to hold API data (V3, V14).</p>
 

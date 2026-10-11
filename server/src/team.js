@@ -125,7 +125,7 @@ export async function confirm(env, sess, body, kind) {
   await checkAssertion(env, body.credential, ch.challenge, sess);
   return ch;
 }
-const founderRow = (db, accountId) => db.prepare("INSERT OR IGNORE INTO members (id, account_id, name, role, created_at, votes_from) SELECT id, id, name, 'owner', created_at, 0 FROM accounts WHERE id = ?").bind(accountId);
+export const founderRow = (db, accountId) => db.prepare("INSERT OR IGNORE INTO members (id, account_id, name, role, created_at, votes_from) SELECT id, id, name, 'owner', created_at, 0 FROM accounts WHERE id = ?").bind(accountId);
 
 /** wake every member's devices (the push carries nothing; the phone reads /v1/alerts), optionally not one member's, and
  *  optionally some devices already gone from the account (a removed person's); after the response on Workers

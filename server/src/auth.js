@@ -126,14 +126,20 @@ export async function loginFinish(env, body) {
   const pk = await verifyPasskey(env, body.credential, ch.challenge);
   // the session is the person's whose passkey this is (a team member, or the account's founder)
   const member = pk.member_id || pk.account_id;
+  // "SSO required" (src/sso.js): members other than owners sign in through the team's identity provider, so someone
+  // removed there loses access at their next sign-in. Owners keep passkey sign-in (a provider outage never locks the
+  // account out). The passkey still approves everything.
+  const sso = await env.DB.prepare(`SELECT 1 AS x FROM sso_configs WHERE account_id = ?1 AND enforce = 1 AND COALESCE((SELECT CASE WHEN removed_at IS NULL THEN role END FROM members WHERE id = ?2 AND account_id = ?1), CASE WHEN ?2 = ?1 THEN 'owner' END, '') != 'owner'`).bind(pk.account_id, member).first();
+  if (sso) throw new HttpError(403, 'sso_required', 'This team signs in with single sign-on. Use the team sign-in link; your passkey still approves.');
   await audit(env, pk.account_id, 'web', 'login', member !== pk.account_id ? { member } : {});
   return startWebSession(env, pk.account_id, member);
 }
 
-export async function startWebSession(env, accountId, memberId = null) {
+/** via: how the session was started (null: a passkey; 'sso': single sign-on, src/sso.js) */
+export async function startWebSession(env, accountId, memberId = null, via = null) {
   const token = b64u(rand(32));
-  await env.DB.prepare('INSERT INTO sessions (hash, account_id, kind, created_at, expires_at, member_id, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(await sha256hex(token), accountId, 'web', now(), now() + WEB_TTL, memberId, now()).run();
+  await env.DB.prepare('INSERT INTO sessions (hash, account_id, kind, created_at, expires_at, member_id, seen_at, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(await sha256hex(token), accountId, 'web', now(), now() + WEB_TTL, memberId, now(), via).run();
   return { body: { ok: true }, cookie: `__Host-leash=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${WEB_TTL / 1000}` };
 }
 
@@ -166,7 +172,7 @@ export async function session(env, request, write) {
   const memberId = s.member_id || s.account_id;
   const role = s.m_id ? (s.m_removed ? null : s.m_role) : memberId === s.account_id ? 'owner' : null;
   if (!role) throw new HttpError(401, 'signed_out');
-  return { accountId: s.account_id, kind, hash, expiresAt: s.expires_at, memberId, role, memberName: s.m_name || null, seenAt: s.seen_at ?? s.created_at };
+  return { accountId: s.account_id, kind, hash, expiresAt: s.expires_at, memberId, role, memberName: s.m_name || null, seenAt: s.seen_at ?? s.created_at, via: s.via || null };
 }
 
 /** an action of yours keeps a web session alive: written at most once a minute per session (src/index.js decides what

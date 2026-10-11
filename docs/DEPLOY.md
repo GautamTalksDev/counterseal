@@ -322,3 +322,9 @@ available to people:
    offer an update, because the scripts are pinned inside the plugin.
 4. **Nothing is tested in the agents' own apps yet** (see the README): try `counterseal guard status` and one held command in each
    agent you intend to name in public copy before naming it.
+
+## Migration 0015 (single sign-on)
+
+`0015_sso.sql` only adds the tables `sso_configs`, `sso_states` and `sso_identities` and the nullable column `sessions.via`.
+An account without SSO behaves as before. Apply it with the other migrations before deploying the code (passkey sign-in
+reads `sso_configs`). See `ENTERPRISE.md`.
