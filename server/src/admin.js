@@ -13,8 +13,8 @@ import { rewrap } from './vault.js';
 const DAY = 86_400_000;
 
 /** constant-time: both sides are hashed first, so the comparison never depends on where they differ or on length */
-export async function checkStatsToken(env, request) {
-  const want = env.STATS_TOKEN;
+export async function checkStatsToken(env, request, name = 'STATS_TOKEN') {
+  const want = env[name];
   const m = (request.headers.get('authorization') || '').match(/^Bearer (\S{1,512})$/);
   if (typeof want !== 'string' || want.length < 32 || !m) throw new HttpError(404, 'not_found');
   if (!eqBytes(await sha256(m[1]), await sha256(want))) throw new HttpError(404, 'not_found');
@@ -93,7 +93,8 @@ export function markSeen(env, accountId) {
 }
 export const _resetSeen = () => seen.clear();
 
-// Master key rotation (docs/KEY_ROTATION.md): POST /v1/admin/vault/rewrap with the STATS_TOKEN bearer, after LEASH_KEK_NEXT
+// Master key rotation (docs/KEY_ROTATION.md): POST /v1/admin/vault/rewrap with the ADMIN_TOKEN bearer
+// (its own secret: the read-only STATS_TOKEN cannot move keys), after LEASH_KEK_NEXT
 // (or LEASH_KEK plus LEASH_KEK_OLD) was set. Each call moves up to PAGE rows of each sealed table to the
 // new key and returns where to continue ({"after": {"credentials": id, "channels": id}}); `next` is null for a table
 // that is done. Counts and row-id cursors only, never a secret: only the data key is unwrapped and wrapped again.

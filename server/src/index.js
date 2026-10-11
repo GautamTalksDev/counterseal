@@ -270,7 +270,7 @@ const ROUTES = [
     return stats(c.env, head);
   }],
   // master key rotation: move vaulted rows to the new master key (docs/KEY_ROTATION.md); counts only
-  ['POST', /^\/v1\/admin\/vault\/rewrap$/, 'admin', (c) => rewrapVault(c.env, c.body)],
+  ['POST', /^\/v1\/admin\/vault\/rewrap$/, 'adminw', (c) => rewrapVault(c.env, c.body)], // ADMIN_TOKEN, not the stats token
   ...LEDGER_ROUTES,
 ];
 
@@ -287,8 +287,9 @@ async function deleteAccount(env, s, body) {
   if (ch.account_id !== s.accountId) throw new HttpError(403, 'forbidden');
   await A.checkAssertion(env, body.credential, ch.challenge, s);
   const id = s.accountId;
-  // order matters: receipts keys stop working first, then the log is unlinked, then the rows go (the whole team's)
-  await forgetAccount(env, id);
+  // order matters: the rows go first, in one batch (the receipts keys with them, so nothing new can be signed), and only
+  // then is the public log unlinked. If the batch fails nothing has changed and the account can still prove its receipts;
+  // the unlink is idempotent and retried, so a failure there leaves no account behind, only a link to an id that is gone.
   await env.DB.batch([
     ...deleteStatements(env.DB, id),
     ...Brakes.deleteStatements(env.DB, id), // their tokens' daily totals and breaker windows, before the tokens go
@@ -298,6 +299,11 @@ async function deleteAccount(env, s, body) {
     ...['push_subs', 'hold_votes', 'holds', 'guard_keys', 'gates', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes', 'invites', 'members'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
     env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id),
   ]);
+  for (let i = 0; ; i++) {
+    try { await forgetAccount(env, id); break; } catch (e) {
+      if (i >= 2) { console.error(JSON.stringify({ event: 'forget_tenant_failed', message: String(e?.message || e).slice(0, 200) })); break; }
+    }
+  }
   return { body: { deleted: true, note: 'Account deleted. Receipts already in the public log stay there by design; they are no longer linked to you on our side.' }, cookie: '__Host-leash=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0' };
 }
 
@@ -380,7 +386,7 @@ export async function handle(request, rawEnv, opts = {}) {
       // reads of the public log and the tool: no storage write per request
       if (guard === 'pub') await readLimit(env, await ipBucket(env, request, 'pubr'), Number(env.PUB_RPM) || 600, t);
       if (guard === 'tool') await readLimit(env, await ipBucket(env, request, 'tool'), Number(env.TOOL_RPM) || 10, t);
-      if (guard === 'admin') { await readLimit(env, await ipBucket(env, request, 'admin'), 30, t); await checkStatsToken(env, request); }
+      if (guard === 'admin' || guard === 'adminw') { await readLimit(env, await ipBucket(env, request, 'admin'), 30, t); await checkStatsToken(env, request, guard === 'adminw' ? 'ADMIN_TOKEN' : 'STATS_TOKEN'); }
       // receipts: the hard limits (quotas, daily capacity) are reserved in D1; the per-key rate limit costs no D1 write
       if (guard === 'key') { c.k = await apiKey(env, request); await readLimit(env, 'key:' + c.k.id, 1200, t); }
       // guard keys: waiting for an approval writes nothing to D1, so this limit lives in memory too

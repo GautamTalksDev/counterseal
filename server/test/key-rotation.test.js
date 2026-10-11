@@ -39,8 +39,10 @@ test('vault: a row sealed with the old key opens with LEASH_KEK_OLD, rewraps to 
 test('POST /v1/admin/vault/rewrap: hidden without the token; moves every sealed row; proxy works before, during, after', async () => {
   const w = new World();
   const rw = (body, bearer = TOKEN) => w.req('POST', '/v1/admin/vault/rewrap', { ...anon, bearer, body });
-  assert.equal((await rw({})).status, 404, 'no STATS_TOKEN: the route does not exist');
+  assert.equal((await rw({})).status, 404, 'no ADMIN_TOKEN: the route does not exist');
   w.env.STATS_TOKEN = TOKEN;
+  assert.equal((await rw({})).status, 404, 'the read-only stats token cannot rewrap (gate L1)');
+  w.env.ADMIN_TOKEN = TOKEN;
   assert.equal((await rw({}, 'wrong')).status, 404);
   const u = await w.user();
   const cred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'github', secret: SECRET } })).body.id;
@@ -78,7 +80,7 @@ test('POST /v1/admin/vault/rewrap: hidden without the token; moves every sealed 
 
 test('rotation without a copy of the current key: LEASH_KEK_NEXT wraps, LEASH_KEK still opens, then NEXT becomes LEASH_KEK', async () => {
   const w = new World();
-  w.env.STATS_TOKEN = TOKEN;
+  w.env.ADMIN_TOKEN = TOKEN;
   const u = await w.user();
   const cred = (await w.req('POST', '/v1/credentials', { cookie: u.cookie, body: { provider: 'github', secret: SECRET } })).body.id;
   const tok = (await w.req('POST', '/v1/tokens', { cookie: u.cookie, body: { credentialId: cred } })).body.token;

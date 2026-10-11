@@ -13,6 +13,7 @@ Tested by `server/test/key-rotation.test.js` (the vault parts) and `server/test/
 | `IP_SALT` | Yes, any time | Rate limit counters start again from zero |
 | `VAPID_PRIVATE_JWK` | Yes, any time | Every device has to turn alerts on again |
 | `STATS_TOKEN` | Yes, any time | None |
+| `ADMIN_TOKEN` | Yes, any time | None (only the rewrap endpoint uses it) |
 | `LOG_KEY_JWK` | **Never** | Breaks the public log for everyone who verifies it |
 
 ## LEASH_KEK, the vault master key
@@ -32,7 +33,7 @@ Use `LEASH_KEK_NEXT`. It needs no copy of the current key, which `wrangler` cann
 saved.
 
 Before you start: the code with `LEASH_KEK_NEXT` support must be deployed (version with `POST /v1/admin/vault/rewrap`),
-and `STATS_TOKEN` must be set.
+and `ADMIN_TOKEN` must be set (see below; the read-only `STATS_TOKEN` cannot rewrap).
 
 ```bash
 # 0. a restore point (keep the bookmark it prints)
@@ -46,7 +47,7 @@ npx -y wrangler@4 secret put LEASH_KEK_NEXT < /tmp/kek-next
 
 # 3. move every row to the new key; repeat with the "after" cursors it returns until "done" is true
 curl -sS -X POST https://counterseal.gautamkhosla.com/v1/admin/vault/rewrap \
-  -H "authorization: Bearer $(cat ~/.counterseal-stats-token)" -H 'content-type: application/json' -d '{}'
+  -H "authorization: Bearer $(cat ~/.counterseal-admin-token)" -H 'content-type: application/json' -d '{}'
 #   {"credentials":{"checked":N,"rewrapped":N,"failed":0,"next":null},"channels":{...},"rotating":true,"done":true}
 #   with "next" set:  -d '{"after":{"credentials":"<next>","channels":"<next>"}}'
 #   run it once more: every "rewrapped" must be 0, every "failed" 0
@@ -98,6 +99,16 @@ At least 32 characters; anything shorter is treated as unset. The old token stop
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | tee ~/.counterseal-stats-token | npx -y wrangler@4 secret put STATS_TOKEN
 chmod 600 ~/.counterseal-stats-token
+```
+
+## ADMIN_TOKEN
+
+Used only by `POST /v1/admin/vault/rewrap`. At least 32 characters, separate from `STATS_TOKEN`, so the token you use
+to read launch numbers cannot move vault keys. Set it before a rotation; you can delete it afterwards.
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | tee ~/.counterseal-admin-token | npx -y wrangler@4 secret put ADMIN_TOKEN
+chmod 600 ~/.counterseal-admin-token
 ```
 
 ## LOG_KEY_JWK: never rotate

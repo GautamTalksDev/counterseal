@@ -116,7 +116,7 @@ Without `VAPID_PRIVATE_JWK`, phone alerts are off. Without `LOG_KEY_JWK`, the br
 | `GATE_RPM` | 600 | requests of a deploy gate (`POST /v1/gate/request`, and separately `/v1/gate/status` and `/v1/gate/cancel`) per IP per minute (in memory per isolate; hosted runners share networks, so it is generous); each gate also has 30 new requests an hour (D1) and 10 waiting, each poll secret 30 polls a minute (in memory) |
 
 Secrets: `LEASH_KEK`, `IP_SALT` (required), `VAPID_PRIVATE_JWK` (phone alerts), `LOG_KEY_JWK` (receipts), `STATS_TOKEN`
-(the private stats endpoint; at least 32 characters, or the endpoint stays 404).
+(the private stats endpoint; at least 32 characters, or the endpoint stays 404), `ADMIN_TOKEN` (only for vault key rotation, see docs/KEY_ROTATION.md).
 
 Recommended: a Workers Rate Limiting binding named `READ_LIMITER` replaces the in-memory buckets (shared across isolates
 in a location). Replace the comment line that starts with `// Optional, replaces the in-memory read limiter:` with:
