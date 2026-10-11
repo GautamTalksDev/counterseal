@@ -6,7 +6,9 @@
 <title>Counterseal</title>
 <meta name="theme-color" content="#08090b">
 <link rel="stylesheet" href="/styles.css">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="icon" href="/favicon-16.png" type="image/png" sizes="16x16">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -88,6 +90,7 @@
       <a href="#" data-view="account"><span class="ico i-acct"></span>Account</a>
       <a href="#" data-view="privacy"><span class="ico i-log"></span>Privacy</a>
     </nav>
+    <button id="themeBtn" class="install-nav theme-btn" type="button">Theme: system</button>
     <button id="installNav" class="install-nav" type="button" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="14" height="11" rx="2"/><path d="M10 6v5M7.5 8.8 10 11.3l2.5-2.5M7 17h6"/></svg>Install the app</button>
     <div class="me"><span class="av" id="avatar">?</span><span class="who-box"><span id="who" class="who"></span><span id="whoRole" class="who-role"></span></span><button id="logout" class="icon-btn" type="button" title="Sign out" aria-label="Sign out"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 4H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M12 6l4 4-4 4M16 10H8"/></svg></button></div>
   </aside>
@@ -140,6 +143,36 @@
 
     <section class="view" data-view="holds">
       <header class="vh"><div><h1>Held</h1><p class="dim">Irreversible calls and commands your agents tried. Nothing happens until you decide.</p></div></header>
+
+      <section class="warden-grid" aria-label="Today at a glance">
+        <article class="wcard w-hero" id="wHero" data-state="calm">
+          <div class="w-top"><span class="w-duty mono">WARDEN IS ON DUTY</span><span id="wBadge" class="w-badge mono">ALL CLEAR</span></div>
+          <div class="w-stage"><img id="wImg" class="w-img" src="/media/warden/calm.png" width="320" height="320" alt="The Warden, a ceramic seal, stands calm with a green wax seal on its belly." decoding="async"></div>
+          <div class="w-copy" aria-live="polite"><h2 class="w-title"><span id="wLead"></span><span id="wHot" class="w-hot">All clear</span><span id="wTail">.</span></h2><p id="wSub" class="dim">Agents are working. Anything they cannot take back waits for your passkey.</p></div>
+        </article>
+        <article class="wcard w-spend" aria-labelledby="wSpendTitle">
+          <h3 id="wSpendTitle">Spend vs cap, today</h3>
+          <div class="w-spend-body">
+            <div class="w-ring" id="wRingBox" role="img" aria-label="No spend yet today">
+              <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="w-ring-t" cx="60" cy="60" r="50"/><circle id="wRingArc" class="w-ring-a" cx="60" cy="60" r="50" stroke-dasharray="0 314.2" transform="rotate(-90 60 60)"/></svg>
+              <div class="w-ring-c"><b id="wRingVal" class="mono">$0.00</b><span id="wRingCap" class="mono">no cap</span></div>
+            </div>
+            <div id="wSpendList" class="w-bars"></div>
+          </div>
+          <p id="wSpendNone" class="dim small">Spend shows here once an agent makes AI model calls through Counterseal with a token for an OpenAI or Anthropic key.</p>
+          <button class="linkbtn w-go" type="button" data-go="budget">Open Budget seal</button>
+        </article>
+        <article class="wcard w-brk" aria-labelledby="wBrkTitle">
+          <div class="w-brk-row"><div><h3 id="wBrkTitle">Breaker</h3><p id="wBrk" class="dim">Closed. Calls flow through the broker.</p></div><span id="wBrkPill" class="w-pill" aria-hidden="true"><span></span></span></div>
+          <button class="linkbtn w-go" type="button" data-go="tokens">Open Agent tokens</button>
+        </article>
+        <article class="wcard w-rec" aria-labelledby="wRecTitle">
+          <h3 id="wRecTitle">Recent decisions</h3>
+          <ol id="wRecent" class="w-recent"></ol>
+          <p id="wRecentNone" class="dim small">No decisions yet.</p>
+          <button class="linkbtn w-go" type="button" data-go="audit">Open Audit log</button>
+        </article>
+      </section>
 
       <section class="panel firstrun" id="firstRun" aria-labelledby="frTitle" hidden>
         <div class="panel-head"><h3 id="frTitle">Get started</h3><span class="dim small" id="frCount"></span><button id="frHide" class="linkbtn" type="button">Hide this list</button></div>

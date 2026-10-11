@@ -1,6 +1,7 @@
 // Counterseal dashboard. No innerHTML (Trusted Types enforced), no third-party code, no secrets kept in the page.
 // The one exception is an agent key made here: it is generated in this browser, downloaded at once, and dropped.
 import { BRAND } from '/brand.js';
+import { wardenState, WARDEN_ALT, WARDEN_STATES } from './warden.js';
 const $ = (id) => document.getElementById(id);
 // the CLI package the install lines name (server/src/brand.js cliInstall; scripts/cli-name.mjs switches it)
 const CLI_PKG = BRAND.cliInstall || BRAND.cli || 'leashcli';
@@ -294,6 +295,10 @@ async function load() {
     sel.replaceChildren(first, ...active.map((k) => el('option', { value: k.id, textContent: k.label })));
     sel.value = active.some((k) => k.id === keep) ? keep : '';
   }
+  // the Warden and the at-a-glance cards: real holds, tokens, freeze, audit and Budget seal spend
+  WARDEN.holds = h.holds; WARDEN.tokens = t.tokens; WARDEN.frozenAt = me.account.frozen_at; WARDEN.entries = a.entries;
+  renderWarden();
+  api('GET', '/v1/budget', undefined, { quiet: true }).then((v) => { WARDEN.budget = v; renderWarden(); }).catch(() => {});
   // the receipts list reads the log's Durable Object, so it is fetched only while that view is open
   if (current === 'receipts') receiptsView(me.receipts).catch(() => {});
   if (current === 'gates') gatesView().catch(() => {});
@@ -373,6 +378,7 @@ function holdCard(x) {
   ok.onclick = async () => {
     try {
       const r = await ceremony(`/v1/holds/${x.id}/approve/begin`, `/v1/holds/${x.id}/approve/finish`);
+      if (r.approved) WARDEN.approvedAt = Date.now();
       if (demo && r.approved) { await demoRetry(x.id); return; }
       toast(!r.approved ? r.note : kind === 'deploy' ? 'Approved. The job can go on, once, within 10 minutes.' : guard ? 'Approved. The agent can run that exact command once, within 10 minutes.' : 'Approved. The agent can retry that exact request once.');
       load();
@@ -929,6 +935,76 @@ async function passkeysView() {
   }
 }
 
+// ---- The Warden (warden.js): the mascot and the at-a-glance cards, from the same answers load() already has
+const WARDEN = { holds: [], tokens: [], frozenAt: null, budget: null, entries: [], approvedAt: 0, shown: null };
+const reduceMotion = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+const RING = 314.2;
+function renderWarden() {
+  const w = wardenState({ holds: WARDEN.holds, tokens: WARDEN.tokens, frozenAt: WARDEN.frozenAt, budget: WARDEN.budget, approvedAt: WARDEN.approvedAt });
+  if (!WARDEN_STATES.includes(w.state)) return;
+  $('wHero').dataset.state = w.state;
+  $('wBadge').textContent = w.badge;
+  $('wLead').textContent = w.lead; $('wHot').textContent = w.hot; $('wTail').textContent = w.tail; $('wSub').textContent = w.sub;
+  // a still picture when the system asks for less motion; the looping one otherwise
+  const src = `/media/warden/${w.state}.${reduceMotion() ? 'png' : 'webp'}`;
+  const img = $('wImg');
+  if (WARDEN.shown !== src) { img.src = src; img.alt = WARDEN_ALT[w.state]; WARDEN.shown = src; }
+  // a fresh approval shows for a few seconds, then the Warden goes back to what is true now
+  if (w.state === 'approved') { clearTimeout(renderWarden.t); renderWarden.t = setTimeout(renderWarden, 6500); }
+  // spend vs cap today: the account's day, and each agent token and key with spend or a cap
+  const scopes = (WARDEN.budget && WARDEN.budget.scopes) || [];
+  const acct = scopes.find((s) => s.scope === 'account');
+  const rows = scopes.filter((s) => s.scope !== 'account' && s.day && (s.day.cap || s.day.spent > 0)).slice(0, 4);
+  const total = acct ? acct.day.spent : 0, cap = acct && acct.day.cap ? acct.day.cap + (acct.day.extra || 0) : null;
+  const pct = cap ? Math.min(100, (total * 100) / cap) : 0;
+  const level = (p) => (p >= 100 ? 'cap' : p >= 80 ? 'warn' : 'ok');
+  $('wRingArc').setAttribute('stroke-dasharray', `${((pct / 100) * RING).toFixed(1)} ${RING}`);
+  $('wRingBox').dataset.level = cap ? level(pct) : 'ok';
+  $('wRingBox').dataset.zero = pct <= 0 ? '1' : '0';
+  $('wRingVal').textContent = usdOf(total);
+  $('wRingCap').textContent = cap ? `of ${usdOf(cap)} cap` : 'no account cap';
+  $('wRingBox').setAttribute('aria-label', cap ? `Spent ${usdOf(total)} of a ${usdOf(cap)} cap today, ${Math.floor(pct)}%` : `Spent ${usdOf(total)} today, no account cap`);
+  const L = $('wSpendList'); L.replaceChildren();
+  for (const s of rows) {
+    const c = s.day.cap ? s.day.cap + (s.day.extra || 0) : null, p = c ? Math.min(100, Math.round((s.day.spent * 100) / c)) : 0;
+    const bar = el('progress', { max: 100, value: p, className: 'w-bar lv-' + (c ? level(p) : 'ok') });
+    bar.setAttribute('aria-label', `${s.label}: ${c ? p + '% of its cap today' : 'no cap'}`);
+    L.append(el('div', { className: 'w-row' }, el('span', { className: 'w-row-top' }, el('span', { className: 'mono w-name', textContent: s.label }), el('span', { className: 'mono', textContent: c ? `${usdOf(s.day.spent)} / ${usdOf(c)}` : `${usdOf(s.day.spent)}, no cap` })), bar));
+  }
+  $('wSpendNone').hidden = scopes.length > 1 || total > 0;
+  // the breaker: the freeze, or any live token that tripped
+  const tripped = (WARDEN.tokens || []).filter((x) => !x.revoked && x.tripped_at);
+  const open = !!WARDEN.frozenAt || tripped.length > 0;
+  $('wBrk').textContent = WARDEN.frozenAt ? 'Frozen. Every agent token is stopped until a passkey unfreezes it.'
+    : tripped.length ? `Tripped on ${tripped.map((x) => x.label).join(', ')}. Writes wait for you; reads still pass.` : 'Closed. Calls flow through the broker.';
+  $('wBrkPill').classList.toggle('open', open);
+  // the last few decisions from the audit log
+  const R = $('wRecent'); R.replaceChildren();
+  const recent = (WARDEN.entries || []).slice(0, 4);
+  for (const x of recent) {
+    const d = x.detail || {};
+    R.append(el('li', {}, el('span', { className: 'w-dot', ariaHidden: 'true' }),
+      el('span', { className: 'w-rec-main' }, el('span', { className: 'mono', textContent: d.path ? `${d.method || ''} ${d.path}`.trim() : String(x.action || '').replace(/_/g, ' ') }),
+        el('span', { className: 'mono w-rec-sub', textContent: `${String(x.actor || '').split(':')[0] || 'account'}${d.path ? '  ' + String(x.action || '').replace(/_/g, ' ') : ''}` })),
+      el('span', { className: 'mono dim', textContent: new Date(x.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) })));
+  }
+  $('wRecentNone').hidden = recent.length > 0;
+}
+
+// ---- light and dark: the system's choice unless the viewer picks one (kept in this browser only)
+const THEMES = ['system', 'light', 'dark'];
+function applyTheme(t) {
+  const root = document.documentElement;
+  if (root) { if (t === 'system') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', t); }
+  $('themeBtn').textContent = `Theme: ${t}`;
+}
+{
+  let theme = 'system';
+  try { const v = window.localStorage.getItem('cs.theme'); if (THEMES.includes(v)) theme = v; } catch { /* private mode */ }
+  applyTheme(theme);
+  $('themeBtn').onclick = () => { theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]; try { window.localStorage.setItem('cs.theme', theme); } catch { /* private mode */ } applyTheme(theme); };
+}
+
 // ---- Budget seal: live spend per agent, key and account, and budgets set with a passkey (server/src/budget.js)
 const usdOf = (micros) => '$' + (Math.max(0, micros || 0) / 1e6).toFixed(micros && micros < 10_000 ? 4 : 2);
 /** "12.50" -> 1250 cents; empty -> null; anything else throws */
@@ -1293,7 +1369,7 @@ async function refresh() {
   boot.ticks = (boot.ticks || 0) + 1;
   if (boot.ticks % 12 === 0) { lastAlerts = null; return load(); }
   const a = await api('GET', '/v1/alerts');
-  const now = JSON.stringify([(a.holds || []).map((h) => [h.id, (h.votes || []).length]), a.frozen_at ?? null, (a.team || []).length, (a.signins || []).length, (a.passkeys || []).length]);
+  const now = JSON.stringify([(a.holds || []).map((h) => [h.id, (h.votes || []).length]), a.frozen_at ?? null, (a.team || []).length, (a.signins || []).length, (a.passkeys || []).length, (a.budget || []).map((b) => [b.scope, b.period, b.pct >= 100 ? 2 : b.pct >= 80 ? 1 : 0])]);
   if (now === lastAlerts) return;
   const first = lastAlerts === null;
   lastAlerts = now;

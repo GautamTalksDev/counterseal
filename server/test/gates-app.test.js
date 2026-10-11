@@ -52,7 +52,8 @@ async function page(routes, { hash = '' } = {}) {
     navigator: { credentials: { get: async () => ({ id: 'cred', response: { authenticatorData: new ArrayBuffer(4), clientDataJSON: new ArrayBuffer(4), signature: new ArrayBuffer(4) } }) }, clipboard: { writeText: async (t) => { ctx.copied = t; } } },
     confirm: () => true, setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {}, Intl, URL, Blob, btoa, atob, Uint8Array, ArrayBuffer, Promise, JSON, Object, Array, String, Number, Date, Math, Set, Map, console, Error, SyntaxError, encodeURIComponent,
   });
-  const src = readFileSync(new URL('../../site/public/app/app.js', import.meta.url), 'utf8').replace(/^import .*$/m, 'const BRAND = { name: "Counterseal" };');
+  const src = readFileSync(new URL('../../site/public/app/app.js', import.meta.url), 'utf8').replace(/^import .*$/m, 'const BRAND = { name: "Counterseal" };')
+    .replace(/^import \{[^}]*\} from '\.\/warden\.js';$/m, () => readFileSync(new URL('../../site/public/app/warden.js', import.meta.url), 'utf8').replace(/^export /gm, ''));
   vm.runInContext(src, ctx, { filename: 'app.js' });
   const settle = async () => { for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r)); };
   await settle();
