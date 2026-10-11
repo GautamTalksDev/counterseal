@@ -531,3 +531,4 @@ h1{font-size:clamp(44px,6.1vw,88px)}
   .acts button{flex:0 1 auto}
 }
 @media (max-width:600px){.req .m{flex:none;margin-right:0}#path{min-width:0;flex:1}}
+.cover{max-width:62ch;margin:var(--s3) auto 0;text-align:center;color:var(--mute);font-size:15px}
