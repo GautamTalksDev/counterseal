@@ -24,6 +24,7 @@ import * as Team from './team.js';
 import * as Win from './windows.js';
 import * as Ch from './channels.js';
 import * as T from './trust.js';
+import * as Sso from './sso.js';
 import { BRAND } from './brand.js';
 export { ReceiptLog } from './log.js';
 
@@ -231,6 +232,19 @@ const ROUTES = [
   ['POST', /^\/v1\/team\/quorum\/finish$/, 'webw', (c) => Team.quorumFinish(c.env, c.s, c.body), OWNER],
   ['POST', /^\/v1\/team\/quorum\/cancel\/begin$/, 'webw', (c) => Team.cancelBegin(c.env, c.s), APPROVER],
   ['POST', /^\/v1\/team\/quorum\/cancel\/finish$/, 'webw', (c) => Team.cancelFinish(c.env, c.s, c.body), APPROVER],
+  // Single sign-on (src/sso.js). An owner picks the identity provider with a fresh passkey ceremony (and turns it off with
+  // one); anyone reads the settings. Signing in is public: start (with the Origin check) and the provider's callback (a
+  // top-level GET from the provider, protected by single-use state, a browser-bound cookie, PKCE and nonce). SSO only signs
+  // in: approvals still need the member's own passkey. A member who joined through SSO adds their first passkey from it.
+  ['GET', /^\/v1\/team\/sso$/, 'session', (c) => Sso.get(c.env, c.s)],
+  ['POST', /^\/v1\/team\/sso\/begin$/, 'webw', (c) => Sso.setBegin(c.env, c.s, c.body), OWNER],
+  ['POST', /^\/v1\/team\/sso\/finish$/, 'webw', (c) => Sso.setFinish(c.env, c.s, c.body), OWNER],
+  ['POST', /^\/v1\/team\/sso\/off\/begin$/, 'webw', (c) => Sso.offBegin(c.env, c.s), OWNER],
+  ['POST', /^\/v1\/team\/sso\/off\/finish$/, 'webw', (c) => Sso.offFinish(c.env, c.s, c.body), OWNER],
+  ['POST', /^\/v1\/sso\/start$/, 'publicw', (c) => Sso.start(c.env, c.body)],
+  ['GET', /^\/v1\/sso\/callback$/, 'public', (c) => Sso.callbackResponse(c.env, c.request, c.url)],
+  ['POST', /^\/v1\/sso\/passkey\/begin$/, 'webw', (c) => Sso.passkeyBegin(c.env, c.s), ANY],
+  ['POST', /^\/v1\/sso\/passkey\/finish$/, 'webw', (c) => Sso.passkeyFinish(c.env, c.s, c.body), ANY],
   ['POST', /^\/v1\/invites\/lookup$/, 'publicw', (c) => Team.inviteLookup(c.env, c.request, c.body)],
   ['POST', /^\/v1\/invites\/begin$/, 'publicw', (c) => Team.joinBegin(c.env, c.request, c.body)],
   ['POST', /^\/v1\/invites\/finish$/, 'publicw', (c) => Team.joinFinish(c.env, c.request, c.body)],
@@ -295,7 +309,7 @@ async function deleteAccount(env, s, body) {
     ...Brakes.deleteStatements(env.DB, id), // their tokens' daily totals and breaker windows, before the tokens go
     ...Budget.deleteStatements(env.DB, id), // Budget seal caps and totals
     ...T.deleteStatements(env.DB, id), // rate limit rows that name the account
-    // (gate_polls, gate_runs, windows and channels go with the account by their foreign keys: ON DELETE CASCADE)
+    // (gate_polls, gate_runs, windows, channels and the sso_ tables go with the account by their foreign keys: ON DELETE CASCADE)
     ...['push_subs', 'hold_votes', 'holds', 'guard_keys', 'gates', 'tokens', 'agent_keys', 'credentials', 'audit', 'sessions', 'move_links', 'passkeys', 'challenges', 'device_codes', 'invites', 'members'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE account_id = ?`).bind(id)),
     env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id),
   ]);
@@ -317,7 +331,8 @@ const SECURITY_EVENTS = new Set(['api_key_required', 'api_key_invalid', 'csrf', 
   'guard_key_required', 'guard_key_invalid', 'hash_mismatch', 'account_frozen',
   'role_required', 'approver_required', 'own_request', 'already_sealed', 'seal_not_yet', 'invite_invalid', 'already_member', 'hold_changed',
   'oidc_required', 'oidc_malformed', 'oidc_alg', 'oidc_unknown_kid', 'oidc_bad_signature', 'oidc_issuer', 'oidc_audience', 'oidc_expired', 'oidc_not_yet_valid',
-  'oidc_lifetime', 'oidc_claims', 'oidc_replayed', 'oidc_keys_unavailable', 'gate_refused', 'poll_secret_required']);
+  'oidc_lifetime', 'oidc_claims', 'oidc_replayed', 'oidc_keys_unavailable', 'gate_refused', 'poll_secret_required',
+  'sso_required', 'sso_state', 'sso_malformed', 'sso_alg', 'sso_unknown_kid', 'sso_bad_signature', 'sso_issuer', 'sso_audience', 'sso_expired', 'sso_nonce', 'sso_domain', 'sso_removed']);
 /** an audit detail's `member` on a team (the founder's entries keep their shape) */
 const who = (s) => (s.memberId && s.memberId !== s.accountId ? { member: s.memberId } : {});
 const logPath = (url) => url.pathname.startsWith('/p/') ? url.pathname.split('/').slice(0, 3).join('/') + '/...' : url.pathname.replace(/\/[0-9a-f]{24}(?=\/|$)/g, '/:id');
@@ -451,6 +466,8 @@ export async function sweep(env, t = Date.now()) {
     // audit log keeps the repository, commit and run, never that name.
     env.DB.prepare("UPDATE holds SET context = NULL WHERE kind = 'deploy' AND context IS NOT NULL AND status NOT IN ('pending','approved') AND expires_at < ?").bind(t - 86400_000),
     env.DB.prepare('DELETE FROM gate_polls WHERE expires_at < ?').bind(t),
+    // single sign-on: sign-ins in progress last 10 minutes
+    env.DB.prepare('DELETE FROM sso_states WHERE expires_at < ?').bind(t),
     // break-glass windows are kept a week (the daily limit needs one day; the private log keeps every one)
     env.DB.prepare('DELETE FROM windows WHERE expires_at < ?').bind(t - 7 * 86400_000),
     ...cleanupStatements(env.DB, t),

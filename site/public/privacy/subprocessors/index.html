@@ -34,12 +34,12 @@
 <p class="kicker">Privacy</p>
   <h1>Subprocessors</h1>
   <p class="lead">When a business uses Counterseal, we process its data on its behalf. One company helps us do that: Cloudflare.</p>
-  <p class="meta">Last updated 9 October 2026</p>
+  <p class="meta">Last updated 10 October 2026 (no new subprocessor; the list below now names each Cloudflare product, and single sign-on, alert channels and AI model APIs are added to who is not a subprocessor)</p>
 
   <h2 id="list">The list</h2>
   <table>
     <tr><th>Subprocessor</th><th>What it does for Counterseal</th><th>Data</th><th>Where</th></tr>
-    <tr><td>Cloudflare, Inc. (San Francisco, United States)</td><td>Runs the service: Cloudflare Workers (the code), D1 (the database: accounts, the encrypted vault, holds, the audit log), a Durable Object (the public log), static hosting for this site, and its network in front of all of it</td><td>Everything the <a href="/privacy/#store">privacy policy</a> lists. Vaulted API keys are encrypted before they are stored; Cloudflare's database never holds one readable</td><td>Requests are handled at the Cloudflare location nearest to the person or agent making them; the database lives in one Cloudflare region</td></tr>
+    <tr><td>Cloudflare, Inc. (San Francisco, United States)</td><td>Runs the service. <strong>Workers</strong>: the code that handles every request. <strong>D1</strong>: the database (accounts, team members, passkey public keys, session and token hashes, the encrypted vault, holds, seals, spend caps, single sign-on settings and identities, alert devices, rate limit counters, the audit log). <strong>Durable Objects</strong>: one SQLite-backed object that holds the append-only public log. <strong>Workers static assets</strong>: this site and the app's files. <strong>Its network</strong> (TLS, DNS, DDoS protection) in front of all of it</td><td>Everything the <a href="/privacy/#store">privacy policy</a> lists. Vaulted API keys are encrypted before they are stored; Cloudflare's database never holds one readable</td><td>Requests are handled at the Cloudflare location nearest to the person or agent making them; the database lives in one Cloudflare region</td></tr>
   </table>
   <p>Cloudflare's <a href="https://www.cloudflare.com/cloudflare-customer-dpa/" rel="noopener noreferrer">Customer Data Processing Addendum</a> is part of its subscription agreement. It names Cloudflare as a processor (or subprocessor) and covers transfers out of the EU, the UK and Switzerland with the EU Standard Contractual Clauses, the UK Addendum, and Cloudflare's EU-U.S. Data Privacy Framework certification (as that page said on 9 October 2026).</p>
   <p>Workers Logs are off for this service, so Cloudflare does not keep our request logs or our log lines. Cloudflare may still process request metadata, such as IP addresses, to run and protect its network, under its own terms.</p>
@@ -48,11 +48,14 @@
   <ul>
     <li><strong>Your browser's push service</strong> (Apple, Google, Mozilla or Microsoft, depending on your browser), only if you turn on alerts. Your browser picks it, not us. We send it an empty wake-up for your device and nothing else: no text, no request, no name. Your device then asks Counterseal for the details over your own session.</li>
     <li><strong>The APIs you connect</strong> (GitHub, Cloudflare, Railway, Stripe, Supabase, Vercel, Neon, Fly.io, Resend, Shopify, and for the Budget seal the AI model APIs of OpenAI and Anthropic). Your agent's requests go to them because you told us to send them there, with your own key; they are your providers, under your agreements with them.</li>
-    <li><strong>Nobody else.</strong> No analytics, no advertising, no error tracking, no email sender, no payment processor (there is no billing yet), no fonts or scripts from other sites.</li>
+    <li><strong>Your identity provider</strong>, only if an owner turns on single sign-on. Your team chooses it and has its own agreement with it. Counterseal sends your people's browsers to it and reads back a signed ID token; it receives nothing else from us.</li>
+    <li><strong>Your team's alert channels</strong> (Slack, Discord or Google Chat), only if an owner adds one. You choose them; they get a short alert text with a label, a rule id and a link, never a request body or key.</li>
+    <li><strong>GitHub, for deploy gates</strong>: Counterseal fetches GitHub's public signing keys to check a workflow's OIDC token. Nothing about you is sent to GitHub by us.</li>
+    <li><strong>Nobody else.</strong> No analytics, no advertising, no error tracking, no email sender, no payment processor (there is no billing yet), no fonts or scripts from other sites. The npm registry and GitHub host the open source command line tool and its source code; they never receive customer data from the service.</li>
   </ul>
 
   <h2 id="changes">Changes</h2>
-  <p>Before we add a subprocessor, we update this page first and give the date. Businesses with a data processing agreement with us get the notice that agreement sets (the <a href="/privacy/dpa/">template</a> says 30 days), and can object. Questions: <a href="mailto:developwith.gt@gmail.com">developwith.gt@gmail.com</a>.</p>
+  <p>Before we add a subprocessor, we update this page first and give the date. Businesses with a data processing agreement with us get the notice that agreement sets (the <a href="/privacy/dpa/">template</a> says 30 days), and can object. To hear about changes, watch this page's history in the <a href="https://github.com/GautamTalksDev/counterseal" rel="noopener noreferrer">public repository</a> (site/public/privacy/subprocessors), or ask to be on the notice list. Questions: <a href="mailto:developwith.gt@gmail.com">developwith.gt@gmail.com</a>.</p>
 </article>
 </main>
 <footer class="foot">

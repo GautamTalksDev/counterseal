@@ -98,7 +98,7 @@ export const _resetSeen = () => seen.clear();
 // (or LEASH_KEK plus LEASH_KEK_OLD) was set. Each call moves up to PAGE rows of each sealed table to the
 // new key and returns where to continue ({"after": {"credentials": id, "channels": id}}); `next` is null for a table
 // that is done. Counts and row-id cursors only, never a secret: only the data key is unwrapped and wrapped again.
-const SEALED = { credentials: 'SELECT id, wrapped_dek, dek_iv FROM credentials WHERE id > ? ORDER BY id LIMIT ?', channels: 'SELECT id, wrapped_dek, dek_iv FROM channels WHERE id > ? ORDER BY id LIMIT ?' };
+const SEALED = { credentials: 'SELECT id, wrapped_dek, dek_iv FROM credentials WHERE id > ? ORDER BY id LIMIT ?', channels: 'SELECT id, wrapped_dek, dek_iv FROM channels WHERE id > ? ORDER BY id LIMIT ?', sso_configs: 'SELECT id, wrapped_dek, dek_iv FROM sso_configs WHERE id > ? AND wrapped_dek IS NOT NULL ORDER BY id LIMIT ?' };
 const PAGE = 100;
 export async function rewrapVault(env, body) {
   const after = body?.after && typeof body.after === 'object' ? body.after : {};

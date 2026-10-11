@@ -146,6 +146,7 @@ export const RETENTION = [
   ['Rate limit counters', 'Until their window ends (at most a day), and deleted with the account.'],
   ['Alert devices (push addresses)', 'Until you turn alerts off, the push service says the device is gone, or the account is deleted.'],
   ['Team invites', '1 day after they expire.'],
+  ['Single sign-on settings and who signed in through it (issuer, subject id, verified email)', 'Until an owner turns SSO off (settings) or the account is deleted (both). Sign-ins in progress: 10 minutes.'],
   ['Public log entries', 'Kept forever by design (append-only). They never hold a name, path, body, key or IP; after account deletion nothing on our side links them to you.'],
 ];
 
@@ -174,6 +175,9 @@ const Q = {
   receiptsUsage: 'SELECT month, receipts, day, day_receipts, skipped FROM usage WHERE account_id = ?',
   moneyTotals: 'SELECT s.token_id, s.day, s.currency, s.amount FROM spend s JOIN tokens t ON t.id = s.token_id WHERE t.account_id = ?',
   moveLinks: 'SELECT created_at, expires_at, used_at FROM move_links WHERE account_id = ?',
+  // single sign-on: the settings (never the client secret) and who signed in through it
+  sso: 'SELECT id, issuer, client_id, domains, default_role, enforce, created_by, created_at, changed_at FROM sso_configs WHERE account_id = ?',
+  ssoIdentities: 'SELECT issuer, sub, member_id, email, created_at, last_login FROM sso_identities WHERE account_id = ?',
 };
 /** a push address is a capability (anyone holding it can wake your device): only the push service's name leaves */
 const pushService = (e) => { try { return new URL(e).hostname; } catch { return null; } };
@@ -198,6 +202,7 @@ export async function exportFinish(env, sess, body) {
       'agent token, guard key, receipts key, session, invite and move-link hashes',
       'passkey public keys and signature counters',
       'push addresses (only the push service\'s name)',
+      'the single sign-on client secret, or any part of it',
       'public receipts\' openings and salts',
     ],
     account: d.account ? { ...d.account, hold_days: holdDaysOf(d.account.hold_days) } : null,
@@ -217,6 +222,8 @@ export async function exportFinish(env, sess, body) {
     receipts_usage: d.receiptsUsage,
     money_totals: d.moneyTotals,
     move_links: d.moveLinks,
+    sso: d.sso.map((c) => ({ ...c, domains: safeJson(c.domains), enforce: !!c.enforce })),
+    sso_identities: d.ssoIdentities,
     // the audit log can be long: it is not in this response (Workers Free allows 10 ms of CPU). The app adds every entry,
     // page by page, from GET /v1/export/evidence (the same rows, as stored, with their hash chain).
     audit: { entries: [], complete: false, pages_from: '/v1/export/evidence', note: 'The app adds every audit entry here, page by page.' },
