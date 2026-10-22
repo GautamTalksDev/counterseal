@@ -209,6 +209,7 @@ agent's machine, then bind a token to it and give the MCP server the key file:
 
 ```bash
 npx counterseal agent-key ~/.config/leash/agent-key.json --label laptop-agent     # outside any project; CLI 0.3.0 or later
+# (from the next CLI release, with no path the key goes to agent-key.json in ~/.config/leash or $XDG_CONFIG_HOME/leash)
 npx counterseal token <credentialId> --agent-key <agentKeyId>
 # MCP env: { "LEASH_TOKENS": "github=lsh_...", "LEASH_AGENT_KEY": "/home/you/.config/leash/agent-key.json" }
 ```

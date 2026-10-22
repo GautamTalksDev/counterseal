@@ -389,7 +389,7 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>counterseal holds</code></td><td>List calls waiting for you.</td></tr>
     <tr><td><code>counterseal watch</code></td><td>Print and ring for each new hold.</td></tr>
     <tr><td><code>counterseal mcp</code></td><td>Run the MCP server for your agent.</td></tr>
-    <tr><td><code>counterseal agent-key [file]</code>, <code>counterseal agent-keys</code></td><td>Make and register an agent key; list them. From 0.3.0. Give it a path outside your project, such as <code>~/.config/leash/agent-key.json</code>, so the private key is never committed.</td></tr>
+    <tr><td><code>counterseal agent-key [file]</code>, <code>counterseal agent-keys</code></td><td>Make and register an agent key; list them. From 0.3.0. Without a path the key goes to <code>agent-key.json</code> in <code>~/.config/leash</code> (or <code>$XDG_CONFIG_HOME/leash</code>); a path you give should be outside your project, so the private key is never committed.</td></tr>
   </table>
   <p>Run any command with <code>npx counterseal</code>, or install it globally with <code>npm i -g counterseal</code>.</p>
 

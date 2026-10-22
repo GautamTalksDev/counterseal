@@ -186,7 +186,7 @@ const COMMAND_HELP = {
   freeze: 'counterseal freeze\n\n  Stop every agent token on the account at once (HTTP 423). Only your passkey, in the app, unfreezes.',
   holds: 'counterseal holds\n\n  List the calls and commands waiting for you.',
   watch: 'counterseal watch\n\n  Print each new held request with its approve link as it happens, and ring the terminal bell. Ctrl+C stops.',
-  'agent-key': 'counterseal agent-key [file] [--out <path>] [--label <label>]\n\n  Make an Ed25519 agent key, save its private half (mode 600, never overwritten) to ~/.config/leash/agent-key.json\n  or the path you give, and register the public half with your account. Keep the file out of any repository.',
+  'agent-key': 'counterseal agent-key [file] [--out <path>] [--label <label>]\n\n  Make an Ed25519 agent key, save its private half (mode 600, never overwritten) to agent-key.json in\n  ~/.config/leash (or $XDG_CONFIG_HOME/leash) or to the path you give, and register the public half with your account. Keep the file out of any repository.',
   'agent-keys': 'counterseal agent-keys\n\n  List the agent keys that are not revoked.',
   mcp: 'counterseal mcp\n\n  Run the MCP server for your agent over stdio. Set LEASH_TOKENS="github=lsh_...,stripe=lsh_..." and, for tokens\n  bound to an agent key, LEASH_AGENT_KEY=<path to the key file>.\n  counterseal mcp wrap|pin|unpin|status --help: the MCP wrapper.',
   help: null,
@@ -299,11 +299,17 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp
     case 'agent-key': {
       // the private key goes to the config folder by default, never the current folder, so it cannot end up in a
       // project's git history; [file] or --out <path> picks another place
-      const file = resolve(flag(args, '--out') || args.find((x, i) => !x.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--'))) || join(CFG_DIR, 'agent-key.json'));
-      if (args.includes('--out') && !flag(args, '--out')) die('--out requires a path.');
+      // --out takes a path, never the next flag (`--out --label x` must not write a file named --label)
+      const out = flag(args, '--out');
+      if (args.includes('--out') && (!out || out.startsWith('-'))) die('--out requires a path.');
+      const file = resolve(out || args.find((x, i) => !x.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--'))) || join(CFG_DIR, 'agent-key.json'));
       // nothing is written for a command line that is not signed in (the key could never be registered)
       if (!cfg().token) die('Not signed in. Run: counterseal login');
-      if (file === join(CFG_DIR, 'agent-key.json')) mkdirSync(CFG_DIR, { recursive: true, mode: 0o700 });
+      if (file === join(CFG_DIR, 'agent-key.json')) {
+        mkdirSync(CFG_DIR, { recursive: true, mode: 0o700 });
+        // a folder that already existed keeps its mode through mkdir: tighten it (best effort, never fatal)
+        try { chmodSync(CFG_DIR, 0o700); } catch {}
+      }
       const jwk = await generateAgentKey();
       // 'wx': created only if absent, in one step (no check-then-write race that could overwrite a key)
       try { writeFileSync(file, JSON.stringify(jwk, null, 2), { mode: 0o600, flag: 'wx' }); } catch (e) { die(e?.code === 'EEXIST' ? `${file} exists; refusing to overwrite a key.` : `cannot write ${file}: ${e?.message}`); }

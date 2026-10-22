@@ -6,7 +6,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -117,10 +117,13 @@ const exists = (f) => { try { return statSync(f); } catch { return null; } };
 for (const cli of CLIS) {
   const which = cli.includes('plugins') ? 'plugin copy' : 'cli';
   test(`${which}: agent-key puts the private key in the config folder (mode 600), never the current folder`, async () => {
-    const r = await run(cli, ['agent-key', '--label', 'laptop'], { check: (home, cfgDir, cwd) => ({ cwd: readdirSync(cwd), key: exists(KEYFILE(cfgDir)), jwk: exists(KEYFILE(cfgDir)) && JSON.parse(readFileSync(KEYFILE(cfgDir), 'utf8')) }) });
+    const r = await run(cli, ['agent-key', '--label', 'laptop'], { prep: (home, cfgDir) => chmodSync(join(cfgDir, 'leash'), 0o755), check: (home, cfgDir, cwd) => ({ cwd: readdirSync(cwd), dir: statSync(join(cfgDir, 'leash')).mode & 0o777, key: exists(KEYFILE(cfgDir)), jwk: exists(KEYFILE(cfgDir)) && JSON.parse(readFileSync(KEYFILE(cfgDir), 'utf8')) }) });
     assert.deepEqual(r.checked.cwd, [], 'nothing in the current folder');
     assert.ok(r.checked.key, 'the key is in ~/.config/leash/agent-key.json');
-    if (process.platform !== 'win32') assert.equal(r.checked.key.mode & 0o777, 0o600);
+    if (process.platform !== 'win32') {
+      assert.equal(r.checked.key.mode & 0o777, 0o600);
+      assert.equal(r.checked.dir, 0o700, 'a config folder that was 755 is tightened to 700');
+    }
     assert.equal(r.checked.jwk.kty, 'OKP'); assert.equal(r.checked.jwk.crv, 'Ed25519');
     assert.deepEqual(r.requests, ['POST /v1/agent-keys/begin'], 'then it asks to register the public half (the test server refuses)');
   });
@@ -136,6 +139,16 @@ for (const cli of CLIS) {
     assert.match(out.stderr, /^Not signed in\. Run: counterseal login/);
     assert.deepEqual(out.checked, [[], null]);
     assert.deepEqual(out.requests, []);
+  });
+
+  test(`${which}: agent-key --out takes a path, never the next flag`, async () => {
+    for (const args of [['agent-key', '--out', '--label', 'x'], ['agent-key', '--out', '-x'], ['agent-key', '--out']]) {
+      const r = await run(cli, args, { check: (home, cfgDir, cwd) => [readdirSync(cwd), exists(KEYFILE(cfgDir))] });
+      assert.equal(r.code, 1, args.join(' '));
+      assert.match(r.stderr, /^--out requires a path\./);
+      assert.deepEqual(r.checked, [[], null], 'no key file anywhere');
+      assert.deepEqual(r.requests, []);
+    }
   });
 
   test(`${which}: agent-key --out <path> writes exactly there`, async () => {
