@@ -69,8 +69,7 @@ After the three commands in the [quickstart](#quickstart), give the token to you
 Or point any SDK at `https://counterseal.gautamkhosla.com/p/github` with the token as its bearer. When the agent tries
 something irreversible it gets `428 held_for_approval` and an approve link, and your phone or browser asks for a passkey.
 
-All commands: `login`, `logout`, `add`, `creds`, `tokens`, `token`, `revoke`, `freeze`, `holds`, `watch`, `agent-key`,
-`agent-keys`, `mcp`, `mcp wrap|pin|unpin|status`, `guard install|uninstall|status|check|map`. Run `npx counterseal help`.
+All commands: `login`, `logout`, `add`, `creds`, `tokens`, `token`, `revoke`, `freeze`, `holds`, `watch`, `agent-key`, `agent-keys`, `mcp`, `mcp wrap`, `mcp pin`, `mcp unpin`, `mcp status`, `guard install`, `guard uninstall`, `guard status`, `guard check`, `guard map`. See the [CLI reference](docs/GUIDE.md#cli-reference) for arguments, flags, and descriptions. Run `npx counterseal help`.
 
 ## Features
 
