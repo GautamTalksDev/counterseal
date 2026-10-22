@@ -24,7 +24,12 @@ after(() => srv.close());
 /** every file under dir with its bytes, to compare before and after */
 function snapshot(dir) {
   const out = {};
-  const walk = (d) => { for (const n of readdirSync(d)) { const p = join(d, n); if (statSync(p).isDirectory()) walk(p); else out[p] = readFileSync(p, 'utf8'); } };
+  const walk = (d) => {
+    for (const n of readdirSync(d)) {
+      const p = join(d, n);
+      try { out[p] = readFileSync(p, 'utf8'); } catch (e) { if (e?.code === 'EISDIR') walk(p); else throw e; }
+    }
+  };
   walk(dir);
   return out;
 }
@@ -83,8 +88,11 @@ for (const cli of CLIS) {
       assert.equal(r.code, 0, `${name}: exit ${r.code} ${r.signal || ''} ${r.stderr}`);
       assert.deepEqual(r.requests, [], `${name}: no request may reach the server`);
       assert.equal(r.changed, false, `${name}: no file may be written or changed`);
-      const want = which === 'plugin copy' && wrapper(args) ? new RegExp(`^MCP commands are not in the plugin\\. Use: npx counterseal mcp ${args[1]} \\.\\.\\.\\n$`) : args[0] === 'guard' ? /^counterseal guard \d/ : args[0] === 'mcp' && args.length > 1 && args[1] !== '--help' && args[1] !== '-h' ? /^usage:\n {2}counterseal mcp wrap/ : new RegExp(`^counterseal ${args[0]}\\b`);
-      assert.match(r.stdout, want, `${name}: help on stdout`);
+      const first = r.stdout.split('\n')[0];
+      if (which === 'plugin copy' && wrapper(args)) assert.equal(r.stdout, `MCP commands are not in the plugin. Use: npx counterseal mcp ${args[1]} ...\n`, `${name}: where the MCP commands are`);
+      else if (args[0] === 'guard') assert.match(first, /^counterseal guard \d+\.\d+\.\d+$/, `${name}: guard help`);
+      else if (wrapper(args)) assert.equal(first, 'usage:', `${name}: the wrapper usage`);
+      else assert.ok(first === `counterseal ${args[0]}` || first.startsWith(`counterseal ${args[0]} `), `${name}: help on stdout: ${first}`);
       assert.doesNotMatch(r.stdout + r.stderr, /Type this code|Frozen|Registering|Signed out|Stored/, `${name}: the command itself did not run`);
     }
   });
@@ -113,11 +121,12 @@ for (const cli of CLIS) {
 
 // ---------------------------------------------------------------- agent-key writes the private key outside the project
 const KEYFILE = (cfgDir) => join(cfgDir, 'leash', 'agent-key.json');
-const exists = (f) => { try { return statSync(f); } catch { return null; } };
+const exists = (f) => { try { return statSync(f); } catch (e) { if (e?.code === 'ENOENT') return null; throw e; } };
+const readJson = (f) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch (e) { if (e?.code === 'ENOENT') return null; throw e; } };
 for (const cli of CLIS) {
   const which = cli.includes('plugins') ? 'plugin copy' : 'cli';
   test(`${which}: agent-key puts the private key in the config folder (mode 600), never the current folder`, async () => {
-    const r = await run(cli, ['agent-key', '--label', 'laptop'], { prep: (home, cfgDir) => chmodSync(join(cfgDir, 'leash'), 0o755), check: (home, cfgDir, cwd) => ({ cwd: readdirSync(cwd), dir: statSync(join(cfgDir, 'leash')).mode & 0o777, key: exists(KEYFILE(cfgDir)), jwk: exists(KEYFILE(cfgDir)) && JSON.parse(readFileSync(KEYFILE(cfgDir), 'utf8')) }) });
+    const r = await run(cli, ['agent-key', '--label', 'laptop'], { prep: (home, cfgDir) => chmodSync(join(cfgDir, 'leash'), 0o755), check: (home, cfgDir, cwd) => ({ cwd: readdirSync(cwd), dir: statSync(join(cfgDir, 'leash')).mode & 0o777, key: exists(KEYFILE(cfgDir)), jwk: readJson(KEYFILE(cfgDir)) }) });
     assert.deepEqual(r.checked.cwd, [], 'nothing in the current folder');
     assert.ok(r.checked.key, 'the key is in ~/.config/leash/agent-key.json');
     if (process.platform !== 'win32') {
