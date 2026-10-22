@@ -77,7 +77,7 @@
     <li><strong>No flood of alerts.</strong> Each guard key can ask for 60 new approvals an hour, with 20 waiting; asking again for the same command sends no new alert, and alerts go out at most once a minute.</li>
     <li><strong>A seatbelt, not a sandbox.</strong> The guard runs on the agent's machine. An agent that edits its hook settings or wraps a command in a script is not stopped by it. Only keys kept in the vault are enforced by the server, so for a hard stop give your agent a Counterseal token instead of the real key.</li>
   </ul>
-  <h3 id="team">Two people, two passkeys (teams, not yet live)</h3>
+  <h3 id="team">Two people, two passkeys (teams)</h3>
   <ul>
     <li><strong>Each person counts once.</strong> A team can require two seals on every held action. A seal belongs to the person whose passkey made it, so a second passkey, a second browser or two taps at the same moment still count once, and the approval happens in the same database transaction as the last seal.</li>
     <li><strong>Roles are checked by the server.</strong> A passkey proves who is there; what they may do (owner, approver, member, viewer) is checked on every request. Only owners and approvers can seal, and you can require that the person whose agent asked is not one of them.</li>

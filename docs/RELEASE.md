@@ -6,7 +6,7 @@ a person follows it.
 ## One-time setup (before the first release from CI)
 
 1. **The packages exist on npm.** Trusted publishing is configured in each package's settings on npmjs.com, so a package
-   has to exist first. `counterseal` 0.3.0 is on npm (checked 10 Oct 2026); `leashcli` 0.1.1 was the first name. For a
+   has to exist first. `counterseal` 0.4.0 is on npm (checked 22 Oct 2026); `leashcli` was the first name. For a
    brand new package, publish once by hand from a clean checkout with 2FA (`cd cli && npm publish --access public`), or
    check npm's current docs for configuring a trusted publisher before the first publish.
 2. **A trusted publisher for each package** (npmjs.com, the package, Settings, Trusted publishing, GitHub Actions):

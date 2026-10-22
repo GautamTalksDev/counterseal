@@ -135,8 +135,8 @@ A token without `limits` and `money` costs no extra database writes. See the [po
 
 ### Two-person seal (teams)
 
-The counterseal in the literal sense: a second, different person seals what the first one approved. In this repo on
-branch `feat/two-person`, not yet deployed (migration 0009; break glass and channels: migration 0011).
+The counterseal in the literal sense: a second, different person seals what the first one approved. Migration 0009;
+break glass and channels: migration 0011.
 
 - **People, not shared logins.** An owner invites people with a link that works once (2 hours by default, 24 at most);
   each person makes their own passkey and signs in as themselves. Roles: **owner** (the team, the quorum, the vault),
@@ -176,7 +176,7 @@ npx counterseal token --label "coding agent, laptop"   # with one key in the vau
 Or skip the terminal: create an account at /app (a name and a passkey), press **Try a held call** to approve a pretend
 one with your passkey (nothing real is called and nothing is made public), then add a key and make a token in the app.
 
-From version 0.3.0 the CLI is the `counterseal` package on npm (published; `npm view counterseal version` says 0.3.0). `leashcli`, its first name, stays as a thin package that runs the same CLI, so old install lines and
+From version 0.3.0 the CLI is the `counterseal` package on npm (`npm view counterseal version` says 0.4.0 on 22 Oct 2026). `leashcli`, its first name, stays as a thin package that runs the same CLI, so old install lines and
 agent configs keep working. A CLI sign-in lasts 7 days, and tokens and receipts
 keys it makes end with it. The code is typed in the app, never sent as a link: never type a code someone sent you, because whoever
 approves a code gives that command line their account. Each sign-in alerts your devices and can be revoked in the app
@@ -204,11 +204,11 @@ stop, give you the approve link, and retry the identical call after you approve.
 
 ### Give the agent its own key (Prove who)
 
-Make an agent key in the app (generated in your browser; only the public half is sent), or with CLI 0.3.0 from the
+Make an agent key in the app (generated in your browser; only the public half is sent), or with the CLI (0.3.0 or later) from the
 agent's machine, then bind a token to it and give the MCP server the key file:
 
 ```bash
-npx counterseal agent-key agent-key.json --label laptop-agent     # CLI 0.3.0
+npx counterseal agent-key agent-key.json --label laptop-agent     # CLI 0.3.0 or later
 npx counterseal token <credentialId> --agent-key <agentKeyId>
 # MCP env: { "LEASH_TOKENS": "github=lsh_...", "LEASH_AGENT_KEY": "/path/to/agent-key.json" }
 ```
@@ -368,8 +368,8 @@ Hold any GitHub Actions job until you approve it with a passkey. GitHub's own de
 timers, custom protection rules) are available only for public repositories on the Free, Pro and Team plans, GitHub's
 documentation says ([read 9 Oct 2026](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
 A gate does not use them: the job's step sends the OIDC token GitHub signs for it, Counterseal verifies it, and your phone shows
-the repository, workflow, commit, run and who started it, from that token. In this repo, not yet deployed (migration 0007); the
-action is in [`action/deploy-gate`](../action/deploy-gate) and is not on the Marketplace.
+the repository, workflow, commit, run and who started it, from that token. A preview: tested against a stand-in issuer that signs like
+GitHub, not yet with real GitHub tokens (migration 0007); the action is in [`action/deploy-gate`](../action/deploy-gate) and is not on the Marketplace.
 
 1. In the app, Deploy gates, **New gate** (it asks for your passkey): the repository, its workflow files and the branches or
    tags it deploys from. Nothing is accepted by default.
@@ -494,16 +494,17 @@ Publish the CLI before deploying a site whose install lines say `npx counterseal
 
 ## Status and roadmap
 
-**Live** (checked 9 Oct 2026 at leash.gautamkhosla.com; counterseal.gautamkhosla.com does not resolve yet): the broker for
-GitHub, Cloudflare, Railway, Stripe and Supabase (map `2026-10-09.1`), passkey approvals of held calls, and payload-free
-phone and desktop alerts. The CLI `counterseal` 0.3.0 is on npm (`leashcli` 0.1.1 was its first name).
+**Live** at [counterseal.gautamkhosla.com](https://counterseal.gautamkhosla.com) (checked 22 Oct 2026), free during the
+public beta: the broker for ten APIs (map `2026-10-10.1`; management APIs only, SQL sent straight over a database
+connection string never passes through Counterseal), passkey approvals of held calls, payload-free phone and desktop alerts, public receipts and the public log, agent keys (Prove who), money caps, the breaker and Freeze, the Approvals API and
+guard keys, the two-person seal with break-glass windows and Slack, Discord and Google Chat alerts, and the installable app
+with the first-run demo, the privacy center, the data export and the evidence pack. leash.gautamkhosla.com redirects to it.
+The CLI `counterseal` 0.4.0 is on npm (`leashcli` was its first name), with `counterseal guard` (shell map `2026-10-10.2`) and
+`counterseal mcp wrap`.
 
-**In this repository, not yet deployed:** the counterseal.gautamkhosla.com host and the domain move; public receipts and the
-public log; agent keys (Prove who); five more APIs (Vercel, Neon, Fly.io, Resend, Shopify; map `2026-10-10.1`); money caps,
-the breaker and Freeze; the Approvals API and guard keys; `counterseal guard` with its shell map and Claude Code plugin,
-`counterseal mcp wrap`; the two-person seal with break-glass windows and Slack, Discord and
-Google Chat alerts; the Deploy Gate for GitHub Actions; and the installable app with the first-run demo, the privacy center,
-the data export and the evidence pack (migration 0012, branch `feat/app-trust`).
+**Preview:** the Deploy Gate for GitHub Actions is on the live service but has been tested only against a stand-in issuer
+that signs like GitHub, not yet with real GitHub tokens. The guard has not been seen firing inside a live agent session
+(see "How far each agent is tested").
 
 **Next:** AWS (SigV4 re-signing), PlanetScale; SSO for teams; external witness cosigning of checkpoints (C2SP
 tlog-witness); SCITT-compatible receipts.

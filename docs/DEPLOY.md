@@ -10,23 +10,20 @@ The live database keeps every row. Migrations `0004_record_and_prove.sql`, `0005
 and defaulted or nullable columns, so the code that runs today keeps working on the migrated database, and the new code keeps
 working with everything the old code wrote (`server/test/migration.test.js` runs the deployed code, migrates, then runs the new
 code). CLI sessions made before 0005 keep their 30-day lifetime; new ones last 7 days. After 0006 every existing hold reads as
-`kind: "proxy"` (a brokered API call); 0006 adds the guard keys table and the coding-agent approvals (branch `feat/approvals`, not
-yet deployed). 0007 (Deploy Gate, branch `feat/deploy-gate`, not yet deployed) adds the tables `gates`, `gate_polls` and
+`kind: "proxy"` (a brokered API call); 0006 adds the guard keys table and the coding-agent approvals. 0007 (Deploy Gate) adds the tables `gates`, `gate_polls` and
 `gate_runs`; it changes no existing row, and a hold made before it reads as it did (`kind: "proxy"`, or `shell` and `tool` for a
-coding agent's approval). Apply every migration before deploying the code (the held list joins `gates`). 0008 (Brakes, branch
-`feat/brakes`, not yet deployed) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and
-`counters`; every existing token and account is not tripped, not frozen and has no caps. 0009 (the two-person seal, branch
-`feat/two-person`, not yet deployed) adds the tables `members`, `invites` and `hold_votes`, a `member_id` on passkeys, sessions,
+coding agent's approval). Apply every migration before deploying the code (the held list joins `gates`). 0008 (Brakes) adds `tokens.tripped_at`, `tokens.tripped_why`, `accounts.frozen_at` and the tables `spend` and
+`counters`; every existing token and account is not tripped, not frozen and has no caps. 0009 (the two-person seal) adds the tables `members`, `invites` and `hold_votes`, a `member_id` on passkeys, sessions,
 push devices, device codes, move links, tokens, guard keys, receipts keys and agent keys, the quorum columns on `accounts`
 (quorum 1, self-approval on) and `needs` and `requested_by` on `holds`; every existing account is one person, its owner, and one
 seal approves, as before (no row is rewritten: a NULL `member_id` means the account's founder). 0010 adds one nullable column, the
-store address of a Shopify key (map `2026-10-10.1`, branch `feat/map-1010`, not yet deployed). 0011 (break glass and alert
-channels, branch `feat/deploy-gate`, not yet deployed) adds the tables `windows` and `channels`; it changes no existing row, and
-with no window and no channel nothing behaves differently. 0012 (the installable app, the first run and the privacy center,
-branch `feat/app-trust`, not yet deployed) adds nullable columns only: five first-time markers and `hold_days` on `accounts`,
+store address of a Shopify key (map `2026-10-10.1`). 0011 (break glass and alert
+channels) adds the tables `windows` and `channels`; it changes no existing row, and
+with no window and no channel nothing behaves differently. 0012 (the installable app, the first run and the privacy center)
+adds nullable columns only: five first-time markers and `hold_days` on `accounts`,
 and `seen_at` on `sessions`. A web session made before it counts its idle hour from when it was made, so the first deploy
 signs out browsers that have been idle for an hour; command line sessions are unaffected. Closed holds older than 365 days are
-deleted by the cleanup from then on (none exist yet). 0013 (the final security gate, branch `feat/final-gate`) adds one
+deleted by the cleanup from then on (none exist yet). 0013 (the final security gate) adds one
 column, `global_usage.reported` (default 0): the day's receipts that agents reported, so they can be held to their share of the
 day (`REPORTED_DAILY_CAP`) while the broker's own decisions keep the rest.
 
@@ -288,21 +285,20 @@ hostnames stay custom domains in `routes`, served by the same Worker, so wrangle
 
 From 0.3.0 the CLI is published as `counterseal` (`cli/package.json`, bin `counterseal`), and `leashcli`, its first name, is a
 thin package (`packages/leashcli`) that depends on `counterseal` of the same version and runs it, so install lines and agent configs that name
-leashcli keep working. Neither is published yet. The steps, with the release checklist, are in
-[docs/RELEASE.md](RELEASE.md): a GitHub release tagged `cli-v0.3.0` runs `.github/workflows/publish.yml` (npm trusted
+leashcli keep working. `counterseal` 0.4.0 is on npm. The steps, with the release checklist, are in
+[docs/RELEASE.md](RELEASE.md): a GitHub release tagged `cli-v<version>` (for example `cli-v0.4.0`) runs `.github/workflows/publish.yml` (npm trusted
 publishing with provenance, a CycloneDX SBOM of each package attached to the release).
 
 **Order.** Every install line on the site, in the docs and in the app names one package, `BRAND.cliInstall` in
 `server/src/brand.js` (`counterseal` on this branch). So:
 
 1. Publish the CLI (`counterseal`, then `leashcli`).
-2. Check `npx counterseal --version` prints 0.3.0 on a clean machine.
+2. Check `npx counterseal --version` prints the new version on a clean machine.
 3. Then deploy the Worker and site.
 
 To deploy before publishing, set `cliInstall: 'leashcli'` in `server/src/brand.js`, run `node scripts/cli-name.mjs` (it
 rewrites only command lines: `npx ...`, the MCP config's `"-y", "..."`, "... login" style mentions and the CLI's `PKG`
-constant), run the tests, and deploy; the published `leashcli` 0.1.1 then serves those lines until 0.3.0 is out (it has no
-guard and cannot sign; the docs say so). Switch back the same way after publishing. `node scripts/cli-name.mjs --check` (in
+constant), run the tests, and deploy; the published `leashcli` then serves those lines until the new `counterseal` is out. Switch back the same way after publishing. `node scripts/cli-name.mjs --check` (in
 CI and `server/test/brand.test.js`) fails if any line names the other package.
 
 ## The coding-agent guard (nothing to deploy on the Worker)
@@ -310,14 +306,14 @@ CI and `server/test/brand.test.js`) fails if any line names the other package.
 `counterseal guard` is a client of the Approvals API (migration 0006), so the Worker needs nothing beyond that. What makes it
 available to people:
 
-1. **Publish the CLI** (above): `guard.mjs` and `shellmap.mjs` are in the package's `files`. Until 0.3.0 is on npm, `npx counterseal guard`
-   runs nothing (0.1.1 has no such command); the docs and README say so.
+1. **Publish the CLI** (above): `guard.mjs` and `shellmap.mjs` are in the package's `files`. `npx counterseal guard` needs
+   CLI 0.3.0 or later (0.4.0 is on npm).
 2. **The plugin needs the repository to be readable by the people who add it.** `claude plugin marketplace add GautamTalksDev/counterseal`
    reads `.claude-plugin/marketplace.json` from the default branch, so the files must be on the branch people get (not only on
    a feature branch) and the repository must be public. No form and no store is involved. Submitting to Anthropic's directory
    is a separate, optional step with its own review (their portal), not done here.
 3. **Keep the copies in step** whenever the map, the CLI or the server's irreversible map changes: `node scripts/sync-guard.mjs`
-   rewrites the generated API map block in `sdk/shellmap.mjs` and the copies in `cli/` and `plugins/counterseal/scripts/`;
+   rewrites the generated API map block in `sdk/shellmap.mjs` and the copies in `cli/`, `plugins/counterseal/scripts/` and `site/public/`;
    CI runs it with `--check`. A new plugin version (`plugins/counterseal/.claude-plugin/plugin.json`) is what makes Claude Code
    offer an update, because the scripts are pinned inside the plugin.
 4. **Nothing is tested in the agents' own apps yet** (see the README): try `counterseal guard status` and one held command in each
