@@ -67,7 +67,7 @@
 npx counterseal token &lt;key-id&gt; --label coding-agent</pre></li>
     <li><strong>Connect your agent.</strong> Add the MCP server to your agent's config (see <a href="#mcp">below</a>).</li>
   </ol>
-  <div class="callout">You can also do all of this in the app without the CLI. The CLI is just faster. From version 0.3.0 the CLI package is called <code>counterseal</code>; <code>leashcli</code>, the product's earlier name, keeps working as an alias that runs it; it is the same service.</div>
+  <div class="callout">You can also do all of this in the app without the CLI. The CLI is just faster. From version 0.3.0 the CLI package is called <code>counterseal</code>; <code>leashcli</code>, the product's earlier name, keeps working: it runs the <code>counterseal</code> CLI of its own version (0.3.0 on npm today) against the same service.</div>
   <div class="callout">Counterseal lives at counterseal.gautamkhosla.com only. Its earlier address, leash.gautamkhosla.com, answers every request (pages, <code>/app</code>, <code>/v1</code>, <code>/p</code>) with a permanent redirect (301) to the same path here and serves nothing itself. Point agents and command lines at counterseal.gautamkhosla.com: <code>leashcli</code> 0.1.1 does not follow redirects. Passkeys made on the earlier address do not work here; make a new account.</div>
 
   <h2 id="concepts">Concepts</h2>

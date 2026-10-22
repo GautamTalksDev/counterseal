@@ -176,8 +176,8 @@ npx counterseal token --label "coding agent, laptop"   # with one key in the vau
 Or skip the terminal: create an account at /app (a name and a passkey), press **Try a held call** to approve a pretend
 one with your passkey (nothing real is called and nothing is made public), then add a key and make a token in the app.
 
-From version 0.3.0 the CLI is the `counterseal` package on npm (`npm view counterseal version` says 0.4.0 on 22 Oct 2026). `leashcli`, its first name, stays as a thin package that runs the same CLI, so old install lines and
-agent configs keep working. A CLI sign-in lasts 7 days, and tokens and receipts
+From version 0.3.0 the CLI is the `counterseal` package on npm (`npm view counterseal version` says 0.4.0 on 22 Oct 2026). `leashcli`, its first name, stays as a thin package that runs the `counterseal` CLI of its own version (0.3.0 on npm
+today), so old install lines and agent configs keep working; use `counterseal` for the newest. A CLI sign-in lasts 7 days, and tokens and receipts
 keys it makes end with it. The code is typed in the app, never sent as a link: never type a code someone sent you, because whoever
 approves a code gives that command line their account. Each sign-in alerts your devices and can be revoked in the app
 (Account), with every token and key it made.
