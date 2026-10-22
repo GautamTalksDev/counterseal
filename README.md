@@ -6,7 +6,7 @@
 
 **Your AI agent never holds a real API key, and anything it cannot take back waits for your passkey.**
 
-[Website](https://counterseal.gautamkhosla.com) · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Limits](#honest-limits) · [Security](SECURITY.md) · [Self-hosting](docs/DEPLOY.md) · [Full guide](docs/GUIDE.md)
+[Website](https://counterseal.gautamkhosla.com) · [Try it, no account](#try-it-without-signing-up) · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Limits](#honest-limits) · [Security](SECURITY.md) · [Self-hosting](docs/DEPLOY.md) · [Full guide](docs/GUIDE.md)
 
 [![ci](https://github.com/GautamTalksDev/counterseal/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GautamTalksDev/counterseal/actions/workflows/ci.yml) [![CodeQL](https://github.com/GautamTalksDev/counterseal/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/GautamTalksDev/counterseal/actions/workflows/codeql.yml) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/GautamTalksDev/counterseal/badge)](https://scorecard.dev/viewer/?uri=github.com/GautamTalksDev/counterseal) [![npm](https://img.shields.io/npm/v/counterseal)](https://www.npmjs.com/package/counterseal) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -15,6 +15,25 @@
 <sub>Illustrated flow: the repository name is an example. The 428 response, the rule id and the approve link are what the server returns.</sub>
 
 </div>
+
+## Try it without signing up
+
+- **In your browser.** The demos on the [home page](https://counterseal.gautamkhosla.com/#demo) run in the tab, with no
+  account and no cookie: an agent's signed Stripe refund held with HTTP 428, approved and recorded (a button stands in for
+  the passkey), the real [shell map](https://counterseal.gautamkhosla.com/#guard) and the MCP wrapper's real
+  [policy](https://counterseal.gautamkhosla.com/#mcp). Type your own command into the shell map.
+- **In your terminal.** `guard check` reads one command against the shell map on your machine and sends it nowhere
+  (npx only fetches the package from npm):
+
+```console
+$ npx counterseal guard check "terraform destroy -auto-approve"
+HELD  sh.terraform-destroy
+      Destroys every resource this configuration manages.
+      terraform destroy -auto-approve
+```
+
+It exits 10 when a command would be held and 0 when it is not on the map. The hosted app, the CLI sign-in and real held
+calls need an account: a name and a passkey, no email.
 
 ## Quickstart
 
