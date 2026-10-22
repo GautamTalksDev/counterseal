@@ -497,7 +497,8 @@ Publish the CLI before deploying a site whose install lines say `npx counterseal
 **Live** at [counterseal.gautamkhosla.com](https://counterseal.gautamkhosla.com) (checked 22 Oct 2026), free during the
 public beta: the broker for ten APIs (map `2026-10-10.1`; management APIs only, SQL sent straight over a database
 connection string never passes through Counterseal), passkey approvals of held calls, payload-free phone and desktop alerts, public receipts and the public log, agent keys (Prove who), money caps, the breaker and Freeze, the Approvals API and
-guard keys, the two-person seal with break-glass windows and Slack, Discord and Google Chat alerts, and the installable app
+guard keys, the two-person seal with break-glass windows and Slack, Discord and Google Chat alerts (tested against
+stand-ins, never run against the real services), and the installable app
 with the first-run demo, the privacy center, the data export and the evidence pack. leash.gautamkhosla.com redirects to it.
 The CLI `counterseal` 0.4.0 is on npm (`leashcli` was its first name), with `counterseal guard` (shell map `2026-10-10.2`) and
 `counterseal mcp wrap`.

@@ -246,7 +246,7 @@ steps:
   </ul>
   <p>Usage, what is checked, limits and errors: <a href="https://github.com/GautamTalksDev/counterseal/blob/main/docs/DEPLOY_GATE.md">docs/DEPLOY_GATE.md</a>. The contract is in <a href="https://github.com/GautamTalksDev/counterseal/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
   <h2 id="mcp-wrap">Any MCP server behind Counterseal</h2>
-  <p><code>counterseal mcp wrap</code> sits between your MCP client and a local (stdio) MCP server. Destructive tool calls wait for your passkey, and the server's tool definitions are pinned, so a tool the server changes after you approved it is hidden until you look. It is in the repository and not yet published (CLI 0.3.0). Put it in front of the server's own command:</p>
+  <p><code>counterseal mcp wrap</code> sits between your MCP client and a local (stdio) MCP server. Destructive tool calls wait for your passkey, and the server's tool definitions are pinned, so a tool the server changes after you approved it is hidden until you look. It needs CLI 0.3.0 or later, on npm. Put it in front of the server's own command:</p>
   <pre>{ "mcpServers": { "supabase": {
     "command": "npx",
     "args": ["-y", "counterseal", "mcp", "wrap", "--name", "supabase", "--",
@@ -312,7 +312,7 @@ steps:
   <p>The Freeze bar at the top of the app, <code>leash freeze</code>, or the Freeze button on a phone alert stops every token of the account at once: each call answers <code>423 account_frozen</code>, a coding agent's guard is stopped too, approvals nobody used yet are void, and approving waits. Any signed-in session can freeze. Only your passkey, in the app, unfreezes.</p>
 
   <h2 id="team">Teams: the two-person seal</h2>
-  <p>In the repository, not yet on the live service. An account can have several people, each with their own passkey, and a held call or command can need two of them.</p>
+  <p>An account can have several people, each with their own passkey, and a held call or command can need two of them.</p>
   <ul>
     <li><strong>Invite.</strong> In the app, Team, an owner makes an invite with their passkey: a role, who it is for, and how long it works (2 hours by default, 24 at most). The link works once. Send it privately; it shows the person your account, your name and the role before they make their own passkey. Every member's devices are told when someone joins.</li>
     <li><strong>Roles.</strong> Owner (the team, the seals needed, the vault, deleting the account), approver (seals held actions), member (makes tokens and keys for their agents, cannot seal), viewer (reads, can deny). Counterseal checks the role on every request. A command line sign-in gets the role of the person who approved it.</li>
@@ -391,7 +391,7 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>leash mcp</code></td><td>Run the MCP server for your agent.</td></tr>
     <tr><td><code>leash agent-key [file]</code>, <code>leash agent-keys</code></td><td>Make and register an agent key; list them. From 0.3.0.</td></tr>
   </table>
-  <p>Run any command with <code>npx counterseal</code>, or install it globally with <code>npm i -g leashcli</code>.</p>
+  <p>Run any command with <code>npx counterseal</code>, or install it globally with <code>npm i -g counterseal</code>.</p>
 
   <h2 id="api">API</h2>
   <p>Base URL <code>https://counterseal.gautamkhosla.com</code>. Account endpoints use your session (web cookie or CLI bearer). Web writes need the same Origin and an <code>x-leash: 1</code> header. Endpoints marked passkey or web only work from the web app.</p>
