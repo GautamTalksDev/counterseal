@@ -172,6 +172,7 @@ function mcp() {
 
 // ---------------------------------------------------------------- commands
 const [cmd, ...args] = process.argv.slice(2);
+const HELP = 'counterseal ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token [credentialId] [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | mcp wrap|pin|unpin|status --name <id> | guard install|uninstall|status|check|map | help';
 try {
   switch (cmd) {
     case 'login': {
@@ -272,8 +273,10 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp
     case 'mcp': if (['wrap', 'pin', 'unpin', 'status'].includes(args[0])) await (await import('./mcp-wrap.mjs')).main(args); else mcp(); break;
     case 'guard': await (await import('./guard.mjs')).main(args); break;
     case '--version': case '-v': console.log(VERSION); break;
-    default:
-      console.log('leash ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token [credentialId] [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | mcp wrap|pin|unpin|status --name <id> | guard install|uninstall|status|check|map');
+    // help, --help, -h and no command at all print the help and succeed; anything else is a typo, so it fails (exit 2)
+    // with the help on stderr, and a script such as `counterseal tokns && deploy` stops there
+    case undefined: case 'help': case '--help': case '-h': console.log(HELP); break;
+    default: die(`counterseal: unknown command "${cmd}"\n\n${HELP}`, 2);
   }
 } catch (e) {
   die(`leash: ${e.message}`);
