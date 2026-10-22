@@ -654,7 +654,7 @@ const USAGE = `usage:
   counterseal mcp pin --name <id> [--yes] [-- <command> [args...]]
   counterseal mcp unpin --name <id>
   counterseal mcp status --name <id> [--check]
-The first form is what your MCP client runs in place of the server (put "leashcli" in its command and the rest in its args).`;
+The first form is what your MCP client runs in place of the server (put "counterseal" in its command, or npx with "-y", "counterseal" first in its args).`;
 
 function loadPolicy(name, file, env) {
   const p = Store.paths(name, env);
@@ -859,6 +859,9 @@ async function statusCommand(a, env) {
 
 export async function main(argv, env = process.env) {
   const sub = argv[0], rest = argv.slice(1);
+  // --help or -h before a "--" (what follows belongs to the server): the usage, nothing started, pinned or removed
+  const dd = argv.indexOf('--');
+  if ((dd < 0 ? argv : argv.slice(0, dd)).some((x) => x === '--help' || x === '-h')) { out(USAGE); return; }
   try {
     if (sub === 'wrap') return await wrap(rest, env);
     if (sub === 'pin') return await pinCommand(rest, env);

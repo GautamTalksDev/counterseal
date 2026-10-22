@@ -53,9 +53,9 @@ async function api(method, path, body, auth = true) {
   const headers = { accept: 'application/json', 'user-agent': `leash-cli/${VERSION}` };
   if (auth) {
     const c = cfg(), t = c.token;
-    if (!t) die('Not signed in. Run: leash login');
+    if (!t) die('Not signed in. Run: counterseal login');
     // the session is sent only to the server that made it (a changed --server or LEASH_URL never receives it)
-    if (c.tokenServer && c.tokenServer !== server()) die(`This command line is signed in to ${c.tokenServer}, not ${server()}. Run: leash login`);
+    if (c.tokenServer && c.tokenServer !== server()) die(`This command line is signed in to ${c.tokenServer}, not ${server()}. Run: counterseal login`);
     headers.authorization = `Bearer ${t}`;
   }
   if (body !== undefined) headers['content-type'] = 'application/json';
@@ -172,8 +172,32 @@ function mcp() {
 
 // ---------------------------------------------------------------- commands
 const [cmd, ...args] = process.argv.slice(2);
+// --help or -h anywhere after a command, before a "--" (what follows "--" belongs to another program), asks for help
+const wantsHelp = (a) => { const i = a.indexOf('--'); return (i < 0 ? a : a.slice(0, i)).some((x) => x === '--help' || x === '-h'); };
+// help for one command; guard and mcp wrap|pin|unpin|status print their own (guard.mjs, mcp-wrap.mjs)
+const COMMAND_HELP = {
+  login: 'counterseal login [--server <url>]\n\n  Sign this computer in: it prints a code, you type it in the app, check where the sign-in started and approve\n  with your passkey. The sign-in lasts 7 days. --server picks another Counterseal server (https; http only for localhost).',
+  logout: 'counterseal logout\n\n  End this computer\'s session on the server and forget it here.',
+  add: 'counterseal add <github|cloudflare|railway|stripe|supabase|vercel|neon|fly|resend|shopify> [label] [--host your-store.myshopify.com]\n\n  Put a real key in the vault. It is read from the terminal without echo and never saved on this computer.\n  --host is the store address, for Shopify only.',
+  creds: 'counterseal creds\n\n  List the keys in the vault (id, provider, label, last four, host).',
+  tokens: 'counterseal tokens\n\n  List the proxy tokens that are not revoked.',
+  token: 'counterseal token [credentialId] [--label <label>] [--policy <file.json>] [--ttl <hours>] [--agent-key <id>]\n\n  Make a proxy token for a key in the vault (the id can be left out when the vault has one key) and print the\n  MCP server config for your agent. --agent-key binds the token to an agent key.',
+  revoke: 'counterseal revoke <token-id>\n\n  Revoke a proxy token now.',
+  freeze: 'counterseal freeze\n\n  Stop every agent token on the account at once (HTTP 423). Only your passkey, in the app, unfreezes.',
+  holds: 'counterseal holds\n\n  List the calls and commands waiting for you.',
+  watch: 'counterseal watch\n\n  Print each new held request with its approve link as it happens, and ring the terminal bell. Ctrl+C stops.',
+  'agent-key': 'counterseal agent-key [file] [--label <label>]\n\n  Make an Ed25519 agent key, save its private half to the file (default agent-key.json, never overwritten)\n  and register the public half with your account.',
+  'agent-keys': 'counterseal agent-keys\n\n  List the agent keys that are not revoked.',
+  mcp: 'counterseal mcp\n\n  Run the MCP server for your agent over stdio. Set LEASH_TOKENS="github=lsh_...,stripe=lsh_..." and, for tokens\n  bound to an agent key, LEASH_AGENT_KEY=<path to the key file>.\n  counterseal mcp wrap|pin|unpin|status --help: the MCP wrapper.',
+  help: null,
+};
 const HELP = 'counterseal ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token [credentialId] [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | mcp wrap|pin|unpin|status --name <id> | guard install|uninstall|status|check|map | help';
 try {
+  // <command> --help: print and stop, before any config is read, any file is written or any request is sent
+  if (Object.hasOwn(COMMAND_HELP, cmd) && cmd !== 'help' && wantsHelp(args) && !(cmd === 'mcp' && ['wrap', 'pin', 'unpin', 'status'].includes(args[0]))) {
+    console.log(COMMAND_HELP[cmd]);
+    process.exit(0);
+  }
   switch (cmd) {
     case 'login': {
       // another server: the old session is dropped, never sent there
@@ -196,16 +220,16 @@ try {
           save({ ...cfg(), token: t.access_token, tokenServer: server() });
           // say whose account this is, so a code approved by someone else (their account, not yours) is noticed at once
           const me = await api('GET', '/v1/me').catch(() => null);
-          console.log(`Signed in${me?.account?.name ? ` to the account of ${me.account.name}` : ''}, for ${Math.round(t.expires_in / 86400)} days.${me?.account?.name ? ' If that is not your account, run leash logout now.' : ''}`);
+          console.log(`Signed in${me?.account?.name ? ` to the account of ${me.account.name}` : ''}, for ${Math.round(t.expires_in / 86400)} days.${me?.account?.name ? ' If that is not your account, run counterseal logout now.' : ''}`);
           process.exit(0);
         } catch (e) {
           if (e.code === 'slow_down') { interval += 5; continue; } // RFC 8628 section 3.5
           if (e.code === 'access_denied') die('The sign-in was denied in the browser. Nothing was signed in.');
-          if (e.code === 'expired_token') die('The code expired or was used. Run leash login again.');
+          if (e.code === 'expired_token') die('The code expired or was used. Run counterseal login again.');
           if (e.code !== 'authorization_pending') throw e;
         }
       }
-      die('The code expired. Run leash login again.');
+      die('The code expired. Run counterseal login again.');
       break;
     }
     case 'logout': {
@@ -214,7 +238,7 @@ try {
       save({ server: cfg().server }); console.log('Signed out on this machine.'); break;
     }
     case 'add': {
-      const provider = args[0]; if (!provider) die('usage: leash add <github|cloudflare|railway|stripe|supabase|vercel|neon|fly|resend|shopify> [label] [--host your-store.myshopify.com] (--host is for Shopify only)');
+      const provider = args[0]; if (!provider) die('usage: counterseal add <github|cloudflare|railway|stripe|supabase|vercel|neon|fly|resend|shopify> [label] [--host your-store.myshopify.com] (--host is for Shopify only)');
       const host = flag(args, '--host');
       const label = args.slice(1).find((x, i, a) => !x.startsWith('--') && a[i - 1] !== '--host');
       const secret = await hidden(`Paste your ${provider} key (hidden): `);
@@ -245,7 +269,7 @@ try {
       let credentialId = args[0] && !args[0].startsWith('--') ? args[0] : null;
       if (!credentialId) {
         const cs = (await api('GET', '/v1/credentials')).credentials;
-        if (cs.length !== 1) die(cs.length ? `Which key? You have ${cs.length}: run "leash creds" and then "leash token <id>".` : 'Your vault is empty. Add a key first: leash add github');
+        if (cs.length !== 1) die(cs.length ? `Which key? You have ${cs.length}: run "counterseal creds" and then "counterseal token <id>".` : 'Your vault is empty. Add a key first: counterseal add github');
         credentialId = cs[0].id;
         process.stderr.write(`Using your only key: ${cs[0].label} (${cs[0].provider}).\n`);
       }
@@ -281,7 +305,7 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp
       const b = await api('POST', '/v1/agent-keys/begin', { publicKey: jwk.x });
       process.stderr.write(`Registering Ed25519 public key ${jwk.x}\nwith account ${b.account} on ${b.origin}.\n`);
       const r = await api('POST', '/v1/agent-keys', { label: flag(args, '--label'), publicKey: jwk.x, challengeId: b.challengeId, proof: await proveAgentKey(await importAgentKey(jwk), b.sign) });
-      console.log(`Agent key ${r.id} registered (keyid ${r.keyid}).\nPrivate key: ${file} (mode 600; keep it on the agent's machine, never commit it).\nBind a token to it: leash token <credentialId> --agent-key ${r.id}\nThen run the MCP server with LEASH_AGENT_KEY=${file}`);
+      console.log(`Agent key ${r.id} registered (keyid ${r.keyid}).\nPrivate key: ${file} (mode 600; keep it on the agent's machine, never commit it).\nBind a token to it: counterseal token <credentialId> --agent-key ${r.id}\nThen run the MCP server with LEASH_AGENT_KEY=${file}`);
       break;
     }
     case 'agent-keys': table((await api('GET', '/v1/agent-keys')).agentKeys.filter((k) => !k.revoked_at), ['id', 'label', 'keyid', 'tokens']); break;
@@ -297,5 +321,5 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp
       die(`counterseal: unknown command "${cmd}"\n\n${HELP}`);
   }
 } catch (e) {
-  die(`leash: ${e.message}`);
+  die(`counterseal: ${e.message}`);
 }

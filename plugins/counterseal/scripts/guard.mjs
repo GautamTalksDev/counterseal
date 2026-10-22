@@ -720,6 +720,9 @@ function quietPipes() {
 export async function main(argv, env = process.env, cwd = process.cwd()) {
   quietPipes();
   const [sub, ...a] = argv;
+  // --help or -h before a "--", after any subcommand: the help, nothing installed, checked or sent
+  const dd = argv.indexOf('--');
+  if (sub !== 'hook' && (dd < 0 ? argv : argv.slice(0, dd)).some((x) => x === '--help' || x === '-h')) { out(guardHelp()); return; }
   switch (sub) {
     case 'hook': {
       const agent = flag(a, '--agent');
