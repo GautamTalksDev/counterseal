@@ -160,6 +160,9 @@ sequenceDiagram
   loosen protection for up to an hour.
 - **The Deploy Gate has not run against real GitHub tokens yet**; the tests use a stand-in that signs like GitHub.
 - **Brakes cover brokered calls only**, not LLM spend and not SQL over a database connection.
+- **The hosted beta has a daily request budget.** It is sized for Cloudflare's Workers Free plan, which counts every
+  request (pages and assets too) against 100,000 a day for the whole account. If that runs out, calls through the hosted
+  service fail until 00:00 UTC ([threat model](docs/THREAT_MODEL.md#residual-risks)). A self-hosted copy has its own budget.
 - **Not independently audited.** The [security standards page](https://counterseal.gautamkhosla.com/security/standards/) is a
   self-assessment. Beta limits are in [docs/DEPLOY.md](docs/DEPLOY.md).
 
