@@ -85,3 +85,29 @@ test('the command line session token is sent only to the server it came from, an
   const r3 = cli(['holds'], { XDG_CONFIG_HOME: d3, LEASH_URL: 'https://evil.invalid' });
   assert.notEqual(r3.status, 0); assert.match(r3.stderr, /signed in to https:\/\/counterseal\.gautamkhosla\.com, not https:\/\/evil\.invalid/);
 });
+
+test('an unknown command is an error: usage on stderr, exit 1, nothing on stdout', () => {
+  // Printing the usage on stdout with exit 0 made `leash bogus && deploy` run the deploy, and no
+  // script could tell a successful run from a typo.
+  const r = cli(['bogus']);
+  assert.equal(r.status, 1, 'an unknown command exits non-zero');
+  assert.equal(r.stdout, '', 'nothing on stdout, so a caller cannot mistake the usage for output');
+  assert.match(r.stderr, /^counterseal: unknown command "bogus"\n\ncounterseal \d+\.\d+\.\d+/, 'the usage goes to stderr');
+  assert.match(r.stderr, /login \| logout/, 'the usage still lists the commands');
+});
+
+test('an unknown guard subcommand is an error too', () => {
+  const r = cli(['guard', 'bogus']);
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, '');
+  assert.match(r.stderr, /counterseal guard \d+\.\d+\.\d+/);
+  assert.match(r.stderr, /install \[--agents/, 'the usage still lists the subcommands');
+});
+
+test('a valid command still succeeds and prints to stdout', () => {
+  // The other half of the change: the exit code above must not have made real commands fail.
+  const r = cli(['--version']);
+  assert.equal(r.status, 0);
+  assert.match(r.stdout.trim(), /^\d+\.\d+\.\d+$/);
+  assert.equal(r.stderr, '');
+});

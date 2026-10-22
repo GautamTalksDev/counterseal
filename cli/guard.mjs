@@ -738,12 +738,12 @@ export async function main(argv, env = process.env, cwd = process.cwd()) {
     case 'check': return check(a, env, cwd);
     case 'map': return showMap(a);
     case 'update-map': { const m = await fetchMap(env); out(m.ok ? `API map updated: ${m.providers} providers, version ${m.version}.` : `Could not update the API map: ${m.why}`); process.exitCode = m.ok ? 0 : 1; return; }
-    // help, --help, -h and no subcommand print the help and succeed; anything else is a typo (`guard instal`), so it
-    // fails (exit 2) with the help on stderr instead of looking like a successful install
+    // help, --help, -h and no subcommand print the help on stdout and succeed
     case undefined: case 'help': case '--help': case '-h': out(guardHelp()); return;
     default:
-      process.stderr.write(`counterseal guard: unknown command "${scrub(String(sub))}"\n\n${guardHelp()}\n`);
-      process.exitCode = 2;
+      /* Same as the top level list: an unknown subcommand is an error, so it goes to stderr with
+       * exit 1 instead of stdout with exit 0. */
+      fail(`counterseal guard: unknown command "${scrub(String(sub))}"\n\n${guardHelp()}`);
   }
 }
 function guardHelp() {

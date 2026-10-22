@@ -273,10 +273,13 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp
     case 'mcp': if (['wrap', 'pin', 'unpin', 'status'].includes(args[0])) await (await import('./mcp-wrap.mjs')).main(args); else mcp(); break;
     case 'guard': await (await import('./guard.mjs')).main(args); break;
     case '--version': case '-v': console.log(VERSION); break;
-    // help, --help, -h and no command at all print the help and succeed; anything else is a typo, so it fails (exit 2)
-    // with the help on stderr, and a script such as `counterseal tokns && deploy` stops there
+    // help, --help, -h and no command at all print the help on stdout and succeed
     case undefined: case 'help': case '--help': case '-h': console.log(HELP); break;
-    default: die(`counterseal: unknown command "${cmd}"\n\n${HELP}`, 2);
+    default:
+      /* A command that is not in the list is a mistake, not a request for help, so the usage goes to
+       * stderr and the exit code is 1. Printing it on stdout with exit 0 let `leash bogus && deploy`
+       * run the deploy, and no script could tell a successful run from a typo. */
+      die(`counterseal: unknown command "${cmd}"\n\n${HELP}`);
   }
 } catch (e) {
   die(`leash: ${e.message}`);
