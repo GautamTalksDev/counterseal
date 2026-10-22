@@ -309,7 +309,7 @@ steps:
   <pre>{ "limits": { "writesPerHour": 200, "repeatsPer5Min": 3 } }</pre>
   <p>Any session may set <code>limits</code>. A write is any request that is not a GET or HEAD. When a token makes more than <code>writesPerHour</code> writes in an hour, or sends the same exact request (method, path, query, content type and body) more than <code>repeatsPer5Min</code> times in 5 minutes, it trips: that write and every later one is held with rule <code>brake.tripped</code> until you reset the token with your passkey (Agent tokens, Reset), and reads keep passing. Your devices are told once. A token with neither limit costs nothing extra.</p>
   <h3>Freeze</h3>
-  <p>The Freeze bar at the top of the app, <code>leash freeze</code>, or the Freeze button on a phone alert stops every token of the account at once: each call answers <code>423 account_frozen</code>, a coding agent's guard is stopped too, approvals nobody used yet are void, and approving waits. Any signed-in session can freeze. Only your passkey, in the app, unfreezes.</p>
+  <p>The Freeze bar at the top of the app, <code>counterseal freeze</code>, or the Freeze button on a phone alert stops every token of the account at once: each call answers <code>423 account_frozen</code>, a coding agent's guard is stopped too, approvals nobody used yet are void, and approving waits. Any signed-in session can freeze. Only your passkey, in the app, unfreezes.</p>
 
   <h2 id="team">Teams: the two-person seal</h2>
   <p>An account can have several people, each with their own passkey, and a held call or command can need two of them.</p>
@@ -321,7 +321,7 @@ steps:
     <li><strong>Leaving.</strong> Removing someone signs them out everywhere, removes their passkeys and alert devices, revokes the tokens and keys they made, drops their seals and voids approvals they helped give that are not yet used, at once. Making someone a viewer revokes what they made. Only its maker or an owner can revoke a token or key. Anyone can leave. The last owner cannot be removed.</li>
     <li><strong>Public receipts</strong> of an approval that needed two seals say <code>"quorum": 2, "votes": 2</code> in <code>meta</code>, never who.</li>
     <li><strong>Break glass.</strong> When the second approver cannot be reached, an owner or approver can open a window of 5 to 60 minutes with a passkey. While it is open, what Counterseal would hold for the tokens and guard keys you pick goes through, every call it lets through is on the record and its public receipt says <code>breakglass</code>, and every member and channel is told at once. It cannot be extended, three a day at most, and any member can close it. It never lifts a freeze, a tripped breaker or a money cap, and never applies to deploy gates.</li>
-    <li><strong>Slack, Discord and Google Chat.</strong> An owner can connect a channel with a passkey (the webhook address is kept encrypted and not shown again). It is told when something is held or part-sealed, when break glass opens, and when the team changes: who asked, the rule, how many seals and the link; never the path, command, body, amount or a name. Only a passkey in the app approves.</li>
+    <li><strong>Slack, Discord and Google Chat.</strong> An owner can connect a channel with a passkey (the webhook address is kept encrypted and not shown again). It is told when something is held or part-sealed, when break glass opens, and when the team changes: who asked, the rule, how many seals and the link; never the path, command, body, amount or a name. Only a passkey in the app approves. The channels were tested against stand-ins only, never against the real services.</li>
   </ul>
   <p>Two people who agree to act together are not stopped: two seals mean two passkeys of two people on your team.</p>
 
@@ -378,18 +378,18 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
   <h2 id="cli">CLI</h2>
   <table>
     <tr><th>Command</th><th>What it does</th></tr>
-    <tr><td><code>leash login</code></td><td>Sign in this machine for 7 days. You type the code it shows in the app and approve with your passkey. Tokens it mints end with the sign-in; revoke it in the app under Account.</td></tr>
-    <tr><td><code>leash logout</code></td><td>End the session on the server (0.3.0) and forget it on this machine. Tokens it minted keep working until they end or you revoke the sign-in in the app.</td></tr>
-    <tr><td><code>leash add &lt;provider&gt; [label]</code></td><td>Vault a key. Prompts for it; encrypted in the vault, never saved on your machine.</td></tr>
-    <tr><td><code>leash creds</code></td><td>List vaulted keys (id, provider, label, last four).</td></tr>
-    <tr><td><code>leash token &lt;key-id&gt; [--label x] [--ttl hours] [--policy file.json]</code></td><td>Mint an agent token. 0.3.0 adds <code>--agent-key &lt;id&gt;</code>.</td></tr>
-    <tr><td><code>leash tokens</code></td><td>List active tokens.</td></tr>
-    <tr><td><code>leash revoke &lt;token-id&gt;</code></td><td>Revoke a token immediately.</td></tr>
-    <tr><td><code>leash freeze</code></td><td>Stop every agent token on the account at once. Only your passkey, in the app, unfreezes. From 0.3.0.</td></tr>
-    <tr><td><code>leash holds</code></td><td>List calls waiting for you.</td></tr>
-    <tr><td><code>leash watch</code></td><td>Print and ring for each new hold.</td></tr>
-    <tr><td><code>leash mcp</code></td><td>Run the MCP server for your agent.</td></tr>
-    <tr><td><code>leash agent-key [file]</code>, <code>leash agent-keys</code></td><td>Make and register an agent key; list them. From 0.3.0.</td></tr>
+    <tr><td><code>counterseal login</code></td><td>Sign in this machine for 7 days. You type the code it shows in the app and approve with your passkey. Tokens it mints end with the sign-in; revoke it in the app under Account.</td></tr>
+    <tr><td><code>counterseal logout</code></td><td>End the session on the server (0.3.0) and forget it on this machine. Tokens it minted keep working until they end or you revoke the sign-in in the app.</td></tr>
+    <tr><td><code>counterseal add &lt;provider&gt; [label]</code></td><td>Vault a key. Prompts for it; encrypted in the vault, never saved on your machine.</td></tr>
+    <tr><td><code>counterseal creds</code></td><td>List vaulted keys (id, provider, label, last four).</td></tr>
+    <tr><td><code>counterseal token &lt;key-id&gt; [--label x] [--ttl hours] [--policy file.json]</code></td><td>Mint an agent token. 0.3.0 adds <code>--agent-key &lt;id&gt;</code>.</td></tr>
+    <tr><td><code>counterseal tokens</code></td><td>List active tokens.</td></tr>
+    <tr><td><code>counterseal revoke &lt;token-id&gt;</code></td><td>Revoke a token immediately.</td></tr>
+    <tr><td><code>counterseal freeze</code></td><td>Stop every agent token on the account at once. Only your passkey, in the app, unfreezes. From 0.3.0.</td></tr>
+    <tr><td><code>counterseal holds</code></td><td>List calls waiting for you.</td></tr>
+    <tr><td><code>counterseal watch</code></td><td>Print and ring for each new hold.</td></tr>
+    <tr><td><code>counterseal mcp</code></td><td>Run the MCP server for your agent.</td></tr>
+    <tr><td><code>counterseal agent-key [file]</code>, <code>counterseal agent-keys</code></td><td>Make and register an agent key; list them. From 0.3.0.</td></tr>
   </table>
   <p>Run any command with <code>npx counterseal</code>, or install it globally with <code>npm i -g counterseal</code>.</p>
 
