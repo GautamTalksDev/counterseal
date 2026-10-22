@@ -50,6 +50,7 @@ for (const cli of CLIS) {
       assert.equal(r.status, 0, args.join(' '));
       assert.match(r.stdout, /^counterseal guard /);
       assert.match(r.stdout, /\n {2}install /);
+      assert.match(r.stdout, /\n {2}help$/m, 'the help lists help');
     }
     const r = run(cli, ['guard', 'instal']);
     assert.equal(r.status, 1);
