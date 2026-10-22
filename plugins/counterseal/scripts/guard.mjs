@@ -720,6 +720,9 @@ function quietPipes() {
 export async function main(argv, env = process.env, cwd = process.cwd()) {
   quietPipes();
   const [sub, ...a] = argv;
+  // --help or -h before a "--", after any subcommand: the help, nothing installed, checked or sent
+  const dd = argv.indexOf('--');
+  if (sub !== 'hook' && (dd < 0 ? argv : argv.slice(0, dd)).some((x) => x === '--help' || x === '-h')) { out(guardHelp()); return; }
   switch (sub) {
     case 'hook': {
       const agent = flag(a, '--agent');
@@ -738,9 +741,16 @@ export async function main(argv, env = process.env, cwd = process.cwd()) {
     case 'check': return check(a, env, cwd);
     case 'map': return showMap(a);
     case 'update-map': { const m = await fetchMap(env); out(m.ok ? `API map updated: ${m.providers} providers, version ${m.version}.` : `Could not update the API map: ${m.why}`); process.exitCode = m.ok ? 0 : 1; return; }
+    // help, --help, -h and no subcommand print the help on stdout and succeed
+    case undefined: case 'help': case '--help': case '-h': out(guardHelp()); return;
     default:
-      out(`counterseal guard ${GUARD_VERSION}\n\n  install [--agents claude-code,codex,cursor|none] [--scope user|project] [--paste-key] [--label x] [--dry-run]\n           (--agents none: a key only, for the Claude Code plugin)\n  uninstall [--agents ...] [--scope ...] [--keep-key] [--revoke-key]\n  status\n  check [--cwd dir] [--json] -- <command>\n  map [--json]\n  update-map\n  hook --agent <claude-code|codex|cursor> [--mode wait|retry]   (what the agent calls)`);
+      /* Same as the top level list: an unknown subcommand is an error, so it goes to stderr with
+       * exit 1 instead of stdout with exit 0. */
+      fail(`counterseal guard: unknown command "${scrub(String(sub))}"\n\n${guardHelp()}`);
   }
+}
+function guardHelp() {
+  return `counterseal guard ${GUARD_VERSION}\n\n  install [--agents claude-code,codex,cursor|none] [--scope user|project] [--paste-key] [--label x] [--dry-run]\n           (--agents none: a key only, for the Claude Code plugin)\n  uninstall [--agents ...] [--scope ...] [--keep-key] [--revoke-key]\n  status\n  check [--cwd dir] [--json] -- <command>\n  map [--json]\n  update-map\n  hook --agent <claude-code|codex|cursor> [--mode wait|retry]   (what the agent calls)\n  help`;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

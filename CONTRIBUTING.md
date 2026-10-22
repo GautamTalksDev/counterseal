@@ -25,7 +25,7 @@ node dev/local.js 8790                                                # a local 
 
 ```bash
 for f in cli/*.mjs sdk/*.mjs scripts/*.mjs plugins/*/scripts/*.mjs action/deploy-gate/*.mjs; do node --check "$f"; done
-node scripts/sync-guard.mjs --check     # generated copies of the shell map, SQL block and API map are in step
+node scripts/sync-guard.mjs --check     # generated copies (CLI, plugin, site) of the shell map, SQL block and API map
 node scripts/rebrand.mjs --check        # names, domains and the repository URL come from server/src/brand.js
 node scripts/cli-name.mjs --check       # every install line names one CLI package
 ```

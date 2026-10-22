@@ -67,7 +67,7 @@
 npx counterseal token &lt;key-id&gt; --label coding-agent</pre></li>
     <li><strong>Connect your agent.</strong> Add the MCP server to your agent's config (see <a href="#mcp">below</a>).</li>
   </ol>
-  <div class="callout">You can also do all of this in the app without the CLI. The CLI is just faster. From version 0.3.0 the CLI package is called <code>counterseal</code>; <code>leashcli</code>, the product's earlier name, keeps working as an alias that runs it; it is the same service.</div>
+  <div class="callout">You can also do all of this in the app without the CLI. The CLI is just faster. From version 0.3.0 the CLI package is called <code>counterseal</code>; <code>leashcli</code>, the product's earlier name, keeps working: it runs the <code>counterseal</code> CLI of the version it pins, against the same service; install <code>counterseal</code> for the newest.</div>
   <div class="callout">Counterseal lives at counterseal.gautamkhosla.com only. Its earlier address, leash.gautamkhosla.com, answers every request (pages, <code>/app</code>, <code>/v1</code>, <code>/p</code>) with a permanent redirect (301) to the same path here and serves nothing itself. Point agents and command lines at counterseal.gautamkhosla.com: <code>leashcli</code> 0.1.1 does not follow redirects. Passkeys made on the earlier address do not work here; make a new account.</div>
 
   <h2 id="concepts">Concepts</h2>
@@ -141,7 +141,7 @@ curl -s https://counterseal.gautamkhosla.com/v1/approvals/&lt;id&gt;/use \
   <p>Fields: <code>kind</code> (<code>shell</code> or <code>tool</code>), <code>agent</code> (<code>claude-code</code>, <code>codex</code>, <code>cursor</code>, <code>copilot</code>, <code>gemini</code>, <code>antigravity</code> or <code>mcp</code>), <code>rule</code>, <code>why</code> (up to 300 characters), <code>summary</code> (up to 200), <code>detail</code> (the exact command or canonical tool call, up to 4,096), optional <code>context</code> (<code>cwd</code>, the folder's name only; <code>session</code>) and <code>map</code> (the guard's map version). The full contract is in <a href="https://github.com/GautamTalksDev/counterseal/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
 
   <h2 id="guard-cli">Guard your coding agent</h2>
-  <p><code>counterseal guard</code> puts a hook in front of your coding agent's shell commands. A command on the shell map waits for your passkey; every other command is left to the agent's own permission settings. It is in this repository (CLI 0.3.0, coming to npm), not on npm yet: until then run <code>node cli/leash.mjs guard ...</code> from a clone.</p>
+  <p><code>counterseal guard</code> puts a hook in front of your coding agent's shell commands. A command on the shell map waits for your passkey; every other command is left to the agent's own permission settings. It needs CLI 0.3.0 or later (<code>npx counterseal</code> runs 0.4.0); from a clone, <code>node cli/leash.mjs guard ...</code> works too.</p>
   <pre>npx counterseal login                  # type its code at /app#device, check where it started, approve
 npx counterseal guard install          # finds Claude Code, Codex and Cursor; or --agents claude-code,codex,cursor
 npx counterseal guard check -- terraform destroy     # what the map says, offline
@@ -246,7 +246,7 @@ steps:
   </ul>
   <p>Usage, what is checked, limits and errors: <a href="https://github.com/GautamTalksDev/counterseal/blob/main/docs/DEPLOY_GATE.md">docs/DEPLOY_GATE.md</a>. The contract is in <a href="https://github.com/GautamTalksDev/counterseal/blob/main/docs/PROTOCOL.md">docs/PROTOCOL.md</a>.</p>
   <h2 id="mcp-wrap">Any MCP server behind Counterseal</h2>
-  <p><code>counterseal mcp wrap</code> sits between your MCP client and a local (stdio) MCP server. Destructive tool calls wait for your passkey, and the server's tool definitions are pinned, so a tool the server changes after you approved it is hidden until you look. It is in the repository and not yet published (CLI 0.3.0). Put it in front of the server's own command:</p>
+  <p><code>counterseal mcp wrap</code> sits between your MCP client and a local (stdio) MCP server. Destructive tool calls wait for your passkey, and the server's tool definitions are pinned, so a tool the server changes after you approved it is hidden until you look. It needs CLI 0.3.0 or later, on npm. Put it in front of the server's own command:</p>
   <pre>{ "mcpServers": { "supabase": {
     "command": "npx",
     "args": ["-y", "counterseal", "mcp", "wrap", "--name", "supabase", "--",
@@ -309,10 +309,10 @@ steps:
   <pre>{ "limits": { "writesPerHour": 200, "repeatsPer5Min": 3 } }</pre>
   <p>Any session may set <code>limits</code>. A write is any request that is not a GET or HEAD. When a token makes more than <code>writesPerHour</code> writes in an hour, or sends the same exact request (method, path, query, content type and body) more than <code>repeatsPer5Min</code> times in 5 minutes, it trips: that write and every later one is held with rule <code>brake.tripped</code> until you reset the token with your passkey (Agent tokens, Reset), and reads keep passing. Your devices are told once. A token with neither limit costs nothing extra.</p>
   <h3>Freeze</h3>
-  <p>The Freeze bar at the top of the app, <code>leash freeze</code>, or the Freeze button on a phone alert stops every token of the account at once: each call answers <code>423 account_frozen</code>, a coding agent's guard is stopped too, approvals nobody used yet are void, and approving waits. Any signed-in session can freeze. Only your passkey, in the app, unfreezes.</p>
+  <p>The Freeze bar at the top of the app, <code>counterseal freeze</code>, or the Freeze button on a phone alert stops every token of the account at once: each call answers <code>423 account_frozen</code>, a coding agent's guard is stopped too, approvals nobody used yet are void, and approving waits. Any signed-in session can freeze. Only your passkey, in the app, unfreezes.</p>
 
   <h2 id="team">Teams: the two-person seal</h2>
-  <p>In the repository, not yet on the live service. An account can have several people, each with their own passkey, and a held call or command can need two of them.</p>
+  <p>An account can have several people, each with their own passkey, and a held call or command can need two of them.</p>
   <ul>
     <li><strong>Invite.</strong> In the app, Team, an owner makes an invite with their passkey: a role, who it is for, and how long it works (2 hours by default, 24 at most). The link works once. Send it privately; it shows the person your account, your name and the role before they make their own passkey. Every member's devices are told when someone joins.</li>
     <li><strong>Roles.</strong> Owner (the team, the seals needed, the vault, deleting the account), approver (seals held actions), member (makes tokens and keys for their agents, cannot seal), viewer (reads, can deny). Counterseal checks the role on every request. A command line sign-in gets the role of the person who approved it.</li>
@@ -321,7 +321,7 @@ steps:
     <li><strong>Leaving.</strong> Removing someone signs them out everywhere, removes their passkeys and alert devices, revokes the tokens and keys they made, drops their seals and voids approvals they helped give that are not yet used, at once. Making someone a viewer revokes what they made. Only its maker or an owner can revoke a token or key. Anyone can leave. The last owner cannot be removed.</li>
     <li><strong>Public receipts</strong> of an approval that needed two seals say <code>"quorum": 2, "votes": 2</code> in <code>meta</code>, never who.</li>
     <li><strong>Break glass.</strong> When the second approver cannot be reached, an owner or approver can open a window of 5 to 60 minutes with a passkey. While it is open, what Counterseal would hold for the tokens and guard keys you pick goes through, every call it lets through is on the record and its public receipt says <code>breakglass</code>, and every member and channel is told at once. It cannot be extended, three a day at most, and any member can close it. It never lifts a freeze, a tripped breaker or a money cap, and never applies to deploy gates.</li>
-    <li><strong>Slack, Discord and Google Chat.</strong> An owner can connect a channel with a passkey (the webhook address is kept encrypted and not shown again). It is told when something is held or part-sealed, when break glass opens, and when the team changes: who asked, the rule, how many seals and the link; never the path, command, body, amount or a name. Only a passkey in the app approves.</li>
+    <li><strong>Slack, Discord and Google Chat.</strong> An owner can connect a channel with a passkey (the webhook address is kept encrypted and not shown again). It is told when something is held or part-sealed, when break glass opens, and when the team changes: who asked, the rule, how many seals and the link; never the path, command, body, amount or a name. Only a passkey in the app approves. The channels were tested against stand-ins only, never against the real services.</li>
   </ul>
   <p>Two people who agree to act together are not stopped: two seals mean two passkeys of two people on your team.</p>
 
@@ -357,9 +357,9 @@ steps:
 
   <h2 id="agent-keys">Agent keys: prove who</h2>
   <p>Give each agent its own Ed25519 key. You register the public half with a proof of possession; the private half never leaves the agent's machine. A token bound to the key then only works on requests that key signed, so a token copied from a log, a config file or a screen is useless on its own, and every decision on a signed request records which agent key made it.</p>
-  <pre>npx counterseal agent-key agent-key.json --label laptop-agent     # makes the key (file mode 600) and registers it
+  <pre>npx counterseal agent-key ~/.config/leash/agent-key.json --label laptop-agent     # makes the key (file mode 600, outside any project) and registers it
 npx counterseal token &lt;key-id&gt; --agent-key &lt;agent-key-id&gt;          # a token bound to it</pre>
-  <p>Then run the MCP server of the CLI (0.3.0 or later; <code>npx counterseal</code> runs 0.4.0) with <code>LEASH_AGENT_KEY=agent-key.json</code> next to <code>LEASH_TOKENS</code>; it signs every call. An older CLI cannot sign, so a bound token refuses its calls. You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys arrive in CLI 0.3.0; until it is published, use the app or the signer in <code>cli/sign.mjs</code>.</p>
+  <p>Then run the MCP server of the CLI (0.3.0 or later; <code>npx counterseal</code> runs 0.4.0) with <code>LEASH_AGENT_KEY</code> set to that file's full path next to <code>LEASH_TOKENS</code>; it signs every call. An older CLI cannot sign, so a bound token refuses its calls. You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys need CLI 0.3.0 or later; the signer is in <code>cli/sign.mjs</code>.</p>
   <p>The signature is an RFC 9421 HTTP Message Signature with this profile:</p>
   <pre>Signature-Input: sig1=("@method" "@target-uri" "content-digest" "content-type");created=1791300000;expires=1791300060;keyid="&lt;JWK thumbprint&gt;";alg="ed25519";nonce="&lt;random&gt;";tag="leash-pop"
 Signature: sig1=:&lt;base64 Ed25519 signature&gt;:
@@ -378,20 +378,20 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
   <h2 id="cli">CLI</h2>
   <table>
     <tr><th>Command</th><th>What it does</th></tr>
-    <tr><td><code>leash login</code></td><td>Sign in this machine for 7 days. You type the code it shows in the app and approve with your passkey. Tokens it mints end with the sign-in; revoke it in the app under Account.</td></tr>
-    <tr><td><code>leash logout</code></td><td>End the session on the server (0.3.0) and forget it on this machine. Tokens it minted keep working until they end or you revoke the sign-in in the app.</td></tr>
-    <tr><td><code>leash add &lt;provider&gt; [label]</code></td><td>Vault a key. Prompts for it; encrypted in the vault, never saved on your machine.</td></tr>
-    <tr><td><code>leash creds</code></td><td>List vaulted keys (id, provider, label, last four).</td></tr>
-    <tr><td><code>leash token &lt;key-id&gt; [--label x] [--ttl hours] [--policy file.json]</code></td><td>Mint an agent token. 0.3.0 adds <code>--agent-key &lt;id&gt;</code>.</td></tr>
-    <tr><td><code>leash tokens</code></td><td>List active tokens.</td></tr>
-    <tr><td><code>leash revoke &lt;token-id&gt;</code></td><td>Revoke a token immediately.</td></tr>
-    <tr><td><code>leash freeze</code></td><td>Stop every agent token on the account at once. Only your passkey, in the app, unfreezes. From 0.3.0.</td></tr>
-    <tr><td><code>leash holds</code></td><td>List calls waiting for you.</td></tr>
-    <tr><td><code>leash watch</code></td><td>Print and ring for each new hold.</td></tr>
-    <tr><td><code>leash mcp</code></td><td>Run the MCP server for your agent.</td></tr>
-    <tr><td><code>leash agent-key [file]</code>, <code>leash agent-keys</code></td><td>Make and register an agent key; list them. From 0.3.0.</td></tr>
+    <tr><td><code>counterseal login</code></td><td>Sign in this machine for 7 days. You type the code it shows in the app and approve with your passkey. Tokens it mints end with the sign-in; revoke it in the app under Account.</td></tr>
+    <tr><td><code>counterseal logout</code></td><td>End the session on the server (0.3.0) and forget it on this machine. Tokens it minted keep working until they end or you revoke the sign-in in the app.</td></tr>
+    <tr><td><code>counterseal add &lt;provider&gt; [label]</code></td><td>Vault a key. Prompts for it; encrypted in the vault, never saved on your machine.</td></tr>
+    <tr><td><code>counterseal creds</code></td><td>List vaulted keys (id, provider, label, last four).</td></tr>
+    <tr><td><code>counterseal token &lt;key-id&gt; [--label x] [--ttl hours] [--policy file.json]</code></td><td>Mint an agent token. 0.3.0 adds <code>--agent-key &lt;id&gt;</code>.</td></tr>
+    <tr><td><code>counterseal tokens</code></td><td>List active tokens.</td></tr>
+    <tr><td><code>counterseal revoke &lt;token-id&gt;</code></td><td>Revoke a token immediately.</td></tr>
+    <tr><td><code>counterseal freeze</code></td><td>Stop every agent token on the account at once. Only your passkey, in the app, unfreezes. From 0.3.0.</td></tr>
+    <tr><td><code>counterseal holds</code></td><td>List calls waiting for you.</td></tr>
+    <tr><td><code>counterseal watch</code></td><td>Print and ring for each new hold.</td></tr>
+    <tr><td><code>counterseal mcp</code></td><td>Run the MCP server for your agent.</td></tr>
+    <tr><td><code>counterseal agent-key [file]</code>, <code>counterseal agent-keys</code></td><td>Make and register an agent key; list them. From 0.3.0. Without a path the key goes to <code>agent-key.json</code> in <code>~/.config/leash</code> (or <code>$XDG_CONFIG_HOME/leash</code>); a path you give should be outside your project, so the private key is never committed.</td></tr>
   </table>
-  <p>Run any command with <code>npx counterseal</code>, or install it globally with <code>npm i -g leashcli</code>.</p>
+  <p>Run any command with <code>npx counterseal</code>, or install it globally with <code>npm i -g counterseal</code>.</p>
 
   <h2 id="api">API</h2>
   <p>Base URL <code>https://counterseal.gautamkhosla.com</code>. Account endpoints use your session (web cookie or CLI bearer). Web writes need the same Origin and an <code>x-leash: 1</code> header. Endpoints marked passkey or web only work from the web app.</p>

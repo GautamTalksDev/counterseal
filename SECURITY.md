@@ -19,10 +19,10 @@ other people's data or degrade the service. `/.well-known/security.txt` carries 
 | A decision on the record cannot be quietly rewritten | Per-account hash-chained audit log (`/v1/audit/verify`); with receipts on, each decision is also an entry in a public RFC 6962 Merkle log with Ed25519-signed C2SP checkpoints; consistency proofs show the log only grew |
 | No agent or API key holder can forge a broker receipt | `source: "broker"` is set only by the broker, outside the receipt; the receipts API fills only the inner receipt and refuses unknown fields |
 | Public receipts leak nothing private | Broker receipts carry the method, the provider host, the decision, rule id, map version, two booleans, the time and the hash of the private audit entry; per-entry salted submitter commitments; never a path, query, body, key, token, account id, name, email or IP (tested) |
-| A coding agent's held command waits for your passkey (guard, not yet deployed) | The guard asks `POST /v1/approvals` with a guard key (`lsg_`) that can ask and read its own approvals, never approve; an approval covers one exact command, its agent and folder name (SHA-256 bound), once, within 10 minutes, consumed atomically. Enforced on the agent's machine: a seatbelt, not a sandbox |
-| A GitHub Actions job waits for your passkey (deploy gate, not yet deployed) | The job's step sends the OIDC token GitHub signs for it. RS256 is pinned and the key comes only from GitHub's own key set; the issuer, an audience naming this gate, `exp`, `nbf`, `iat` and a once-only `jti` are checked; then the run must be what the owner listed for the gate (repository, workflow files, refs, environments, triggers; nothing is accepted by default). The approval covers one run (GitHub's repository and owner ids, run, attempt, commit, workflow, ref, environment, SHA-256 bound), is spent once by the poll that finds it approved, and a gate's first approved run binds it to the repository's ids. A gate is a pause the job asks for: protect the workflow file, or hand the deploy key out through the gate so nothing can deploy before an approval |
+| A coding agent's held command waits for your passkey (guard) | The guard asks `POST /v1/approvals` with a guard key (`lsg_`) that can ask and read its own approvals, never approve; an approval covers one exact command, its agent and folder name (SHA-256 bound), once, within 10 minutes, consumed atomically. Enforced on the agent's machine: a seatbelt, not a sandbox |
+| A GitHub Actions job waits for your passkey (deploy gate, preview) | The job's step sends the OIDC token GitHub signs for it. RS256 is pinned and the key comes only from GitHub's own key set; the issuer, an audience naming this gate, `exp`, `nbf`, `iat` and a once-only `jti` are checked; then the run must be what the owner listed for the gate (repository, workflow files, refs, environments, triggers; nothing is accepted by default). The approval covers one run (GitHub's repository and owner ids, run, attempt, commit, workflow, ref, environment, SHA-256 bound), is spent once by the poll that finds it approved, and a gate's first approved run binds it to the repository's ids. A gate is a pause the job asks for: protect the workflow file, or hand the deploy key out through the gate so nothing can deploy before an approval |
 | An agent stays inside the money you gave it | Stripe refunds and payouts pass unattended only under a token's per-call and per-day caps (set with a passkey, one currency, amounts read by the map's strict form parser and held when anything is ambiguous, the day's total reserved atomically); a breaker holds the writes of a token that makes too many in an hour or repeats one request; Freeze stops every token at once and only a passkey ends it. This covers calls through Counterseal, not LLM tokens and not SQL sent over a database connection |
-| Two different people, each with their own passkey, for an irreversible action (two-person seal, not yet deployed) | A team can require two seals: one row per (hold, member), the member taken from the passkey, so a second passkey, a second browser or two confirmations at once count once; the seal and the approval are one transaction; roles are checked on the server for every request; with self-approval off, the maker of the token or guard key that asked is not one of them. Raising the quorum is immediate; lowering it (or turning self-approval on) takes 24 hours and wakes every member's devices, and any approver can cancel it. While one person cannot approve alone (two seals, or self-approval off), a new or promoted approver's seal counts after 24 hours, and pre-approvals and money caps are paused; they are also paused on tokens whose maker can no longer approve. Public receipts carry only how many seals were required and given. Two people who agree to act together are out of scope |
+| Two different people, each with their own passkey, for an irreversible action (two-person seal) | A team can require two seals: one row per (hold, member), the member taken from the passkey, so a second passkey, a second browser or two confirmations at once count once; the seal and the approval are one transaction; roles are checked on the server for every request; with self-approval off, the maker of the token or guard key that asked is not one of them. Raising the quorum is immediate; lowering it (or turning self-approval on) takes 24 hours and wakes every member's devices, and any approver can cancel it. While one person cannot approve alone (two seals, or self-approval off), a new or promoted approver's seal counts after 24 hours, and pre-approvals and money caps are paused; they are also paused on tokens whose maker can no longer approve. Public receipts carry only how many seals were required and given. Two people who agree to act together are out of scope |
 | A signed reported receipt was signed by that key | Receipts keys bound to an Ed25519 signer (proof of possession naming the log and the account) accept only receipts that signer signed, with a `ts` within 10 minutes, each signature once; small-order and non-canonical keys and signatures are refused |
 
 ## Controls, mapped to OWASP Top 10 (2025) and OWASP API Security Top 10 (2023)
@@ -172,7 +172,7 @@ margin on Workers Free; proxied paths are never written to log lines. Tests: `se
 - Pages served through the Worker get the site's security headers even if `_headers` is not applied to them.
 Tests: `server/test/cli-signin.test.js`, `server/test/second-pass.test.js`.
 
-## Approvals API, 9 Oct 2026 (branch `feat/approvals`, migration 0006, not deployed)
+## Approvals API, 9 Oct 2026 (migration 0006)
 
 Guard keys and `POST /v1/approvals` for what the broker does not proxy (a coding agent's shell commands, MCP tool calls),
 on the existing holds, approve, deny and receipts paths. Threat model section G; tests in
@@ -182,7 +182,7 @@ and with the CLI session that made it, D1 budgets) and the migration test on liv
 second pass: they end with the CLI session that made them and are revoked with it even after it signed out, guard holds
 share the account's 100 waiting holds and its one alert a minute, and guard key events are in the audit log.
 
-## MCP gateway mode, 10 Oct 2026 (branch `feat/mcp-wrap`, CLI only, no server change)
+## MCP gateway mode, 10 Oct 2026 (CLI only, no server change)
 
 `counterseal mcp wrap` holds destructive MCP tool calls through the Approvals API (kind `tool`, agent `mcp`) and pins the
 server's tool definitions with mcp-pin's published hash. Threat model section W; zero runtime dependencies. Tests:
@@ -210,7 +210,7 @@ already in flight when a freeze lands, and a total that can reach twice the dail
 Tests: `server/test/brakes-money.test.js`, `brakes-breaker.test.js`, `brakes-freeze.test.js`, `brakes-headline.test.js`,
 `brakes-mcp.test.js`, and the migration test.
 
-## Two-person seal, 9 Oct 2026 (branch `feat/two-person`, migration 0009, not deployed)
+## Two-person seal, 9 Oct 2026 (migration 0009)
 
 Team members, invites, roles and quorum votes (threat model T1 to T11; migration 0009, additive: an existing account is one
 person, its owner, and one seal approves, as before). Tests in `server/test/team.test.js`: the same person twice (a second
@@ -223,7 +223,7 @@ on the one host, the D1 budgets and account deletion; and the migration test on 
 the seals already on waiting holds. Passkey ceremonies of Brakes (unfreeze, breaker reset) also require the signed-in
 person's own passkey.
 
-## Break glass and alert channels, 9 Oct 2026 (branch `feat/deploy-gate`, migration 0011, not deployed)
+## Break glass and alert channels, 9 Oct 2026 (migration 0011)
 
 Part 2b of the two-person seal (threat model T12 and T13). A window of at most 60 minutes, opened by an owner or approver with a
 passkey whose challenge carries exactly what was asked, lets what the map would hold go through for the tokens and guard keys it
@@ -236,9 +236,9 @@ and said so: for up to an hour a leaked token in a window's scope can do what th
 opens windows is an insider that the product reports but does not stop. Tests: `server/test/breakglass.test.js`,
 `channels.test.js`, `bg-app.test.js`.
 
-## The coding-agent guard, 10 Oct 2026 (branch `feat/guard-cli`, not deployed; no server change)
+## The coding-agent guard, 10 Oct 2026 (CLI only, no server change)
 
-`counterseal guard` (CLI 0.3.0), the shell map (`sdk/shellmap.mjs`, version `2026-10-10.1`) and the Claude Code plugin. It runs
+`counterseal guard` (CLI 0.3.0 and later), the shell map (`sdk/shellmap.mjs`, version `2026-10-10.2` from CLI 0.4.0) and the Claude Code plugin. It runs
 on the agent's machine and uses the Approvals API above; threat model G9 to G17. The hook fails closed (a command on the
 map is denied when the server cannot be reached, the key is bad, a limit is hit or the account is frozen), removes
 credentials it recognises before sending a command, never prints its key, sends the key only over HTTPS or to the same
@@ -250,7 +250,7 @@ here (Codex and Cursor are written to their documented formats and not run in th
 thousand commands in `sdk/shellmap.vectors.txt`), `cli/test/guard.test.mjs` (against a strict stand-in of the contract),
 `cli/test/guard-server.test.mjs` (against the real server code over HTTP), `cli/test/plugin.test.mjs`.
 
-## Deploy Gate, 9 Oct 2026 (branch `feat/deploy-gate`, migration 0007, not deployed)
+## Deploy Gate, 9 Oct 2026 (migration 0007, a preview)
 
 A GitHub Actions job waits for your passkey, bound to the claims in the OIDC token GitHub signs for it
 ([docs/DEPLOY_GATE.md](docs/DEPLOY_GATE.md), threat model section H). GitHub's own required reviewers are available only for
@@ -265,7 +265,7 @@ tests use a stand-in that signs like GitHub). The Brakes Freeze stops asking, wa
 Tests: `server/test/oidc.test.js`, `gates.test.js`, `gates-security.test.js`, `gates-freeze.test.js`, `gates-app.test.js`,
 `deploy-action.test.js`, and the migration test on live-shaped data.
 
-## The installable app, the first run and the privacy center, 9 Oct 2026 (branch `feat/app-trust`, migration 0012, not deployed)
+## The installable app, the first run and the privacy center, 9 Oct 2026 (migration 0012)
 
 The app installs to the dock, taskbar, Start menu and Home Screen (a complete manifest, maskable and monochrome icons,
 shortcuts), shows the number of waiting requests on its icon where the Badging API exists, and opens offline to a page that
@@ -277,9 +277,10 @@ OWASP ASVS 5.0 and four OWASP Top 10 lists is on `/security/standards/` (self-as
 P10. Tests: `server/test/app-trust.test.js`, `app-shell.test.js` (the service worker run in node:vm, the manifest and
 icons, security.txt), `app-ui.test.js`, and a real-browser pass with a virtual passkey at desktop and phone widths.
 
-## Supply chain for the CLI (branch `feat/app-trust`, nothing published)
+## Supply chain for the CLI
 
 `.github/workflows/publish.yml` publishes `counterseal` and its alias `leashcli` with npm trusted publishing (OIDC, no
 stored npm token) and provenance, from a GitHub-hosted runner behind a protected environment, after the whole suite and a
 version check, and attaches a CycloneDX SBOM of each package (made by `npm sbom`, no extra tool) to the release.
+`counterseal` 0.4.0 was published this way: its npm provenance names `.github/workflows/publish.yml` at the tag `cli-v0.4.0`.
 Checklist: docs/RELEASE.md.

@@ -231,7 +231,7 @@ is written to the audit log. A CLI session or an agent cannot do it.
 **J9. A log that is down never blocks a decision.** Sealing runs after the response; a failing, full or misconfigured log
 only increments the skipped count. Test: *A log that is misconfigured or down*.
 
-### Approvals for a coding agent's commands (guard keys, migration 0006, not yet deployed)
+### Approvals for a coding agent's commands (guard keys, migration 0006)
 
 A hook on the agent's machine (the guard) holds a guard key and asks `POST /v1/approvals` before running a command on its
 map; the human approves in the app with a passkey. **The guard is enforced on the agent's machine, not by the server: a
@@ -274,8 +274,8 @@ the public log or its storage.
 **G8. Waiting must not cost the free plan.** A long poll re-reads every 2 seconds for at most 20 seconds: at most 12 D1
 queries and no writes (its limit is in memory). Test: *the long poll*.
 
-**The guard itself (`counterseal guard`, `sdk/shellmap.mjs`, the Claude Code plugin; on branch `feat/guard-cli`, not yet
-deployed).** Everything below runs on the agent's machine, as the agent's user.
+**The guard itself (`counterseal guard`, `sdk/shellmap.mjs`, the Claude Code plugin; CLI 0.3.0 and
+later).** Everything below runs on the agent's machine, as the agent's user.
 
 **G9. The agent switches the guard off.** It can edit the hook settings (`~/.claude/settings.json`, `~/.codex/hooks.json`,
 `~/.cursor/hooks.json`), `~/.config/leash/guard.json` (which holds `disableRules` and `onUnavailable`), the guard's
@@ -347,7 +347,7 @@ Residual: the guard can be bypassed by an agent that edits its hook settings, wr
 not read, or calls the tool another way (G9, G10); hook runners that time out may fail open unless set to block (G11).
 Commands not on the map are left to the agent's own permission settings.
 
-### The two-person seal (team, migration 0009, not yet deployed)
+### The two-person seal (team, migration 0009)
 
 An account can have several people (owner, approver, member, viewer), each with their own passkey; a held action can
 require seals from two different owners or approvers. Code: `server/src/team.js`. Tests: `server/test/team.test.js`.
@@ -455,7 +455,7 @@ label made of safe characters, the rule's id, the seals and the approve link; ne
 a window's reason, and Discord's mentions are switched off. Residual: the people in a channel learn that something was held
 and when; the services (Slack, Discord, Google) receive that text. Tests: `test/channels.test.js`.
 
-### Deploy gates (GitHub Actions, migration 0007, not yet deployed)
+### Deploy gates (GitHub Actions, migration 0007, a preview)
 
 A job asks `POST /v1/gate/request` with the OIDC token GitHub signs for it; the owner approves in the app with a passkey; the
 job's poll spends the approval once (phase 2: and receives a 15 minute token). Usage: [DEPLOY_GATE.md](DEPLOY_GATE.md).
@@ -614,7 +614,7 @@ credentials by our code. Test: *the retired host answers every request*.
 **D3. Old clients.** leashcli 0.1.1 and agents configured with leash.gautamkhosla.com get a 301 and, not following it,
 fail closed: nothing is proxied or approved there. Residual: they stop working until pointed at counterseal.
 
-### The installable app, the first run and the privacy center (migration 0012, branch feat/app-trust, not yet deployed)
+### The installable app, the first run and the privacy center (migration 0012)
 
 **P1. The offline copy keeps private data.** The service worker keeps the app's own files so it opens without a network.
 It caches only a fixed list of paths (the page, its scripts, styles, fonts and icons), same origin, GET, no query string,

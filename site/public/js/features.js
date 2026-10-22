@@ -26,7 +26,7 @@ const S = (await import('/js/strings.js')).STRINGS;
   const FILES = {
     env: { file: '# .env, readable by the agent\nSTRIPE_SECRET_KEY=sk_live_••••••••\nGITHUB_TOKEN=ghp_••••••••\nRAILWAY_TOKEN=••••••••', leak: 'Whoever has this file holds your real keys. They can refund, pay out, delete repositories and volumes, from anywhere, at machine speed, until you rotate every one of them.' },
     token: { file: '# .env, readable by the agent\nLEASH_TOKENS=stripe=lsh_7c1e••••,github=lsh_2b9a••••\n# no real key on this machine', leak: 'Whoever has this file holds tokens, not keys. A token only works through Counterseal, within its policy, until it expires or you revoke it, and everything on the irreversible map still waits for your passkey.' },
-    bound: { file: '# .env, readable by the agent\nLEASH_TOKENS=stripe=lsh_7c1e••••,github=lsh_2b9a••••\nLEASH_AGENT_KEY=agent-key.json\n# tokens bound to the agent\'s own Ed25519 key', leak: 'The tokens alone are useless: every request must be signed by the agent\'s own key, or the broker answers 401 agent_signature_required. If the key file leaks too, revoke the agent key and every token bound to it stops at once.' },
+    bound: { file: '# .env, readable by the agent\nLEASH_TOKENS=stripe=lsh_7c1e••••,github=lsh_2b9a••••\nLEASH_AGENT_KEY=/home/you/.config/leash/agent-key.json\n# tokens bound to the agent\'s own Ed25519 key', leak: 'The tokens alone are useless: every request must be signed by the agent\'s own key, or the broker answers 401 agent_signature_required. If the key file leaks too, revoke the agent key and every token bound to it stops at once.' },
   };
   let cur = 'env';
   const show = (k, leaked = false) => {

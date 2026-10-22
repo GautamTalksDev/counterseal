@@ -3,7 +3,8 @@
 Hold a GitHub Actions job until the owner approves it with a passkey. The approval is bound to the repository, workflow,
 commit and run named in the token GitHub signs for the job (an OIDC token), so what is approved is what runs.
 
-Status: in this repository (branch `feat/deploy-gate`, migration `0007_gates.sql`), not deployed. The action is in
+Status: a preview. It is on the live service (migration `0007_gates.sql`) but has been tested only against a stand-in issuer
+that signs like GitHub, not yet with real GitHub tokens. The action is in
 [`action/deploy-gate`](../action/deploy-gate) and is not published to the GitHub Marketplace.
 
 ## Why

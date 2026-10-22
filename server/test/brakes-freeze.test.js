@@ -241,7 +241,10 @@ test('leashcli freeze: stops the account, says only the app can start it again, 
     assert.match(r.out, /^Frozen: every agent token on this account is stopped \(HTTP 423\) until you unfreeze it with your passkey at http:\/\/127\.0\.0\.1:\d+\/app\. This command line cannot unfreeze\.\n$/);
     assert.equal((await w.req('GET', '/p/github/repos/a/b', { bearer: tok, ...anon })).status, 423);
     assert.match((await run(['freeze'])).out, /^Already frozen/);
-    assert.match((await run(['unfreeze'])).out, /login \| logout/, 'there is no command to unfreeze');
+    // there is no command to unfreeze: it is an unknown command (exit 1, the help on stderr)
+    const un = await run(['unfreeze']);
+    assert.equal(un.code, 1);
+    assert.match(un.err, /^counterseal: unknown command "unfreeze"\n[\s\S]*login \| logout/);
     assert.match((await run([])).out, /\bfreeze\b/);
   } finally { srv.close(); rmSync(dir, { recursive: true, force: true }); }
 });

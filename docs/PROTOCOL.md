@@ -114,7 +114,7 @@ a key belongs to one account; up to 20 active per account. A reference signer is
 
 For actions that never pass through a brokered API (a coding agent's shell command, an MCP tool call). A hook on the
 agent's machine holds a **guard key** and asks; a human approves in the app with a passkey. The holds table, alerts,
-approve and deny routes and receipts are the same as for brokered calls. In this repo, not yet deployed (migration 0006).
+approve and deny routes and receipts are the same as for brokered calls (migration 0006).
 
 The guard runs on the agent's machine: a seatbelt, not a sandbox. Only brokered keys are enforced by the server.
 
@@ -198,8 +198,8 @@ key label or deny reason.
 
 ## Team (the two-person seal)
 
-One account, several people, each signing in with their own passkey. In this repo on branch `feat/two-person`, not yet
-deployed (migration 0009). Code: `server/src/team.js`; tests: `server/test/team.test.js`.
+One account, several people, each signing in with their own passkey. Migration
+0009. Code: `server/src/team.js`; tests: `server/test/team.test.js`.
 
 ### Members and roles
 
@@ -402,8 +402,8 @@ Built in 0011 (`src/windows.js`, `src/channels.js`); what follows is the contrac
 ## Deploy gates
 
 A GitHub Actions job waits for a passkey approval, bound to the claims in GitHub's signed OIDC token. The holds table,
-alerts, approve and deny routes and receipts are the same as for brokered calls and commands (hold kind `deploy`). In this
-repo, not yet deployed (migration 0007). How to use it: [DEPLOY_GATE.md](DEPLOY_GATE.md). The action that speaks this
+alerts, approve and deny routes and receipts are the same as for brokered calls and commands (hold kind `deploy`). A preview, not
+yet tested with real GitHub tokens (migration 0007). How to use it: [DEPLOY_GATE.md](DEPLOY_GATE.md). The action that speaks this
 protocol is `action/deploy-gate`.
 
 ### Gates (the app)
@@ -501,7 +501,7 @@ with `publishRepo`. Never the commit, workflow, run, person, label, summary or d
 (repository, commit, ref, run, attempt, environment, gate), `approve`, `deny`, `gate_passed`, `gate_cancelled`,
 `gate_created` and `gate_revoked`.
 
-## The app, the first run and the privacy center (migration 0012, not yet deployed)
+## The app, the first run and the privacy center (migration 0012)
 
 All routes below are signed-in routes with the usual CSRF rules (writes need an `Origin` equal to the one host and
 `x-leash: 1`).
