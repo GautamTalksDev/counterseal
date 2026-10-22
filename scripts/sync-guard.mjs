@@ -10,6 +10,9 @@
 //                                           from PROVIDERS in server/src/providers.js, so it can never be out of date.
 //   cli/shellmap.mjs                      the copy the npm package ships (the SDK is not published)
 //   plugins/counterseal/scripts/*.mjs     the plugin runs pinned copies of the CLI files, never npx at hook time
+//   site/public/...                       the site's in-browser demos run copies of SDK and CLI files (SITE_COPIES). They
+//                                         are written and checked here too, so the test suite (cli/test/copies.test.mjs)
+//                                         fails on a stale site copy before CI does; scripts/rebrand.mjs writes them as well
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,6 +56,16 @@ export const COPIES = [
   ['cli/sign.mjs', 'plugins/counterseal/scripts/sign.mjs'],
 ];
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+// [source, site copy, how the copy is made]: the same pairs as the CI step "Site copies of the SDK are current"
+const same = (t) => t;
+export const SITE_COPIES = [
+  ['sdk/shellmap.mjs', 'site/public/shellmap.js', same],
+  ['sdk/websig.mjs', 'site/public/websig.js', same],
+  ['sdk/receipts.mjs', 'site/public/receipts-sdk.js', (t) => t.split('\n').slice(1).join('\n')],
+  ['cli/mcp-policy.mjs', 'site/public/mcp/mcp-policy.mjs', same],
+  ['cli/mcp-sql.mjs', 'site/public/mcp/mcp-sql.mjs', same],
+  ['cli/mcp-json.mjs', 'site/public/mcp/mcp-json.mjs', same],
+];
 
 // server/src/guardrules.js: the rule ids a coding-agent hook or the MCP wrapper can send. A public receipt names a guard
 // decision's rule only if it is one of these (or a rule of the server's own API map), so an agent cannot write text of its
@@ -84,6 +97,10 @@ export async function check() {
     if (!existsSync(join(ROOT, to))) bad.push(`${to}: missing (run node scripts/sync-guard.mjs)`);
     else if (read(from) !== read(to)) bad.push(`${to}: differs from ${from} (run node scripts/sync-guard.mjs)`);
   }
+  for (const [from, to, make] of SITE_COPIES) {
+    if (!existsSync(join(ROOT, to))) bad.push(`${to}: missing (run node scripts/sync-guard.mjs)`);
+    else if (make(read(from)) !== read(to)) bad.push(`${to}: the site copy differs from ${from} (run node scripts/sync-guard.mjs)`);
+  }
   return bad;
 }
 export async function sync() {
@@ -99,6 +116,10 @@ export async function sync() {
     mkdirSync(dirname(join(ROOT, to)), { recursive: true });
     writeFileSync(join(ROOT, to), read(from));
   }
+  for (const [from, to, make] of SITE_COPIES) {
+    mkdirSync(dirname(join(ROOT, to)), { recursive: true });
+    writeFileSync(join(ROOT, to), make(read(from)));
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
@@ -110,6 +131,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     await sync();
     const bad = await check();
     if (bad.length) { console.error(bad.join('\n')); process.exit(1); }
-    console.log(`wrote the API map block and ${COPIES.length} copies`);
+    console.log(`wrote the API map block, ${COPIES.length} copies and ${SITE_COPIES.length} site copies`);
   }
 }
