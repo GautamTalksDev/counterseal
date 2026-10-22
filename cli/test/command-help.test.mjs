@@ -29,7 +29,7 @@ function snapshot(dir) {
   return out;
 }
 
-function run(cli, args) {
+function run(cli, args, { prep, check } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'cs-help-'));
   const cfgDir = join(home, 'config'), cwd = join(home, 'work');
   mkdirSync(join(cfgDir, 'leash'), { recursive: true }); mkdirSync(cwd);
@@ -37,6 +37,7 @@ function run(cli, args) {
   // a guard config with a key, so guard install, status and update-map would reach the server if they ran
   mkdirSync(join(cfgDir, 'counterseal'), { recursive: true });
   const env = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: cfgDir, LEASH_URL: base, COUNTERSEAL_URL: base, LEASH_TOKENS: 'github=lsh_' + 'B'.repeat(43) };
+  if (prep) prep(home, cfgDir, cwd);
   const was = snapshot(home);
   const before = seen.length;
   return new Promise((done) => {
@@ -50,8 +51,9 @@ function run(cli, args) {
       // let a request that was in flight reach the server before counting
       setTimeout(() => {
         const files = snapshot(home);
+        const checked = check ? check(home, cfgDir, cwd) : undefined;
         rmSync(home, { recursive: true, force: true });
-        done({ code, signal, stdout, stderr, requests: seen.slice(before), changed: JSON.stringify(files) !== JSON.stringify(was) });
+        done({ code, signal, stdout, stderr, checked, requests: seen.slice(before), changed: JSON.stringify(files) !== JSON.stringify(was) });
       }, 200);
     });
   });
@@ -72,15 +74,16 @@ const CASES = [
 for (const cli of CLIS) {
   const which = cli.includes('plugins') ? 'plugin copy' : 'cli';
   test(`${which}: <command> --help prints help, exits 0, sends nothing and writes nothing`, async () => {
-    // the plugin ships the CLI, the guard and the signer, not the MCP wrapper (plugins/counterseal/scripts)
+    // the plugin ships the CLI, the guard and the signer, not the MCP wrapper (plugins/counterseal/scripts): there,
+    // mcp wrap|pin|unpin|status --help says where they are instead
     const wrapper = (args) => args[0] === 'mcp' && ['wrap', 'pin', 'unpin', 'status'].includes(args[1]);
-    for (const args of CASES.filter((x) => which === 'cli' || !wrapper(x))) {
+    for (const args of CASES) {
       const r = await run(cli, args);
       const name = args.join(' ');
       assert.equal(r.code, 0, `${name}: exit ${r.code} ${r.signal || ''} ${r.stderr}`);
       assert.deepEqual(r.requests, [], `${name}: no request may reach the server`);
       assert.equal(r.changed, false, `${name}: no file may be written or changed`);
-      const want = args[0] === 'guard' ? /^counterseal guard \d/ : args[0] === 'mcp' && args.length > 1 && args[1] !== '--help' && args[1] !== '-h' ? /^usage:\n {2}counterseal mcp wrap/ : new RegExp(`^counterseal ${args[0]}\\b`);
+      const want = which === 'plugin copy' && wrapper(args) ? new RegExp(`^MCP commands are not in the plugin\\. Use: npx counterseal mcp ${args[1]} \\.\\.\\.\\n$`) : args[0] === 'guard' ? /^counterseal guard \d/ : args[0] === 'mcp' && args.length > 1 && args[1] !== '--help' && args[1] !== '-h' ? /^usage:\n {2}counterseal mcp wrap/ : new RegExp(`^counterseal ${args[0]}\\b`);
       assert.match(r.stdout, want, `${name}: help on stdout`);
       assert.doesNotMatch(r.stdout + r.stderr, /Type this code|Frozen|Registering|Signed out|Stored/, `${name}: the command itself did not run`);
     }
@@ -105,5 +108,38 @@ for (const cli of CLIS) {
     assert.notEqual(r.code, 0);
     assert.deepEqual(r.requests, ['POST /v1/me/freeze']);
     assert.match(r.stderr, /^counterseal: /, 'errors start with counterseal:');
+  });
+}
+
+// ---------------------------------------------------------------- agent-key writes the private key outside the project
+const KEYFILE = (cfgDir) => join(cfgDir, 'leash', 'agent-key.json');
+const exists = (f) => { try { return statSync(f); } catch { return null; } };
+for (const cli of CLIS) {
+  const which = cli.includes('plugins') ? 'plugin copy' : 'cli';
+  test(`${which}: agent-key puts the private key in the config folder (mode 600), never the current folder`, async () => {
+    const r = await run(cli, ['agent-key', '--label', 'laptop'], { check: (home, cfgDir, cwd) => ({ cwd: readdirSync(cwd), key: exists(KEYFILE(cfgDir)), jwk: exists(KEYFILE(cfgDir)) && JSON.parse(readFileSync(KEYFILE(cfgDir), 'utf8')) }) });
+    assert.deepEqual(r.checked.cwd, [], 'nothing in the current folder');
+    assert.ok(r.checked.key, 'the key is in ~/.config/leash/agent-key.json');
+    if (process.platform !== 'win32') assert.equal(r.checked.key.mode & 0o777, 0o600);
+    assert.equal(r.checked.jwk.kty, 'OKP'); assert.equal(r.checked.jwk.crv, 'Ed25519');
+    assert.deepEqual(r.requests, ['POST /v1/agent-keys/begin'], 'then it asks to register the public half (the test server refuses)');
+  });
+
+  test(`${which}: agent-key never overwrites a key, and writes nothing when not signed in`, async () => {
+    const old = await run(cli, ['agent-key'], { prep: (home, cfgDir) => writeFileSync(KEYFILE(cfgDir), 'OLD KEY', { mode: 0o600 }), check: (home, cfgDir) => readFileSync(KEYFILE(cfgDir), 'utf8') });
+    assert.equal(old.code, 1);
+    assert.match(old.stderr, /agent-key\.json exists; refusing to overwrite a key/);
+    assert.equal(old.checked, 'OLD KEY');
+    assert.deepEqual(old.requests, []);
+    const out = await run(cli, ['agent-key'], { prep: (home, cfgDir) => writeFileSync(join(cfgDir, 'leash', 'config.json'), JSON.stringify({ server: base })), check: (home, cfgDir, cwd) => [readdirSync(cwd), exists(KEYFILE(cfgDir))] });
+    assert.equal(out.code, 1);
+    assert.match(out.stderr, /^Not signed in\. Run: counterseal login/);
+    assert.deepEqual(out.checked, [[], null]);
+    assert.deepEqual(out.requests, []);
+  });
+
+  test(`${which}: agent-key --out <path> writes exactly there`, async () => {
+    const r = await run(cli, ['agent-key', '--out', 'keys/agent.json'], { prep: (home, cfgDir, cwd) => mkdirSync(join(cwd, 'keys')), check: (home, cfgDir, cwd) => [readdirSync(join(cwd, 'keys')), exists(KEYFILE(cfgDir))] });
+    assert.deepEqual(r.checked, [['agent.json'], null]);
   });
 }

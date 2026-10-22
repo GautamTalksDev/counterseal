@@ -19,7 +19,7 @@
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { signBrokerRequest, generateAgentKey, importAgentKey, keyid, proveAgentKey } from './sign.mjs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const VERSION = '0.4.0';
@@ -186,12 +186,12 @@ const COMMAND_HELP = {
   freeze: 'counterseal freeze\n\n  Stop every agent token on the account at once (HTTP 423). Only your passkey, in the app, unfreezes.',
   holds: 'counterseal holds\n\n  List the calls and commands waiting for you.',
   watch: 'counterseal watch\n\n  Print each new held request with its approve link as it happens, and ring the terminal bell. Ctrl+C stops.',
-  'agent-key': 'counterseal agent-key [file] [--label <label>]\n\n  Make an Ed25519 agent key, save its private half to the file (default agent-key.json, never overwritten)\n  and register the public half with your account.',
+  'agent-key': 'counterseal agent-key [file] [--out <path>] [--label <label>]\n\n  Make an Ed25519 agent key, save its private half (mode 600, never overwritten) to ~/.config/leash/agent-key.json\n  or the path you give, and register the public half with your account. Keep the file out of any repository.',
   'agent-keys': 'counterseal agent-keys\n\n  List the agent keys that are not revoked.',
   mcp: 'counterseal mcp\n\n  Run the MCP server for your agent over stdio. Set LEASH_TOKENS="github=lsh_...,stripe=lsh_..." and, for tokens\n  bound to an agent key, LEASH_AGENT_KEY=<path to the key file>.\n  counterseal mcp wrap|pin|unpin|status --help: the MCP wrapper.',
   help: null,
 };
-const HELP = 'counterseal ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token [credentialId] [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--label] | agent-keys | mcp | mcp wrap|pin|unpin|status --name <id> | guard install|uninstall|status|check|map | help';
+const HELP = 'counterseal ' + VERSION + '\n\n  login | logout | add <provider> [label] [--host store] | creds | tokens | token [credentialId] [--label] [--policy file] [--ttl h] [--agent-key id] | revoke <id> | freeze | holds | watch | agent-key [file] [--out path] [--label] | agent-keys | mcp | mcp wrap|pin|unpin|status --name <id> | guard install|uninstall|status|check|map | help';
 try {
   // <command> --help: print and stop, before any config is read, any file is written or any request is sent
   if (Object.hasOwn(COMMAND_HELP, cmd) && cmd !== 'help' && wantsHelp(args) && !(cmd === 'mcp' && ['wrap', 'pin', 'unpin', 'status'].includes(args[0]))) {
@@ -297,7 +297,13 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp
       }
     }
     case 'agent-key': {
-      const file = args.find((x, i) => !x.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--'))) || 'agent-key.json';
+      // the private key goes to the config folder by default, never the current folder, so it cannot end up in a
+      // project's git history; [file] or --out <path> picks another place
+      const file = resolve(flag(args, '--out') || args.find((x, i) => !x.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--'))) || join(CFG_DIR, 'agent-key.json'));
+      if (args.includes('--out') && !flag(args, '--out')) die('--out requires a path.');
+      // nothing is written for a command line that is not signed in (the key could never be registered)
+      if (!cfg().token) die('Not signed in. Run: counterseal login');
+      if (file === join(CFG_DIR, 'agent-key.json')) mkdirSync(CFG_DIR, { recursive: true, mode: 0o700 });
       const jwk = await generateAgentKey();
       // 'wx': created only if absent, in one step (no check-then-write race that could overwrite a key)
       try { writeFileSync(file, JSON.stringify(jwk, null, 2), { mode: 0o600, flag: 'wx' }); } catch (e) { die(e?.code === 'EEXIST' ? `${file} exists; refusing to overwrite a key.` : `cannot write ${file}: ${e?.message}`); }
@@ -309,7 +315,19 @@ ${JSON.stringify({ mcpServers: { leash: { command: 'npx', args: ['-y', PKG, 'mcp
       break;
     }
     case 'agent-keys': table((await api('GET', '/v1/agent-keys')).agentKeys.filter((k) => !k.revoked_at), ['id', 'label', 'keyid', 'tokens']); break;
-    case 'mcp': if (['wrap', 'pin', 'unpin', 'status'].includes(args[0])) await (await import('./mcp-wrap.mjs')).main(args); else mcp(); break;
+    case 'mcp': {
+      if (!['wrap', 'pin', 'unpin', 'status'].includes(args[0])) { mcp(); break; }
+      let wrapper;
+      try { wrapper = await import('./mcp-wrap.mjs'); } catch (e) {
+        // the coding-agent plugin ships pinned copies of the CLI and the guard, not the MCP wrapper
+        if (e?.code !== 'ERR_MODULE_NOT_FOUND' || !String(e?.message).includes('mcp-wrap.mjs')) throw e;
+        const msg = 'MCP commands are not in the plugin. Use: npx counterseal mcp ' + args[0] + ' ...';
+        if (wantsHelp(args)) { console.log(msg); process.exit(0); }
+        die(msg);
+      }
+      await wrapper.main(args);
+      break;
+    }
     case 'guard': await (await import('./guard.mjs')).main(args); break;
     case '--version': case '-v': console.log(VERSION); break;
     // help, --help, -h and no command at all print the help on stdout and succeed

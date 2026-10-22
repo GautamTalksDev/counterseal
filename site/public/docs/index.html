@@ -67,7 +67,7 @@
 npx counterseal token &lt;key-id&gt; --label coding-agent</pre></li>
     <li><strong>Connect your agent.</strong> Add the MCP server to your agent's config (see <a href="#mcp">below</a>).</li>
   </ol>
-  <div class="callout">You can also do all of this in the app without the CLI. The CLI is just faster. From version 0.3.0 the CLI package is called <code>counterseal</code>; <code>leashcli</code>, the product's earlier name, keeps working: it runs the <code>counterseal</code> CLI of its own version (0.3.0 on npm today) against the same service.</div>
+  <div class="callout">You can also do all of this in the app without the CLI. The CLI is just faster. From version 0.3.0 the CLI package is called <code>counterseal</code>; <code>leashcli</code>, the product's earlier name, keeps working: it runs the <code>counterseal</code> CLI of the version it pins, against the same service; install <code>counterseal</code> for the newest.</div>
   <div class="callout">Counterseal lives at counterseal.gautamkhosla.com only. Its earlier address, leash.gautamkhosla.com, answers every request (pages, <code>/app</code>, <code>/v1</code>, <code>/p</code>) with a permanent redirect (301) to the same path here and serves nothing itself. Point agents and command lines at counterseal.gautamkhosla.com: <code>leashcli</code> 0.1.1 does not follow redirects. Passkeys made on the earlier address do not work here; make a new account.</div>
 
   <h2 id="concepts">Concepts</h2>
@@ -357,9 +357,9 @@ steps:
 
   <h2 id="agent-keys">Agent keys: prove who</h2>
   <p>Give each agent its own Ed25519 key. You register the public half with a proof of possession; the private half never leaves the agent's machine. A token bound to the key then only works on requests that key signed, so a token copied from a log, a config file or a screen is useless on its own, and every decision on a signed request records which agent key made it.</p>
-  <pre>npx counterseal agent-key agent-key.json --label laptop-agent     # makes the key (file mode 600) and registers it
+  <pre>npx counterseal agent-key ~/.config/leash/agent-key.json --label laptop-agent     # makes the key (file mode 600, outside any project) and registers it
 npx counterseal token &lt;key-id&gt; --agent-key &lt;agent-key-id&gt;          # a token bound to it</pre>
-  <p>Then run the MCP server of the CLI (0.3.0 or later; <code>npx counterseal</code> runs 0.4.0) with <code>LEASH_AGENT_KEY=agent-key.json</code> next to <code>LEASH_TOKENS</code>; it signs every call. An older CLI cannot sign, so a bound token refuses its calls. You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys need CLI 0.3.0 or later; the signer is in <code>cli/sign.mjs</code>.</p>
+  <p>Then run the MCP server of the CLI (0.3.0 or later; <code>npx counterseal</code> runs 0.4.0) with <code>LEASH_AGENT_KEY</code> set to that file's full path next to <code>LEASH_TOKENS</code>; it signs every call. An older CLI cannot sign, so a bound token refuses its calls. You can also make a key in the app (it is generated in your browser and downloaded; only the public half is sent). The CLI commands for agent keys need CLI 0.3.0 or later; the signer is in <code>cli/sign.mjs</code>.</p>
   <p>The signature is an RFC 9421 HTTP Message Signature with this profile:</p>
   <pre>Signature-Input: sig1=("@method" "@target-uri" "content-digest" "content-type");created=1791300000;expires=1791300060;keyid="&lt;JWK thumbprint&gt;";alg="ed25519";nonce="&lt;random&gt;";tag="leash-pop"
 Signature: sig1=:&lt;base64 Ed25519 signature&gt;:
@@ -389,7 +389,7 @@ Content-Digest: sha-256=:&lt;base64 SHA-256 of the body&gt;:</pre>
     <tr><td><code>counterseal holds</code></td><td>List calls waiting for you.</td></tr>
     <tr><td><code>counterseal watch</code></td><td>Print and ring for each new hold.</td></tr>
     <tr><td><code>counterseal mcp</code></td><td>Run the MCP server for your agent.</td></tr>
-    <tr><td><code>counterseal agent-key [file]</code>, <code>counterseal agent-keys</code></td><td>Make and register an agent key; list them. From 0.3.0.</td></tr>
+    <tr><td><code>counterseal agent-key [file]</code>, <code>counterseal agent-keys</code></td><td>Make and register an agent key; list them. From 0.3.0. Give it a path outside your project, such as <code>~/.config/leash/agent-key.json</code>, so the private key is never committed.</td></tr>
   </table>
   <p>Run any command with <code>npx counterseal</code>, or install it globally with <code>npm i -g counterseal</code>.</p>
 
