@@ -89,7 +89,7 @@ Or point any SDK at `https://counterseal.gautamkhosla.com/p/github` with the tok
 something irreversible it gets `428 held_for_approval` and an approve link, and your phone or browser asks for a passkey.
 
 All commands: `login`, `logout`, `add`, `creds`, `tokens`, `token`, `revoke`, `freeze`, `holds`, `watch`, `agent-key`,
-`agent-keys`, `mcp`, `mcp wrap|pin|unpin|status`, `guard install|uninstall|status|check|map`. Run `npx counterseal help`.
+`agent-keys`, `mcp`, `mcp wrap|pin|unpin|status`, `guard install|uninstall|status|check|map`. Run `npx counterseal help` See the [CLI reference](docs/GUIDE.md#cli-reference) for command arguments and flags.
 
 ## Features
 
